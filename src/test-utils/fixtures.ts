@@ -83,7 +83,7 @@ export const testFlowsheetEntry: FlowsheetEntryResponse = {
   artist_name: 'Test Artist',
   record_label: 'Test Label',
   rotation_id: undefined,
-  rotation_play_freq: null,
+  rotation_bin: null,
   request_flag: false,
 };
 
@@ -111,7 +111,7 @@ export const testOnAirDJ: OnAirDJ = {
 export const testRotation: RotationEntry = {
   id: 1,
   album_id: 1,
-  play_freq: 'H',
+  rotation_bin: 'H',
   add_date: '2024-01-01',
   kill_date: null,
 };

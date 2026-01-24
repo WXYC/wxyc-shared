@@ -13,7 +13,7 @@ export type RotationBin = 'H' | 'M' | 'L' | 'S';
 export interface RotationEntry {
   id: number;
   album_id: number;
-  play_freq: RotationBin;
+  rotation_bin: RotationBin;
   add_date: string;
   kill_date: string | null;
 }
@@ -21,7 +21,7 @@ export interface RotationEntry {
 /** Request to add an album to rotation */
 export interface AddRotationRequest {
   album_id: number;
-  play_freq: RotationBin;
+  rotation_bin: RotationBin;
 }
 
 /** Request to kill (end) a rotation */
