@@ -2,16 +2,18 @@
  * Rotation DTOs
  *
  * Rotation refers to albums that DJs are encouraged to play more frequently.
+ * Albums in rotation are kept in physical bins labeled H (Heavy), M (Medium),
+ * L (Light), and S (Single).
  */
 
-/** Rotation frequency levels (H=High, M=Medium, L=Low, S=Special) */
-export type RotationFrequency = 'H' | 'M' | 'L' | 'S';
+/** Rotation bin levels - corresponds to physical bins: H=Heavy, M=Medium, L=Light, S=Single */
+export type RotationBin = 'H' | 'M' | 'L' | 'S';
 
 /** Rotation entry from the database */
-export interface Rotation {
+export interface RotationEntry {
   id: number;
   album_id: number;
-  play_freq: RotationFrequency;
+  play_freq: RotationBin;
   add_date: string;
   kill_date: string | null;
 }
@@ -19,7 +21,7 @@ export interface Rotation {
 /** Request to add an album to rotation */
 export interface AddRotationRequest {
   album_id: number;
-  play_freq: RotationFrequency;
+  play_freq: RotationBin;
 }
 
 /** Request to kill (end) a rotation */
@@ -29,7 +31,7 @@ export interface KillRotationRequest {
 }
 
 /** Rotation with album details (for display) */
-export interface RotationWithAlbum extends Rotation {
+export interface RotationWithAlbum extends RotationEntry {
   album_title: string;
   artist_name: string;
   code_letters: string;

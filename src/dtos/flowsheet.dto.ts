@@ -5,7 +5,7 @@
  */
 
 import type { DateTimeEntry } from './common.dto.js';
-import type { RotationFrequency } from './rotation.dto.js';
+import type { RotationBin } from './rotation.dto.js';
 
 /** Base fields for all flowsheet entries */
 export interface FlowsheetEntryBase {
@@ -26,7 +26,7 @@ export interface FlowsheetEntryResponse extends FlowsheetEntryBase {
   artist_name?: string;
   record_label?: string;
   rotation_id?: number;
-  rotation_play_freq?: RotationFrequency | null;
+  rotation_play_freq?: RotationBin | null;
   request_flag: boolean;
 
   // Message/breakpoint fields
@@ -54,7 +54,7 @@ export interface FlowsheetSongEntry extends FlowsheetEntryBase {
   request_flag: boolean;
   album_id?: number;
   rotation_id?: number;
-  rotation_play_freq?: RotationFrequency | null;
+  rotation_play_freq?: RotationBin | null;
 }
 
 /** Show block entry (start or end of a DJ's show) */

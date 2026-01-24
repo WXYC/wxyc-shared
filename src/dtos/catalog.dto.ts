@@ -5,7 +5,7 @@
  */
 
 import type { Genre, Format } from './common.dto.js';
-import type { RotationFrequency } from './rotation.dto.js';
+import type { RotationBin } from './rotation.dto.js';
 
 /** Artist entry */
 export interface Artist {
@@ -51,7 +51,7 @@ export interface AlbumSearchResult {
   album_dist?: number;
   artist_dist?: number;
   // Optional rotation info
-  play_freq?: RotationFrequency;
+  play_freq?: RotationBin;
   rotation_id?: number;
   plays?: number;
 }
@@ -105,7 +105,7 @@ export interface AlbumInfoResponse extends Album {
   genre_name: Genre;
   rotation?: {
     id: number;
-    play_freq: RotationFrequency;
+    play_freq: RotationBin;
     add_date: string;
     kill_date: string | null;
   } | null;
@@ -122,7 +122,7 @@ export interface TrackSearchResult {
   artist_name: string;
   label?: string;
   rotation_id?: number;
-  play_freq?: RotationFrequency;
+  play_freq?: RotationBin;
   source: 'discogs' | 'flowsheet' | 'bin';
 }
 

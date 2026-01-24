@@ -6,7 +6,7 @@
 
 import type { Artist, Album, AlbumSearchResult } from '../dtos/catalog.dto.js';
 import type { FlowsheetEntryResponse, FlowsheetSongEntry, FlowsheetCreateRequest } from '../dtos/flowsheet.dto.js';
-import type { Rotation, RotationFrequency } from '../dtos/rotation.dto.js';
+import type { RotationEntry } from '../dtos/rotation.dto.js';
 import type { DJ, BinEntry } from '../dtos/dj.dto.js';
 import type { ScheduleShift, DayOfWeek } from '../dtos/schedule.dto.js';
 import type { SongRequest, ParsedSongRequest } from '../dtos/request.dto.js';
@@ -131,7 +131,7 @@ export function createFlowsheetCreateRequest(
 // Rotation
 // ============================================================================
 
-export function createTestRotation(overrides: Partial<Rotation> = {}): Rotation {
+export function createTestRotation(overrides: Partial<RotationEntry> = {}): RotationEntry {
   return {
     ...testRotation,
     id: generateId(),

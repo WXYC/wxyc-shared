@@ -6,7 +6,7 @@
 
 import type { Artist, Album, AlbumSearchResult } from '../dtos/catalog.dto.js';
 import type { FlowsheetEntryResponse, FlowsheetSongEntry, OnAirDJ } from '../dtos/flowsheet.dto.js';
-import type { Rotation } from '../dtos/rotation.dto.js';
+import type { RotationEntry } from '../dtos/rotation.dto.js';
 import type { DJ, BinEntry } from '../dtos/dj.dto.js';
 import type { ScheduleShift } from '../dtos/schedule.dto.js';
 
@@ -108,7 +108,7 @@ export const testOnAirDJ: OnAirDJ = {
 // Rotation
 // ============================================================================
 
-export const testRotation: Rotation = {
+export const testRotation: RotationEntry = {
   id: 1,
   album_id: 1,
   play_freq: 'H',
