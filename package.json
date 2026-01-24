@@ -50,5 +50,8 @@
     "type": "git",
     "url": "git+https://github.com/WXYC/wxyc-shared.git"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "date-fns": "^4.1.0"
+  }
 }
