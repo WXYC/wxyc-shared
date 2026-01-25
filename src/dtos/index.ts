@@ -13,3 +13,4 @@ export * from './dj.dto.js';
 export * from './request.dto.js';
 export * from './metadata.dto.js';
 export * from './common.dto.js';
+export * from './auth.dto.js';

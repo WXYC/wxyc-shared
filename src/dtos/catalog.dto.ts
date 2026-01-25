@@ -2,58 +2,54 @@
  * Catalog DTOs
  *
  * The catalog (library) contains the station's album collection.
+ * Types use nested structures matching Drizzle relational queries.
  */
 
 import type { Genre, Format } from './common.dto.js';
-import type { RotationBin } from './rotation.dto.js';
+import type { RotationBin, RotationInfo } from './rotation.dto.js';
 
-/** Artist entry */
+/** Genre entry */
+export interface GenreEntry {
+  id: number;
+  genre_name: Genre;
+  code_letters: string;
+}
+
+/** Format entry */
+export interface FormatEntry {
+  id: number;
+  format_name: Format;
+}
+
+/** Artist with nested genre */
 export interface Artist {
   id: number;
   artist_name: string;
   code_letters: string;
   code_artist_number: number;
-  genre_id: number;
+  genre: GenreEntry;
 }
 
-/** Artist with genre name (for display) */
-export interface ArtistWithGenre extends Artist {
-  genre_name: Genre;
-}
-
-/** Album entry */
+/** Album with nested relations */
 export interface Album {
   id: number;
-  artist_id: number;
   album_title: string;
   code_number: number;
-  genre_id: number;
-  format_id: number;
   label?: string;
   add_date?: string;
   disc_quantity?: number;
   alternate_artist_name?: string;
+  plays?: number;
+  artist: Artist;
+  format: FormatEntry;
 }
 
-/** Album search result (includes joined fields) */
-export interface AlbumSearchResult {
-  id: number;
-  add_date: string;
-  album_title: string;
-  artist_name: string;
-  code_letters: string;
-  code_number: number;
-  code_artist_number: number;
-  format_name: string;
-  genre_name: string;
-  label: string;
-  // Optional fields from fuzzy search
+/** Album search result (includes rotation and fuzzy search scores) */
+export interface AlbumSearchResult extends Album {
+  rotation?: RotationInfo | null;
+  /** Fuzzy search distance (lower = better match) */
   album_dist?: number;
   artist_dist?: number;
-  // Optional rotation info
-  rotation_bin?: RotationBin;
-  rotation_id?: number;
-  plays?: number;
 }
 
 /** Request to add a new album */
@@ -79,36 +75,9 @@ export interface AddArtistRequest {
 export interface CatalogSearchParams {
   artist_name?: string;
   album_name?: string;
-  n?: number; // max results
+  n?: number;
   orderBy?: string;
   orderDirection?: 'asc' | 'desc';
-}
-
-/** Format entry */
-export interface FormatEntry {
-  id: number;
-  format_name: string;
-}
-
-/** Genre entry */
-export interface GenreEntry {
-  id: number;
-  genre_name: Genre;
-  code_letters: string;
-}
-
-/** Album info response (detailed view) */
-export interface AlbumInfoResponse extends Album {
-  artist_name: string;
-  code_letters: string;
-  format_name: string;
-  genre_name: Genre;
-  rotation?: {
-    id: number;
-    rotation_bin: RotationBin;
-    add_date: string;
-    kill_date: string | null;
-  } | null;
 }
 
 /** Track search result (from Discogs cache, flowsheet, or bin) */

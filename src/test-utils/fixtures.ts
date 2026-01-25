@@ -4,11 +4,37 @@
  * Static test data for common entities.
  */
 
-import type { Artist, Album, AlbumSearchResult } from '../dtos/catalog.dto.js';
+import type { Artist, Album, AlbumSearchResult, GenreEntry, FormatEntry } from '../dtos/catalog.dto.js';
 import type { FlowsheetEntryResponse, FlowsheetSongEntry, OnAirDJ } from '../dtos/flowsheet.dto.js';
-import type { RotationEntry } from '../dtos/rotation.dto.js';
+import type { RotationEntry, RotationInfo } from '../dtos/rotation.dto.js';
 import type { DJ, BinEntry } from '../dtos/dj.dto.js';
 import type { ScheduleShift } from '../dtos/schedule.dto.js';
+
+// ============================================================================
+// Genres & Formats
+// ============================================================================
+
+export const testGenreRock: GenreEntry = {
+  id: 2,
+  genre_name: 'Rock',
+  code_letters: 'RO',
+};
+
+export const testGenreJazz: GenreEntry = {
+  id: 5,
+  genre_name: 'Jazz',
+  code_letters: 'JA',
+};
+
+export const testFormatVinyl: FormatEntry = {
+  id: 1,
+  format_name: 'Vinyl',
+};
+
+export const testFormatCD: FormatEntry = {
+  id: 2,
+  format_name: 'CD',
+};
 
 // ============================================================================
 // Artists
@@ -19,7 +45,7 @@ export const testArtist: Artist = {
   artist_name: 'Test Artist',
   code_letters: 'RO',
   code_artist_number: 1,
-  genre_id: 2, // Rock
+  genre: testGenreRock,
 };
 
 export const testArtist2: Artist = {
@@ -27,7 +53,7 @@ export const testArtist2: Artist = {
   artist_name: 'Another Artist',
   code_letters: 'JA',
   code_artist_number: 1,
-  genre_id: 5, // Jazz
+  genre: testGenreJazz,
 };
 
 // ============================================================================
@@ -36,37 +62,27 @@ export const testArtist2: Artist = {
 
 export const testAlbum: Album = {
   id: 1,
-  artist_id: 1,
   album_title: 'Test Album',
   code_number: 1,
-  genre_id: 2,
-  format_id: 1,
   label: 'Test Label',
   add_date: '2024-01-15',
+  artist: testArtist,
+  format: testFormatVinyl,
 };
 
 export const testAlbum2: Album = {
   id: 2,
-  artist_id: 2,
   album_title: 'Another Album',
   code_number: 1,
-  genre_id: 5,
-  format_id: 2,
   label: 'Another Label',
   add_date: '2024-02-20',
+  artist: testArtist2,
+  format: testFormatCD,
 };
 
 export const testAlbumSearchResult: AlbumSearchResult = {
-  id: 1,
-  add_date: '2024-01-15',
-  album_title: 'Test Album',
-  artist_name: 'Test Artist',
-  code_letters: 'RO',
-  code_number: 1,
-  code_artist_number: 1,
-  format_name: 'Vinyl',
-  genre_name: 'Rock',
-  label: 'Test Label',
+  ...testAlbum,
+  rotation: null,
 };
 
 // ============================================================================
@@ -108,12 +124,16 @@ export const testOnAirDJ: OnAirDJ = {
 // Rotation
 // ============================================================================
 
-export const testRotation: RotationEntry = {
+export const testRotationInfo: RotationInfo = {
   id: 1,
-  album_id: 1,
   rotation_bin: 'H',
   add_date: '2024-01-01',
   kill_date: null,
+};
+
+export const testRotation: RotationEntry = {
+  ...testRotationInfo,
+  album_id: 1,
 };
 
 // ============================================================================
