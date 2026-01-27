@@ -2,6 +2,100 @@
 
 Shared DTOs, test utilities, and E2E tests for WXYC services.
 
+## Full-Stack Development Setup
+
+This repository includes a setup script to quickly bootstrap the entire WXYC development environment.
+
+### Architecture
+
+```mermaid
+flowchart TB
+    subgraph Frontend
+        DJ[dj-site<br/>localhost:3000]
+    end
+
+    subgraph Backend-Service
+        API[Backend API<br/>localhost:8080]
+        Auth[Auth Service<br/>localhost:8082]
+    end
+
+    subgraph Database
+        PG[(PostgreSQL<br/>localhost:5432)]
+    end
+
+    DJ --> API
+    DJ --> Auth
+    API --> PG
+    Auth --> PG
+```
+
+### Quick Start
+
+```bash
+# Clone this repository
+git clone git@github.com:WXYC/wxyc-shared.git
+cd wxyc-shared
+
+# Run the setup script
+./scripts/setup-dev-environment.sh
+```
+
+The script will:
+1. Check for required dependencies (Docker, Node.js, npm, git)
+2. Clone Backend-Service and dj-site repositories (if not present)
+3. Install npm dependencies
+4. Start PostgreSQL database
+5. Start backend and auth services
+6. Start the frontend
+7. Verify all services with health checks
+
+### Script Options
+
+```bash
+# Show help
+./scripts/setup-dev-environment.sh --help
+
+# Skip repository cloning (if already cloned)
+./scripts/setup-dev-environment.sh --skip-clone
+
+# Skip npm install (if dependencies are current)
+./scripts/setup-dev-environment.sh --skip-deps
+
+# Start only backend services
+./scripts/setup-dev-environment.sh --backend-only
+
+# Start only frontend (assumes backend is running)
+./scripts/setup-dev-environment.sh --frontend-only
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WXYC_DEV_ROOT` | `..` | Directory containing/for WXYC repositories |
+| `BACKEND_BRANCH` | `main` | Backend-Service branch to checkout |
+| `FRONTEND_BRANCH` | `main` | dj-site branch to checkout |
+
+### Health Check Endpoints
+
+| Service | URL | Expected Response |
+|---------|-----|-------------------|
+| Backend | http://localhost:8080/healthcheck | `200 OK` |
+| Auth | http://localhost:8082/auth/ok | `200 OK` |
+| Frontend | http://localhost:3000 | `200 OK` |
+
+### Test Credentials
+
+Once running, log in with any of these accounts (password: `testpassword123`):
+
+| Username | Role |
+|----------|------|
+| test_member | member |
+| test_dj1 | dj |
+| test_dj2 | dj |
+| test_music_director | musicDirector |
+| test_station_manager | stationManager |
+
 ## Overview
 
 This package serves as the single source of truth for:
