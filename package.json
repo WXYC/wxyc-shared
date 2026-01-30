@@ -8,15 +8,23 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./dtos": {
       "types": "./dist/dtos/index.d.ts",
-      "import": "./dist/dtos/index.js"
+      "import": "./dist/dtos/index.js",
+      "default": "./dist/dtos/index.js"
     },
     "./test-utils": {
       "types": "./dist/test-utils/index.d.ts",
-      "import": "./dist/test-utils/index.js"
+      "import": "./dist/test-utils/index.js",
+      "default": "./dist/test-utils/index.js"
+    },
+    "./auth-client": {
+      "types": "./dist/auth-client/index.d.ts",
+      "import": "./dist/auth-client/index.js",
+      "default": "./dist/auth-client/index.js"
     }
   },
   "scripts": {
@@ -54,6 +62,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "better-auth": "^1.4.9",
     "date-fns": "^4.1.0"
   }
 }
