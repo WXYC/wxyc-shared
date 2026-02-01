@@ -38,7 +38,7 @@
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist",
     "generate": "npm run generate:typescript && npm run generate:swift && npm run generate:kotlin",
-    "generate:typescript": "openapi-generator-cli generate -i api.yaml -g typescript-fetch -o ./src/generated -c openapi-config/typescript.yaml --skip-validate-spec",
+    "generate:typescript": "openapi-generator-cli generate -i api.yaml -g typescript-fetch -o ./src/generated -c openapi-config/typescript.yaml --skip-validate-spec --global-property models,supportingFiles,modelDocs=false",
     "generate:swift": "openapi-generator-cli generate -i api.yaml -g swift5 -o ../wxyc-ios-64-copy/Shared/WXYCAPI -c openapi-config/swift.yaml --skip-validate-spec",
     "generate:kotlin": "openapi-generator-cli generate -i api.yaml -g kotlin -o ../WXYC-Android/shared/api -c openapi-config/kotlin.yaml --skip-validate-spec",
     "check:breaking": "node scripts/check-breaking-changes.js"
