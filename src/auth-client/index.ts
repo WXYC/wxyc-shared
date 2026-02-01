@@ -11,7 +11,7 @@ import {
 /**
  * Roles that grant extended archive access (90 days instead of 14).
  */
-export const DJ_ROLES = ["dj", "musicDirector", "stationManager"] as const;
+export const DJ_ROLES = ["dj", "musicDirector", "stationManager", "admin"] as const;
 export type DJRole = (typeof DJ_ROLES)[number];
 
 /**
@@ -101,3 +101,7 @@ export async function getJWTToken(): Promise<string | null> {
 
 // Re-export types from better-auth for convenience
 export type { Session, User } from "better-auth/types";
+
+// Permission system
+export * from "./permissions.js";
+export * from "./roles.js";
