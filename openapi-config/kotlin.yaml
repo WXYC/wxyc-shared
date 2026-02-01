@@ -1,0 +1,19 @@
+# OpenAPI Generator config for Kotlin
+# Generates type definitions for Android app (WXYC-Android)
+
+# Only generate models, not API clients
+generateApiTests: false
+generateModelTests: false
+
+# Use kotlinx.serialization for JSON
+serializationLibrary: kotlinx_serialization
+
+# Project structure
+sourceFolder: src/main/kotlin
+packageName: org.wxyc.api
+modelPackage: org.wxyc.api.models
+
+# Modern Kotlin features
+enumPropertyNaming: original
+parcelizeModels: true
+useCoroutines: true

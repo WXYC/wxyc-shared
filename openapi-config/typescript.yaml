@@ -1,0 +1,14 @@
+# OpenAPI Generator config for TypeScript
+# Generates type definitions for TypeScript consumers
+
+supportsES6: true
+typescriptThreePlus: true
+enumPropertyNaming: original
+modelPropertyNaming: original
+
+# Generate models only, no runtime/API client
+withInterfaces: true
+useSingleRequestParameter: true
+
+# Use native fetch types
+platform: browser

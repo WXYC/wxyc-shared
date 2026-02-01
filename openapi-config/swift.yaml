@@ -1,0 +1,22 @@
+# OpenAPI Generator config for Swift
+# Generates type definitions for iOS app (wxyc-ios-64-copy)
+
+# Only generate models, not API clients
+generateModelTests: false
+generateApiTests: false
+generateApis: false
+
+# Project configuration
+projectName: WXYCAPI
+library: urlsession
+
+# Use Swift Package Manager structure
+useSPMFileStructure: true
+
+# Modern Swift features
+responseAs: AsyncAwait
+useClasses: false
+useBacktickEscapes: true
+
+# Codable support
+hashableModels: true
