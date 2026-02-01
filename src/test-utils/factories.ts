@@ -4,12 +4,21 @@
  * Factory functions for creating test data with custom overrides.
  */
 
-import type { Artist, Album, AlbumSearchResult } from '../dtos/catalog.dto.js';
-import type { FlowsheetEntryResponse, FlowsheetSongEntry, FlowsheetCreateRequest } from '../dtos/flowsheet.dto.js';
-import type { RotationEntry } from '../dtos/rotation.dto.js';
-import type { DJ, BinEntry } from '../dtos/dj.dto.js';
-import type { ScheduleShift, DayOfWeek } from '../dtos/schedule.dto.js';
-import type { SongRequest, ParsedSongRequest } from '../dtos/request.dto.js';
+import type {
+  Artist,
+  Album,
+  AlbumSearchResult,
+  FlowsheetEntryResponse,
+  FlowsheetSongEntry,
+  FlowsheetPostRequest,
+  RotationEntry,
+  DJ,
+  BinEntry,
+  ScheduleShift,
+  DayOfWeek,
+  SongRequest,
+  ParsedSongRequest,
+} from '../dtos/index.js';
 
 import {
   testArtist,
@@ -99,10 +108,10 @@ export function createTestFlowsheetSongEntry(
   };
 }
 
-export function createFlowsheetCreateRequest(
+export function createFlowsheetPostRequest(
   type: 'catalog' | 'freeform' | 'message',
-  overrides: Partial<FlowsheetCreateRequest> = {}
-): FlowsheetCreateRequest {
+  overrides: Partial<FlowsheetPostRequest> = {}
+): FlowsheetPostRequest {
   switch (type) {
     case 'catalog':
       return {
@@ -110,7 +119,7 @@ export function createFlowsheetCreateRequest(
         track_title: 'Test Track',
         request_flag: false,
         ...overrides,
-      } as FlowsheetCreateRequest;
+      } as FlowsheetPostRequest;
     case 'freeform':
       return {
         artist_name: 'Test Artist',
@@ -118,12 +127,12 @@ export function createFlowsheetCreateRequest(
         track_title: 'Test Track',
         request_flag: false,
         ...overrides,
-      } as FlowsheetCreateRequest;
+      } as FlowsheetPostRequest;
     case 'message':
       return {
         message: 'Test message',
         ...overrides,
-      } as FlowsheetCreateRequest;
+      } as FlowsheetPostRequest;
   }
 }
 
@@ -184,7 +193,7 @@ export function createTestSongRequest(
     id: generateId(),
     device_id: `device-${generateId()}`,
     message: 'Play some jazz please',
-    created_at: new Date().toISOString(),
+    created_at: new Date(),
     status: 'pending',
     ...overrides,
   };

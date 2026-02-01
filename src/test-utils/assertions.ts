@@ -4,9 +4,11 @@
  * Custom assertion helpers for common test patterns.
  */
 
-import type { FlowsheetEntryResponse } from '../dtos/flowsheet.dto.js';
-import type { AlbumSearchResult } from '../dtos/catalog.dto.js';
-import type { ApiErrorResponse } from '../dtos/common.dto.js';
+import type {
+  FlowsheetEntryResponse,
+  AlbumSearchResult,
+  ApiErrorResponse,
+} from '../dtos/index.js';
 
 /**
  * Assert that a response is a valid flowsheet entry

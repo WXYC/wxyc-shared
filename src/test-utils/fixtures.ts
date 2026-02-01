@@ -4,11 +4,18 @@
  * Static test data for common entities.
  */
 
-import type { Artist, Album, AlbumSearchResult } from '../dtos/catalog.dto.js';
-import type { FlowsheetEntryResponse, FlowsheetSongEntry, OnAirDJ } from '../dtos/flowsheet.dto.js';
-import type { RotationEntry } from '../dtos/rotation.dto.js';
-import type { DJ, BinEntry } from '../dtos/dj.dto.js';
-import type { ScheduleShift } from '../dtos/schedule.dto.js';
+import type {
+  Artist,
+  Album,
+  AlbumSearchResult,
+  FlowsheetEntryResponse,
+  FlowsheetSongEntry,
+  OnAirDJ,
+  RotationEntry,
+  DJ,
+  BinEntry,
+  ScheduleShift,
+} from '../dtos/index.js';
 
 // ============================================================================
 // Artists
@@ -42,7 +49,7 @@ export const testAlbum: Album = {
   genre_id: 2,
   format_id: 1,
   label: 'Test Label',
-  add_date: '2024-01-15',
+  add_date: new Date('2024-01-15'),
 };
 
 export const testAlbum2: Album = {
@@ -53,12 +60,12 @@ export const testAlbum2: Album = {
   genre_id: 5,
   format_id: 2,
   label: 'Another Label',
-  add_date: '2024-02-20',
+  add_date: new Date('2024-02-20'),
 };
 
 export const testAlbumSearchResult: AlbumSearchResult = {
   id: 1,
-  add_date: '2024-01-15',
+  add_date: new Date('2024-01-15'),
   album_title: 'Test Album',
   artist_name: 'Test Artist',
   code_letters: 'RO',
@@ -83,7 +90,7 @@ export const testFlowsheetEntry: FlowsheetEntryResponse = {
   artist_name: 'Test Artist',
   record_label: 'Test Label',
   rotation_id: undefined,
-  rotation_bin: null,
+  rotation_bin: undefined,
   request_flag: false,
 };
 
@@ -112,7 +119,7 @@ export const testRotation: RotationEntry = {
   id: 1,
   album_id: 1,
   rotation_bin: 'H',
-  add_date: '2024-01-01',
+  add_date: new Date('2024-01-01'),
   kill_date: null,
 };
 
@@ -131,7 +138,7 @@ export const testBinEntry: BinEntry = {
   id: 1,
   dj_id: 1,
   album_id: 1,
-  added_at: '2024-01-15T12:00:00Z',
+  added_at: new Date('2024-01-15T12:00:00Z'),
   album_title: 'Test Album',
   artist_name: 'Test Artist',
   code_letters: 'RO',

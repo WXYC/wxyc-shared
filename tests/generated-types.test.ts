@@ -24,7 +24,7 @@ import {
   DayOfWeek,
   Genre,
   RequestStatus,
-} from '../generated/typescript/models/index.js';
+} from '../src/generated/models/index.js';
 
 describe('Generated TypeScript Types', () => {
   describe('FlowsheetEntryResponse', () => {

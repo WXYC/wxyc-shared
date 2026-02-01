@@ -36,7 +36,7 @@ import {
   SongRequestFromJSON,
   RotationBin as GeneratedRotationBin,
   DayOfWeek as GeneratedDayOfWeek,
-} from '../generated/typescript/models/index.js';
+} from '../src/generated/models/index.js';
 
 /**
  * Type compatibility helper: If T extends U and U extends T, they're compatible
