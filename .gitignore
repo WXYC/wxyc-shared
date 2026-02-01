@@ -29,3 +29,4 @@ npm-debug.log*
 # Generated code (regenerate with npm run generate)
 generated/
 openapitools.json
+.api-base-temp.yaml

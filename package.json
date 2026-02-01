@@ -40,7 +40,8 @@
     "generate": "npm run generate:typescript && npm run generate:swift && npm run generate:kotlin",
     "generate:typescript": "openapi-generator-cli generate -i api.yaml -g typescript-fetch -o ./generated/typescript -c openapi-config/typescript.yaml --skip-validate-spec",
     "generate:swift": "openapi-generator-cli generate -i api.yaml -g swift5 -o ../wxyc-ios-64-copy/Shared/WXYCAPI -c openapi-config/swift.yaml --skip-validate-spec",
-    "generate:kotlin": "openapi-generator-cli generate -i api.yaml -g kotlin -o ../WXYC-Android/shared/api -c openapi-config/kotlin.yaml --skip-validate-spec"
+    "generate:kotlin": "openapi-generator-cli generate -i api.yaml -g kotlin -o ../WXYC-Android/shared/api -c openapi-config/kotlin.yaml --skip-validate-spec",
+    "check:breaking": "node scripts/check-breaking-changes.js"
   },
   "files": [
     "dist",
@@ -49,7 +50,9 @@
   "devDependencies": {
     "@openapitools/openapi-generator-cli": "^2.15.3",
     "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "bats": "^1.11.0",
+    "openapi-diff": "^0.24.1",
     "tsup": "^8.4.0",
     "typescript": "^5.6.2",
     "vitest": "^2.0.0",
