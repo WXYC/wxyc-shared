@@ -361,7 +361,7 @@ components:
             $ref: '#/components/schemas/OnAirDJ'
         onAir:
           type: string
-          description: "on" or "off"
+          description: Status indicator - "on" or "off"
 
     Show:
       type: object
