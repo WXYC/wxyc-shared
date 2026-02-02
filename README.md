@@ -101,6 +101,7 @@ Once running, log in with any of these accounts (password: `testpassword123`):
 This package serves as the single source of truth for:
 
 - **DTOs**: TypeScript interfaces for all API request/response types
+- **Validation**: Shared validation utilities for consistent validation across services
 - **Test Utilities**: Shared fixtures, factories, and assertions
 - **E2E Tests**: End-to-end tests that verify full-stack integration
 
@@ -154,6 +155,30 @@ describe('MyComponent', () => {
 });
 ```
 
+### Validation
+
+```typescript
+import {
+  isValidEmail,
+  validateEmail,
+  EMAIL_REGEX,
+} from '@wxyc/shared/validation';
+
+// Simple boolean check
+if (isValidEmail(userInput)) {
+  // proceed
+}
+
+// Structured validation with error messages
+const result = validateEmail(userInput);
+if (!result.valid) {
+  showError(result.error); // "Email is required" or "Invalid email format"
+}
+
+// Use the regex directly if needed
+const isValid = EMAIL_REGEX.test(email);
+```
+
 ## Available Exports
 
 ### DTOs (`@wxyc/shared/dtos`)
@@ -176,6 +201,15 @@ describe('MyComponent', () => {
 | `fixtures` | Static test data for common entities |
 | `factories` | Factory functions with override support |
 | `assertions` | Custom assertion helpers |
+
+### Validation (`@wxyc/shared/validation`)
+
+| Export | Description |
+|--------|-------------|
+| `EMAIL_REGEX` | Regex pattern for email validation |
+| `isValidEmail(email)` | Returns `true` if valid email format |
+| `validateEmail(email)` | Returns `{ valid, error? }` with detailed result |
+| `ValidationResult` | TypeScript type for validation results |
 
 ## Development
 

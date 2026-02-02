@@ -15,6 +15,7 @@ export default defineConfig([
       index: 'src/index.ts',
       'dtos/index': 'src/dtos/index.ts',
       'test-utils/index': 'src/test-utils/index.ts',
+      'validation/index': 'src/validation/index.ts',
     },
     format: ['esm'],
     dts: true,
