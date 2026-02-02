@@ -105,3 +105,4 @@ export type { Session, User } from "better-auth/types";
 // Permission system
 export * from "./permissions.js";
 export * from "./roles.js";
+export * from "./capabilities.js";
