@@ -1,7 +1,7 @@
 {
   "name": "@wxyc/shared",
   "version": "0.1.0",
-  "description": "Shared DTOs, test utilities, and E2E tests for WXYC services",
+  "description": "Shared DTOs, validation, test utilities, and E2E tests for WXYC services",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -25,6 +25,11 @@
       "types": "./dist/auth-client/index.d.ts",
       "import": "./dist/auth-client/index.js",
       "default": "./dist/auth-client/index.js"
+    },
+    "./validation": {
+      "types": "./dist/validation/index.d.ts",
+      "import": "./dist/validation/index.js",
+      "default": "./dist/validation/index.js"
     }
   },
   "scripts": {
