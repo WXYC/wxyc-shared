@@ -5,7 +5,6 @@ import {
   adminClient,
   usernameClient,
   jwtClient,
-  organizationClient,
 } from "better-auth/client/plugins";
 
 /**
@@ -63,7 +62,6 @@ export function createWXYCAuthClient(baseURL: string) {
       adminClient(),
       usernameClient(),
       jwtClient(),
-      organizationClient(),
     ],
   });
 }

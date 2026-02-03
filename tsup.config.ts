@@ -24,10 +24,11 @@ export default defineConfig([
     splitting: false,
     treeshake: true,
   },
-  // Auth client (needs "use client" directive preserved)
+  // Auth client entries (index needs "use client" directive)
   {
     entry: {
       'auth-client/index': 'src/auth-client/index.ts',
+      'auth-client/auth': 'src/auth-client/auth.ts',
     },
     format: ['esm'],
     dts: true,
@@ -35,6 +36,7 @@ export default defineConfig([
     splitting: false,
     treeshake: true,
     async onSuccess() {
+      // Only add "use client" to the index.js, not auth.js
       addUseClientDirective('dist/auth-client/index.js');
     },
   },
