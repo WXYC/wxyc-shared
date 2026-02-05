@@ -21,8 +21,20 @@ jobs:
           registry-url: 'https://npm.pkg.github.com'
           scope: '@wxyc'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Setup Java (for OpenAPI Generator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies (skip build)
+        run: npm ci --ignore-scripts
+
+      - name: Generate TypeScript types from OpenAPI
+        run: npm run generate:typescript
+
+      - name: Build
+        run: npm run build
 
       - name: Run tests
         run: npm test
