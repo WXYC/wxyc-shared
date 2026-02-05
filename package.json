@@ -76,6 +76,9 @@
     "url": "git+https://github.com/WXYC/wxyc-shared.git"
   },
   "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "dependencies": {
     "better-auth": "^1.4.9",
     "date-fns": "^4.1.0"
