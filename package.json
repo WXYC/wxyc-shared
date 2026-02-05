@@ -1,6 +1,6 @@
 {
   "name": "@wxyc/shared",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared DTOs, validation, test utilities, and E2E tests for WXYC services",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
