@@ -348,6 +348,10 @@ npm run lint
 
 See [e2e/README.md](./e2e/README.md) for details on running E2E tests.
 
+## Railway Deployment
+
+See [`railway/`](./railway/) for the Railway service topology, environment variable reference, and setup instructions for replicating the deployment environment.
+
 ## Contributing
 
 1. Add new DTOs in `src/dtos/`

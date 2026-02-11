@@ -1,0 +1,105 @@
+# WXYC Railway Service Topology
+#
+# This file documents all Railway services and their configuration.
+# It is not consumed by Railway directly -- it serves as the single source of
+# truth for replicating the environment.
+#
+# Use setup-environment.sh to bootstrap a new Railway project from this spec.
+
+project: wxyc-services
+
+# ---------------------------------------------------------------------------
+# Shared infrastructure
+# ---------------------------------------------------------------------------
+
+databases:
+  postgres-nard:
+    plugin: postgresql
+    description: >
+      Discogs metadata cache. Populated by discogs-cache ETL.
+      Shared by request-o-matic and library-metadata-lookup.
+
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+
+services:
+
+  # --- Request-O-Matic (message parser + Slack poster) ---
+  request-o-matic:
+    repo: WXYC/request-parser
+    environments:
+      staging:
+        branch: main
+      production:
+        branch: prod
+    build:
+      builder: nixpacks
+    deploy:
+      healthcheck_path: /health
+    env:
+      required:
+        - GROQ_API_KEY            # Groq AI for message parsing
+      optional:
+        - DISCOGS_TOKEN           # Discogs API for artwork + track lookup
+        - SLACK_WEBHOOK_URL       # Slack webhook for posting results
+        - SENTRY_DSN              # Sentry error tracking
+        - POSTHOG_API_KEY         # PostHog telemetry
+        - DATABASE_URL_DISCOGS    # PostgreSQL URL for Discogs cache (from postgres-nard)
+        - LIBRARY_DB_PATH         # Path to SQLite database (default: library.db)
+        - LOG_LEVEL               # Logging level (default: INFO)
+      # Future (Phase 2+): LOOKUP_SERVICE_URL for calling library-metadata-lookup
+
+  # --- Library Metadata Lookup (search + Discogs enrichment) ---
+  library-metadata-lookup:
+    repo: WXYC/library-metadata-lookup
+    environments:
+      staging:
+        branch: main
+      production:
+        branch: prod
+    build:
+      builder: dockerfile
+      dockerfile_path: Dockerfile
+    deploy:
+      healthcheck_path: /health
+      healthcheck_timeout: 60
+      restart_policy: on_failure
+      restart_max_retries: 10
+    env:
+      required: []  # All env vars are optional; service degrades gracefully
+      optional:
+        - DISCOGS_TOKEN           # Discogs API for artwork + track lookup
+        - SENTRY_DSN              # Sentry error tracking
+        - POSTHOG_API_KEY         # PostHog telemetry
+        - DATABASE_URL_DISCOGS    # PostgreSQL URL for Discogs cache (from postgres-nard)
+        - LIBRARY_DB_PATH         # Path to SQLite database (default: library.db)
+        - LOG_LEVEL               # Logging level (default: INFO)
+        # Cache TTL settings (all have sane defaults)
+        - DISCOGS_TRACK_CACHE_TTL
+        - DISCOGS_RELEASE_CACHE_TTL
+        - DISCOGS_SEARCH_CACHE_TTL
+        - DISCOGS_CACHE_MAXSIZE
+        # Rate limiting settings (all have sane defaults)
+        - DISCOGS_RATE_LIMIT
+        - DISCOGS_MAX_CONCURRENT
+        - DISCOGS_MAX_RETRIES
+
+# ---------------------------------------------------------------------------
+# Internal networking
+# ---------------------------------------------------------------------------
+#
+# Services on the same Railway project communicate via internal URLs:
+#
+#   postgres-nard:
+#     postgres-nard.railway.internal:5432/railway
+#
+#   library-metadata-lookup (staging):
+#     library-metadata-lookup-staging.railway.internal:8000
+#
+#   library-metadata-lookup (production):
+#     library-metadata-lookup-production.railway.internal:8000
+#
+# Set DATABASE_URL_DISCOGS on each service using the postgres-nard internal URL.
+# Set LOOKUP_SERVICE_URL on request-o-matic using the library-metadata-lookup
+# internal URL (Phase 2+).
