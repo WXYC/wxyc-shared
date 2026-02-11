@@ -338,6 +338,85 @@ components:
         shows_limit:
           type: integer
 
+    PlaylistSearchParams:
+      type: object
+      properties:
+        q:
+          type: string
+          description: Search query (supports AND, OR, NOT, "", *)
+        page:
+          type: integer
+          minimum: 0
+          default: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+        sort:
+          type: string
+          enum:
+            - date
+            - artist
+            - song
+            - dj
+          default: date
+        order:
+          type: string
+          enum:
+            - asc
+            - desc
+          default: desc
+
+    PlaylistSearchResult:
+      type: object
+      required:
+        - id
+        - play_date
+        - artist_name
+        - track_title
+        - album_title
+        - record_label
+        - dj_name
+        - show_id
+      properties:
+        id:
+          type: integer
+        play_date:
+          type: string
+          format: date-time
+        artist_name:
+          type: string
+        track_title:
+          type: string
+        album_title:
+          type: string
+        record_label:
+          type: string
+        dj_name:
+          type: string
+        show_id:
+          type: integer
+
+    PlaylistSearchResponse:
+      type: object
+      required:
+        - results
+        - total
+        - page
+        - totalPages
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlaylistSearchResult'
+        total:
+          type: integer
+        page:
+          type: integer
+        totalPages:
+          type: integer
+
     OnAirDJ:
       type: object
       required:
@@ -1846,6 +1925,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ShowPlaylist'
+
+  /flowsheet/search:
+    get:
+      summary: Search historical playlists
+      description: Search flowsheet entries by artist, song, album, label, or DJ name
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query (supports AND, OR, NOT, exact phrases, wildcards)
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [date, artist, song, dj]
+            default: date
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistSearchResponse'
 
   /djs:
     get:
