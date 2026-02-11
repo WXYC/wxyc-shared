@@ -1457,6 +1457,155 @@ components:
           items:
             $ref: '#/components/schemas/DiscogsImage'
 
+    # ============================
+    # Lookup Service Types
+    # ============================
+
+    LookupRequest:
+      type: object
+      required:
+        - raw_message
+      properties:
+        artist:
+          type: string
+          description: Parsed artist name
+        song:
+          type: string
+          description: Parsed song/track title
+        album:
+          type: string
+          description: Parsed album name
+        raw_message:
+          type: string
+          description: Original request message (needed for ambiguous format detection)
+
+    LibraryCatalogItem:
+      type: object
+      description: >
+        A single item from the WXYC library catalog. Mirrors request-parser's
+        LibraryItem with computed properties serialized as regular fields.
+      required:
+        - id
+        - call_number
+        - library_url
+      properties:
+        id:
+          type: integer
+          description: Unique identifier in the library database
+        title:
+          type: string
+          description: Album/release title
+        artist:
+          type: string
+          description: Artist name
+        call_letters:
+          type: string
+          description: Library call letter code
+        artist_call_number:
+          type: integer
+          description: Numeric part of artist classification
+        release_call_number:
+          type: integer
+          description: Numeric part of release classification
+        genre:
+          type: string
+          description: Genre classification
+        format:
+          type: string
+          description: Physical format (vinyl, CD, etc.)
+        call_number:
+          type: string
+          description: >
+            Full call number for shelf lookup, e.g. "Rock CD ABC 123/45".
+            Computed from genre, format, call_letters, artist_call_number,
+            and release_call_number.
+        library_url:
+          type: string
+          description: URL to view this release in the WXYC library
+
+    DiscogsMatchResult:
+      type: object
+      description: >
+        A processed Discogs search result with artwork. Distinct from the raw
+        DiscogsSearchResult which mirrors the Discogs API response directly.
+      required:
+        - release_id
+        - release_url
+      properties:
+        album:
+          type: string
+          description: Release title
+        artist:
+          type: string
+          description: Release artist
+        release_id:
+          type: integer
+          description: Discogs release ID
+        release_url:
+          type: string
+          description: URL to the release on Discogs
+        artwork_url:
+          type: string
+          description: Artwork image URL
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0
+          description: Match confidence score
+
+    LookupResultItem:
+      type: object
+      description: A single lookup result pairing a library item with optional artwork
+      required:
+        - library_item
+      properties:
+        library_item:
+          $ref: '#/components/schemas/LibraryCatalogItem'
+        artwork:
+          $ref: '#/components/schemas/DiscogsMatchResult'
+
+    LookupResponse:
+      type: object
+      description: Response from the lookup service containing library search results and metadata
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupResultItem'
+          default: []
+        search_type:
+          type: string
+          description: >
+            The search strategy that produced results: direct, fallback,
+            alternative, compilation, song_as_artist, or none
+          default: none
+          enum:
+            - direct
+            - fallback
+            - alternative
+            - compilation
+            - song_as_artist
+            - none
+        song_not_found:
+          type: boolean
+          default: false
+          description: True if search fell back to artist-only (track not confirmed on results)
+        found_on_compilation:
+          type: boolean
+          default: false
+          description: True if the track was found on a compilation album
+        context_message:
+          type: string
+          description: Human-readable context string for display
+        corrected_artist:
+          type: string
+          description: Fuzzy-corrected artist name if different from the original
+        cache_stats:
+          type: object
+          additionalProperties: true
+          description: Cache hit/miss statistics from the lookup
+
 security:
   - BearerAuth: []
 
@@ -2239,3 +2388,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MetadataFetchResponse'
+
+  # ============================
+  # Lookup Service
+  # ============================
+
+  /lookup:
+    post:
+      summary: Look up library items and artwork for a parsed song request
+      description: >
+        Accepts a parsed song request (artist, song, album) and searches the
+        WXYC library catalog, resolves album names via Discogs, fetches artwork,
+        and returns matching results with metadata.
+      security: []
+      tags:
+        - lookup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LookupRequest'
+      responses:
+        '200':
+          description: Lookup results with library matches and artwork
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
