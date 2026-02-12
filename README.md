@@ -273,7 +273,8 @@ if (hasPermission(user.role, "catalog", "write")) {
 
 | Module | Description |
 |--------|-------------|
-| `flowsheet.dto` | Flowsheet entries, shows, on-air status |
+| `flowsheet.dto` | V1 flowsheet entries, shows, on-air status |
+| `flowsheet-v2.dto` | V2 flowsheet entries (discriminated union by `entry_type`) |
 | `catalog.dto` | Albums, artists, search results |
 | `rotation.dto` | Rotation entries and frequencies |
 | `schedule.dto` | DJ schedule and shifts |

@@ -11,6 +11,14 @@ import type {
   FlowsheetEntryResponse,
   FlowsheetSongEntry,
   FlowsheetPostRequest,
+  FlowsheetV2TrackEntry,
+  FlowsheetV2ShowStartEntry,
+  FlowsheetV2ShowEndEntry,
+  FlowsheetV2DJJoinEntry,
+  FlowsheetV2DJLeaveEntry,
+  FlowsheetV2TalksetEntry,
+  FlowsheetV2BreakpointEntry,
+  FlowsheetV2MessageEntry,
   RotationEntry,
   DJ,
   BinEntry,
@@ -20,12 +28,22 @@ import type {
   ParsedSongRequest,
 } from '../dtos/index.js';
 
+import type { FlowsheetV2Entry } from '../dtos/extensions.js';
+
 import {
   testArtist,
   testAlbum,
   testAlbumSearchResult,
   testFlowsheetEntry,
   testFlowsheetSongEntry,
+  testV2TrackEntry,
+  testV2ShowStartEntry,
+  testV2ShowEndEntry,
+  testV2DJJoinEntry,
+  testV2DJLeaveEntry,
+  testV2TalksetEntry,
+  testV2BreakpointEntry,
+  testV2MessageEntry,
   testRotation,
   testDJ,
   testBinEntry,
@@ -134,6 +152,98 @@ export function createFlowsheetPostRequest(
         ...overrides,
       } as FlowsheetPostRequest;
   }
+}
+
+// ============================================================================
+// Flowsheet V2
+// ============================================================================
+
+export function createTestV2TrackEntry(
+  overrides: Partial<FlowsheetV2TrackEntry> = {}
+): FlowsheetV2TrackEntry {
+  return {
+    ...testV2TrackEntry,
+    id: generateId(),
+    play_order: generateId(),
+    ...overrides,
+  };
+}
+
+export function createTestV2ShowStartEntry(
+  overrides: Partial<FlowsheetV2ShowStartEntry> = {}
+): FlowsheetV2ShowStartEntry {
+  return {
+    ...testV2ShowStartEntry,
+    id: generateId(),
+    play_order: generateId(),
+    ...overrides,
+  };
+}
+
+export function createTestV2ShowEndEntry(
+  overrides: Partial<FlowsheetV2ShowEndEntry> = {}
+): FlowsheetV2ShowEndEntry {
+  return {
+    ...testV2ShowEndEntry,
+    id: generateId(),
+    play_order: generateId(),
+    ...overrides,
+  };
+}
+
+export function createTestV2DJJoinEntry(
+  overrides: Partial<FlowsheetV2DJJoinEntry> = {}
+): FlowsheetV2DJJoinEntry {
+  return {
+    ...testV2DJJoinEntry,
+    id: generateId(),
+    play_order: generateId(),
+    ...overrides,
+  };
+}
+
+export function createTestV2DJLeaveEntry(
+  overrides: Partial<FlowsheetV2DJLeaveEntry> = {}
+): FlowsheetV2DJLeaveEntry {
+  return {
+    ...testV2DJLeaveEntry,
+    id: generateId(),
+    play_order: generateId(),
+    ...overrides,
+  };
+}
+
+export function createTestV2TalksetEntry(
+  overrides: Partial<FlowsheetV2TalksetEntry> = {}
+): FlowsheetV2TalksetEntry {
+  return {
+    ...testV2TalksetEntry,
+    id: generateId(),
+    play_order: generateId(),
+    ...overrides,
+  };
+}
+
+export function createTestV2BreakpointEntry(
+  overrides: Partial<FlowsheetV2BreakpointEntry> = {}
+): FlowsheetV2BreakpointEntry {
+  return {
+    ...testV2BreakpointEntry,
+    id: generateId(),
+    play_order: generateId(),
+    ...overrides,
+  };
+}
+
+export function createTestV2MessageEntry(
+  overrides: Partial<FlowsheetV2MessageEntry> = {}
+): FlowsheetV2MessageEntry {
+  return {
+    ...testV2MessageEntry,
+    id: generateId(),
+    play_order: generateId(),
+    ...overrides,
+  };
 }
 
 // ============================================================================

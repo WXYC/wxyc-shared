@@ -417,6 +417,265 @@ components:
         totalPages:
           type: integer
 
+    # ===================
+    # Flowsheet V2 Types (Discriminated Union)
+    # ===================
+
+    FlowsheetEntryType:
+      type: string
+      enum:
+        - track
+        - show_start
+        - show_end
+        - dj_join
+        - dj_leave
+        - talkset
+        - breakpoint
+        - message
+      description: Discriminator for V2 flowsheet entry types
+
+    FlowsheetV2Base:
+      type: object
+      description: Base fields shared by all V2 flowsheet entries
+      required:
+        - id
+        - show_id
+        - play_order
+        - add_time
+        - entry_type
+      properties:
+        id:
+          type: integer
+        show_id:
+          type: integer
+          nullable: true
+        play_order:
+          type: integer
+        add_time:
+          type: string
+          format: date-time
+
+    FlowsheetV2TrackEntry:
+      description: V2 track entry - a song that was played
+      allOf:
+        - $ref: '#/components/schemas/FlowsheetV2Base'
+        - type: object
+          required:
+            - entry_type
+            - request_flag
+          properties:
+            entry_type:
+              type: string
+              enum: [track]
+            album_id:
+              type: integer
+              nullable: true
+            rotation_id:
+              type: integer
+              nullable: true
+            artist_name:
+              type: string
+              nullable: true
+            album_title:
+              type: string
+              nullable: true
+            track_title:
+              type: string
+              nullable: true
+            record_label:
+              type: string
+              nullable: true
+            request_flag:
+              type: boolean
+            rotation_bin:
+              $ref: '#/components/schemas/RotationBin'
+            artwork_url:
+              type: string
+              nullable: true
+            discogs_url:
+              type: string
+              nullable: true
+            release_year:
+              type: integer
+              nullable: true
+            spotify_url:
+              type: string
+              nullable: true
+            apple_music_url:
+              type: string
+              nullable: true
+            youtube_music_url:
+              type: string
+              nullable: true
+            bandcamp_url:
+              type: string
+              nullable: true
+            soundcloud_url:
+              type: string
+              nullable: true
+            artist_bio:
+              type: string
+              nullable: true
+            artist_wikipedia_url:
+              type: string
+              nullable: true
+
+    FlowsheetV2ShowStartEntry:
+      description: V2 show start event - when a show begins
+      allOf:
+        - $ref: '#/components/schemas/FlowsheetV2Base'
+        - type: object
+          required:
+            - entry_type
+            - dj_name
+            - timestamp
+          properties:
+            entry_type:
+              type: string
+              enum: [show_start]
+            dj_name:
+              type: string
+            timestamp:
+              type: string
+              format: date-time
+
+    FlowsheetV2ShowEndEntry:
+      description: V2 show end event - when a show ends
+      allOf:
+        - $ref: '#/components/schemas/FlowsheetV2Base'
+        - type: object
+          required:
+            - entry_type
+            - dj_name
+            - timestamp
+          properties:
+            entry_type:
+              type: string
+              enum: [show_end]
+            dj_name:
+              type: string
+            timestamp:
+              type: string
+              format: date-time
+
+    FlowsheetV2DJJoinEntry:
+      description: V2 DJ join event - when a DJ joins an active show
+      allOf:
+        - $ref: '#/components/schemas/FlowsheetV2Base'
+        - type: object
+          required:
+            - entry_type
+            - dj_name
+          properties:
+            entry_type:
+              type: string
+              enum: [dj_join]
+            dj_name:
+              type: string
+
+    FlowsheetV2DJLeaveEntry:
+      description: V2 DJ leave event - when a DJ leaves an active show
+      allOf:
+        - $ref: '#/components/schemas/FlowsheetV2Base'
+        - type: object
+          required:
+            - entry_type
+            - dj_name
+          properties:
+            entry_type:
+              type: string
+              enum: [dj_leave]
+            dj_name:
+              type: string
+
+    FlowsheetV2TalksetEntry:
+      description: V2 talkset entry - DJ talk segment
+      allOf:
+        - $ref: '#/components/schemas/FlowsheetV2Base'
+        - type: object
+          required:
+            - entry_type
+            - message
+          properties:
+            entry_type:
+              type: string
+              enum: [talkset]
+            message:
+              type: string
+
+    FlowsheetV2BreakpointEntry:
+      description: V2 breakpoint entry - hour marker
+      allOf:
+        - $ref: '#/components/schemas/FlowsheetV2Base'
+        - type: object
+          required:
+            - entry_type
+          properties:
+            entry_type:
+              type: string
+              enum: [breakpoint]
+            message:
+              type: string
+              nullable: true
+
+    FlowsheetV2MessageEntry:
+      description: V2 message entry - custom/arbitrary message
+      allOf:
+        - $ref: '#/components/schemas/FlowsheetV2Base'
+        - type: object
+          required:
+            - entry_type
+            - message
+          properties:
+            entry_type:
+              type: string
+              enum: [message]
+            message:
+              type: string
+
+    FlowsheetV2PaginatedResponse:
+      type: object
+      required:
+        - entries
+        - page
+        - limit
+        - total
+        - totalPages
+      properties:
+        entries:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/FlowsheetV2TrackEntry'
+              - $ref: '#/components/schemas/FlowsheetV2ShowStartEntry'
+              - $ref: '#/components/schemas/FlowsheetV2ShowEndEntry'
+              - $ref: '#/components/schemas/FlowsheetV2DJJoinEntry'
+              - $ref: '#/components/schemas/FlowsheetV2DJLeaveEntry'
+              - $ref: '#/components/schemas/FlowsheetV2TalksetEntry'
+              - $ref: '#/components/schemas/FlowsheetV2BreakpointEntry'
+              - $ref: '#/components/schemas/FlowsheetV2MessageEntry'
+            discriminator:
+              propertyName: entry_type
+              mapping:
+                track: '#/components/schemas/FlowsheetV2TrackEntry'
+                show_start: '#/components/schemas/FlowsheetV2ShowStartEntry'
+                show_end: '#/components/schemas/FlowsheetV2ShowEndEntry'
+                dj_join: '#/components/schemas/FlowsheetV2DJJoinEntry'
+                dj_leave: '#/components/schemas/FlowsheetV2DJLeaveEntry'
+                talkset: '#/components/schemas/FlowsheetV2TalksetEntry'
+                breakpoint: '#/components/schemas/FlowsheetV2BreakpointEntry'
+                message: '#/components/schemas/FlowsheetV2MessageEntry'
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+          description: Total number of entries
+        totalPages:
+          type: integer
+          description: Total number of pages
+
     OnAirDJ:
       type: object
       required:
@@ -1967,6 +2226,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistSearchResponse'
+
+  # ===================
+  # Flowsheet V2 Endpoints
+  # ===================
+
+  /v2/flowsheet:
+    get:
+      summary: Get V2 flowsheet entries (paginated, discriminated union)
+      description: |
+        Returns flowsheet entries as a discriminated union with entry_type field.
+        Each entry type has a well-defined shape instead of optional fields.
+      security: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Page number (0-indexed)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+          description: Number of entries per page
+      responses:
+        '200':
+          description: Paginated list of V2 flowsheet entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlowsheetV2PaginatedResponse'
+
+  /v2/flowsheet/latest:
+    get:
+      summary: Get the most recent V2 flowsheet entry
+      security: []
+      responses:
+        '200':
+          description: Latest flowsheet entry in V2 format
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FlowsheetV2TrackEntry'
+                  - $ref: '#/components/schemas/FlowsheetV2ShowStartEntry'
+                  - $ref: '#/components/schemas/FlowsheetV2ShowEndEntry'
+                  - $ref: '#/components/schemas/FlowsheetV2DJJoinEntry'
+                  - $ref: '#/components/schemas/FlowsheetV2DJLeaveEntry'
+                  - $ref: '#/components/schemas/FlowsheetV2TalksetEntry'
+                  - $ref: '#/components/schemas/FlowsheetV2BreakpointEntry'
+                  - $ref: '#/components/schemas/FlowsheetV2MessageEntry'
+                discriminator:
+                  propertyName: entry_type
+                  mapping:
+                    track: '#/components/schemas/FlowsheetV2TrackEntry'
+                    show_start: '#/components/schemas/FlowsheetV2ShowStartEntry'
+                    show_end: '#/components/schemas/FlowsheetV2ShowEndEntry'
+                    dj_join: '#/components/schemas/FlowsheetV2DJJoinEntry'
+                    dj_leave: '#/components/schemas/FlowsheetV2DJLeaveEntry'
+                    talkset: '#/components/schemas/FlowsheetV2TalksetEntry'
+                    breakpoint: '#/components/schemas/FlowsheetV2BreakpointEntry'
+                    message: '#/components/schemas/FlowsheetV2MessageEntry'
 
   /djs:
     get:

@@ -10,6 +10,14 @@ import type {
   AlbumSearchResult,
   FlowsheetEntryResponse,
   FlowsheetSongEntry,
+  FlowsheetV2TrackEntry,
+  FlowsheetV2ShowStartEntry,
+  FlowsheetV2ShowEndEntry,
+  FlowsheetV2DJJoinEntry,
+  FlowsheetV2DJLeaveEntry,
+  FlowsheetV2TalksetEntry,
+  FlowsheetV2BreakpointEntry,
+  FlowsheetV2MessageEntry,
   OnAirDJ,
   RotationEntry,
   DJ,
@@ -109,6 +117,93 @@ export const testFlowsheetSongEntry: FlowsheetSongEntry = {
 export const testOnAirDJ: OnAirDJ = {
   id: 1,
   dj_name: 'DJ Test',
+};
+
+// ============================================================================
+// Flowsheet V2
+// ============================================================================
+
+const testV2AddTime = new Date('2024-06-15T14:30:00.000Z');
+
+export const testV2TrackEntry: FlowsheetV2TrackEntry = {
+  id: 100,
+  show_id: 1,
+  play_order: 50,
+  add_time: testV2AddTime,
+  entry_type: 'track',
+  album_id: 1,
+  rotation_id: 5001,
+  artist_name: 'Test Artist',
+  album_title: 'Test Album',
+  track_title: 'Test Track',
+  record_label: 'Test Label',
+  request_flag: false,
+  rotation_bin: 'H',
+};
+
+export const testV2ShowStartEntry: FlowsheetV2ShowStartEntry = {
+  id: 101,
+  show_id: 1,
+  play_order: 1,
+  add_time: testV2AddTime,
+  entry_type: 'show_start',
+  dj_name: 'DJ Test',
+  timestamp: testV2AddTime,
+};
+
+export const testV2ShowEndEntry: FlowsheetV2ShowEndEntry = {
+  id: 102,
+  show_id: 1,
+  play_order: 200,
+  add_time: testV2AddTime,
+  entry_type: 'show_end',
+  dj_name: 'DJ Test',
+  timestamp: testV2AddTime,
+};
+
+export const testV2DJJoinEntry: FlowsheetV2DJJoinEntry = {
+  id: 103,
+  show_id: 1,
+  play_order: 10,
+  add_time: testV2AddTime,
+  entry_type: 'dj_join',
+  dj_name: 'DJ Guest',
+};
+
+export const testV2DJLeaveEntry: FlowsheetV2DJLeaveEntry = {
+  id: 104,
+  show_id: 1,
+  play_order: 190,
+  add_time: testV2AddTime,
+  entry_type: 'dj_leave',
+  dj_name: 'DJ Guest',
+};
+
+export const testV2TalksetEntry: FlowsheetV2TalksetEntry = {
+  id: 105,
+  show_id: 1,
+  play_order: 60,
+  add_time: testV2AddTime,
+  entry_type: 'talkset',
+  message: 'Talkset - station ID',
+};
+
+export const testV2BreakpointEntry: FlowsheetV2BreakpointEntry = {
+  id: 106,
+  show_id: 1,
+  play_order: 100,
+  add_time: testV2AddTime,
+  entry_type: 'breakpoint',
+  message: 'Breakpoint - 3:00 PM',
+};
+
+export const testV2MessageEntry: FlowsheetV2MessageEntry = {
+  id: 107,
+  show_id: 1,
+  play_order: 70,
+  add_time: testV2AddTime,
+  entry_type: 'message',
+  message: 'Listener shout-out to Chapel Hill',
 };
 
 // ============================================================================
