@@ -51,3 +51,16 @@ Run `npm run check:breaking` before changing `api.yaml` to detect breaking chang
 npm test              # Unit tests
 npm run test:e2e      # E2E tests (requires running services)
 ```
+
+## Testing Standards
+
+This project follows **Test-Driven Development (TDD)**. All code changes must be test-driven - this is not optional.
+
+### TDD Workflow
+
+1. **Red**: Write a failing test that describes the desired behavior. Run it and verify it fails for the expected reason.
+2. **Green**: Write the minimum code necessary to make the test pass. Run the test and confirm it passes.
+3. **Refactor**: Look for opportunities to improve the code while keeping tests green. Re-run tests after each change.
+4. **Repeat**: Continue this cycle until the feature is complete.
+
+**Key principle**: No production code without a failing test first.
