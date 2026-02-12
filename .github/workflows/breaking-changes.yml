@@ -36,7 +36,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.base.outputs.skip != 'true'
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Check for breaking changes
         if: steps.base.outputs.skip != 'true'
