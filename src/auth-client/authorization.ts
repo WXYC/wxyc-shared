@@ -20,8 +20,6 @@ export enum Authorization {
   MD = 2,
   /** Station Manager - can manage roster */
   SM = 3,
-  /** Admin - full access */
-  ADMIN = 4,
 }
 
 /**
@@ -32,7 +30,6 @@ export const AUTHORIZATION_LABELS: Record<Authorization, string> = {
   [Authorization.DJ]: "DJ",
   [Authorization.MD]: "Music Director",
   [Authorization.SM]: "Station Manager",
-  [Authorization.ADMIN]: "Admin",
 };
 
 // ============================================================================
@@ -43,9 +40,10 @@ export const AUTHORIZATION_LABELS: Record<Authorization, string> = {
  * Maps a WXYCRole string to the Authorization enum.
  *
  * Handles variations:
- * - Standard roles: "member", "dj", "musicDirector", "stationManager", "admin"
+ * - Standard roles: "member", "dj", "musicDirector", "stationManager"
  * - Snake case: "station_manager", "music_director"
- * - Better-auth defaults: "owner", "user"
+ * - Better-auth defaults: "admin", "owner" -> SM (safe fallback)
+ * - "user" -> NO (member-level)
  *
  * @param role - The role string from better-auth
  * @returns The corresponding Authorization enum value
@@ -62,7 +60,6 @@ export function roleToAuthorization(
   switch (normalized) {
     case "admin":
     case "owner":
-      return Authorization.ADMIN;
     case "stationmanager":
     case "station_manager":
       return Authorization.SM;
@@ -84,8 +81,6 @@ export function roleToAuthorization(
  */
 export function authorizationToRole(auth: Authorization): WXYCRole {
   switch (auth) {
-    case Authorization.ADMIN:
-      return "admin";
     case Authorization.SM:
       return "stationManager";
     case Authorization.MD:

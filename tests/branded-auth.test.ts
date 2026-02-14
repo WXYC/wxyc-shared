@@ -18,11 +18,9 @@ describe("Authorization enum", () => {
     expect(Authorization.DJ).toBe(1);
     expect(Authorization.MD).toBe(2);
     expect(Authorization.SM).toBe(3);
-    expect(Authorization.ADMIN).toBe(4);
   });
 
   it("supports numeric comparison for hierarchy", () => {
-    expect(Authorization.ADMIN > Authorization.SM).toBe(true);
     expect(Authorization.SM > Authorization.MD).toBe(true);
     expect(Authorization.MD > Authorization.DJ).toBe(true);
     expect(Authorization.DJ > Authorization.NO).toBe(true);
@@ -35,13 +33,12 @@ describe("AUTHORIZATION_LABELS", () => {
     expect(AUTHORIZATION_LABELS[Authorization.DJ]).toBe("DJ");
     expect(AUTHORIZATION_LABELS[Authorization.MD]).toBe("Music Director");
     expect(AUTHORIZATION_LABELS[Authorization.SM]).toBe("Station Manager");
-    expect(AUTHORIZATION_LABELS[Authorization.ADMIN]).toBe("Admin");
   });
 });
 
 describe("roleToAuthorization", () => {
   const cases: [WXYCRole | string | null | undefined, Authorization, string][] = [
-    ["admin", Authorization.ADMIN, "admin role"],
+    ["admin", Authorization.SM, "admin maps to SM"],
     ["stationManager", Authorization.SM, "stationManager role"],
     ["station_manager", Authorization.SM, "snake_case variant"],
     ["musicDirector", Authorization.MD, "musicDirector role"],
@@ -49,7 +46,7 @@ describe("roleToAuthorization", () => {
     ["dj", Authorization.DJ, "dj role"],
     ["member", Authorization.NO, "member role"],
     ["user", Authorization.NO, "user fallback"],
-    ["owner", Authorization.ADMIN, "owner maps to admin"],
+    ["owner", Authorization.SM, "owner maps to SM"],
     [null, Authorization.NO, "null defaults to NO"],
     [undefined, Authorization.NO, "undefined defaults to NO"],
     ["unknown", Authorization.NO, "unknown defaults to NO"],
@@ -62,7 +59,6 @@ describe("roleToAuthorization", () => {
 
 describe("authorizationToRole", () => {
   const cases: [Authorization, WXYCRole][] = [
-    [Authorization.ADMIN, "admin"],
     [Authorization.SM, "stationManager"],
     [Authorization.MD, "musicDirector"],
     [Authorization.DJ, "dj"],
@@ -108,7 +104,6 @@ describe("checkRole", () => {
       [Authorization.DJ, Authorization.MD, "DJ cannot access MD-required"],
       [Authorization.DJ, Authorization.SM, "DJ cannot access SM-required"],
       [Authorization.MD, Authorization.SM, "MD cannot access SM-required"],
-      [Authorization.SM, Authorization.ADMIN, "SM cannot access ADMIN-required"],
     ];
 
     it.each(insufficientCases)(
@@ -127,10 +122,7 @@ describe("checkRole", () => {
     const sufficientCases: [Authorization, Authorization, string][] = [
       [Authorization.DJ, Authorization.DJ, "exact match"],
       [Authorization.SM, Authorization.DJ, "higher role"],
-      [Authorization.ADMIN, Authorization.DJ, "admin accessing DJ"],
       [Authorization.SM, Authorization.SM, "SM accessing SM"],
-      [Authorization.ADMIN, Authorization.SM, "admin accessing SM"],
-      [Authorization.ADMIN, Authorization.ADMIN, "admin accessing admin"],
     ];
 
     it.each(sufficientCases)(

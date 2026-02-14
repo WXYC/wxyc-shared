@@ -12,7 +12,7 @@ export type Capability = (typeof CAPABILITIES)[number];
  * Policy as data: who can assign which capabilities.
  *
  * Delegation chain:
- *   Admin/StationManager -> can assign webmaster or editor
+ *   StationManager -> can assign webmaster or editor
  *   Webmaster (capability) -> can assign editor only
  */
 export const CAPABILITY_ASSIGNERS: Record<
@@ -20,11 +20,11 @@ export const CAPABILITY_ASSIGNERS: Record<
   { roles: readonly WXYCRole[]; capabilities: readonly Capability[] }
 > = {
   editor: {
-    roles: ["admin", "stationManager"],
+    roles: ["stationManager"],
     capabilities: ["webmaster"],
   },
   webmaster: {
-    roles: ["admin", "stationManager"],
+    roles: ["stationManager"],
     capabilities: [],
   },
 } as const;

@@ -4,6 +4,14 @@
  * permission/role/capability utilities without the React auth client.
  */
 
+/**
+ * Check if a user has the better-auth system admin role.
+ * This is orthogonal to the WXYC station role hierarchy (member/dj/md/sm).
+ */
+export function isSystemAdmin(user: { role?: string | null }): boolean {
+  return user.role === "admin";
+}
+
 export * from "./permissions.js";
 export * from "./roles.js";
 export * from "./capabilities.js";
