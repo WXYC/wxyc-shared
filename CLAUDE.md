@@ -19,7 +19,7 @@ This package provides:
 ## Authorization Model
 
 The auth system has two dimensions:
-1. **Roles** (hierarchical): member < dj < musicDirector < stationManager < admin
+1. **Roles** (hierarchical): member < dj < musicDirector < stationManager
 2. **Capabilities** (cross-cutting): `editor`, `webmaster` - can be granted to any user
 
 Use `Authorization` enum for numeric comparisons, branded types (`RoleAuthorizedUser`, `CapabilityAuthorizedUser`) for compile-time enforcement.

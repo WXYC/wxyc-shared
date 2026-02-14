@@ -45,18 +45,16 @@ describe("canEditWebsite", () => {
 });
 
 describe("CAPABILITY_ASSIGNERS", () => {
-  it("allows admin and stationManager to assign editor", () => {
-    expect(CAPABILITY_ASSIGNERS.editor.roles).toContain("admin");
-    expect(CAPABILITY_ASSIGNERS.editor.roles).toContain("stationManager");
+  it("allows only stationManager to assign editor by role", () => {
+    expect(CAPABILITY_ASSIGNERS.editor.roles).toEqual(["stationManager"]);
   });
 
   it("allows webmaster capability to assign editor", () => {
     expect(CAPABILITY_ASSIGNERS.editor.capabilities).toContain("webmaster");
   });
 
-  it("allows admin and stationManager to assign webmaster", () => {
-    expect(CAPABILITY_ASSIGNERS.webmaster.roles).toContain("admin");
-    expect(CAPABILITY_ASSIGNERS.webmaster.roles).toContain("stationManager");
+  it("allows only stationManager to assign webmaster by role", () => {
+    expect(CAPABILITY_ASSIGNERS.webmaster.roles).toEqual(["stationManager"]);
   });
 
   it("does not allow any capability to assign webmaster", () => {
@@ -75,7 +73,6 @@ describe("canAssignCapability", () => {
     it.each<
       [{ role: WXYCRole; capabilities: Capability[] }, boolean, string]
     >([
-      [user("admin"), true, "admin can assign"],
       [user("stationManager"), true, "stationManager can assign"],
       [user("dj", ["webmaster"]), true, "webmaster capability can assign"],
       [user("member", ["webmaster"]), true, "member with webmaster can assign"],
@@ -91,7 +88,6 @@ describe("canAssignCapability", () => {
     it.each<
       [{ role: WXYCRole; capabilities: Capability[] }, boolean, string]
     >([
-      [user("admin"), true, "admin can assign"],
       [user("stationManager"), true, "stationManager can assign"],
       [user("dj", ["webmaster"]), false, "webmaster cannot assign webmaster"],
       [user("musicDirector"), false, "musicDirector cannot assign"],

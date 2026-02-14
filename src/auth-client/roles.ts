@@ -1,10 +1,12 @@
 import type { Permission, Resource, Action } from "./permissions.js";
 
 /**
- * All WXYC roles, ordered by privilege level (highest first).
+ * All WXYC station roles, ordered by privilege level (highest first).
+ *
+ * Note: "admin" is a better-auth system role (auth_user.role), not a station role.
+ * Use isSystemAdmin() from auth.ts for system admin checks.
  */
 export const ROLES = [
-  "admin",
   "stationManager",
   "musicDirector",
   "dj",
@@ -16,12 +18,6 @@ export type WXYCRole = (typeof ROLES)[number];
  * Permission grants for each role.
  */
 export const ROLE_PERMISSIONS: Record<WXYCRole, Permission> = {
-  admin: {
-    catalog: ["read", "write"],
-    bin: ["read", "write"],
-    flowsheet: ["read", "write"],
-    roster: ["read", "write"],
-  },
   stationManager: {
     catalog: ["read", "write"],
     bin: ["read", "write"],
@@ -69,32 +65,21 @@ export function canManageRoster(role: WXYCRole | null | undefined): boolean {
 
 /**
  * Check if a role can assign other roles.
- * Only admin and stationManager can assign roles.
+ * Only stationManager can assign roles.
  */
 export function canAssignRoles(role: WXYCRole | null | undefined): boolean {
-  return role === "admin" || role === "stationManager";
-}
-
-/**
- * Check if a role can promote to admin.
- * Only admin can promote to admin.
- */
-export function canPromoteToAdmin(role: WXYCRole | null | undefined): boolean {
-  return role === "admin";
+  return role === "stationManager";
 }
 
 /**
  * Get assignable roles for a given role.
- * Admins can assign any role, SMs can assign up to SM.
+ * Station managers can assign any station role.
  */
 export function getAssignableRoles(
   role: WXYCRole | null | undefined
 ): WXYCRole[] {
-  if (role === "admin") {
-    return [...ROLES];
-  }
   if (role === "stationManager") {
-    return ["stationManager", "musicDirector", "dj", "member"];
+    return [...ROLES];
   }
   return [];
 }

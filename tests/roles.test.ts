@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   hasPermission,
-  canPromoteToAdmin,
   canAssignRoles,
   canManageRoster,
   getAssignableRoles,
@@ -11,12 +10,7 @@ import {
 
 describe("hasPermission", () => {
   const permissionCases = [
-    // Admin has everything
-    { role: "admin", resource: "roster", action: "read", expected: true },
-    { role: "admin", resource: "roster", action: "write", expected: true },
-    { role: "admin", resource: "catalog", action: "write", expected: true },
-
-    // SM has roster access
+    // SM has roster access (top of hierarchy)
     {
       role: "stationManager",
       resource: "roster",
@@ -76,7 +70,6 @@ describe("hasPermission", () => {
 
 describe("canManageRoster", () => {
   const cases = [
-    { role: "admin", expected: true },
     { role: "stationManager", expected: true },
     { role: "musicDirector", expected: false },
     { role: "dj", expected: false },
@@ -89,27 +82,8 @@ describe("canManageRoster", () => {
   });
 });
 
-describe("canPromoteToAdmin", () => {
-  const cases = [
-    { role: "admin", expected: true },
-    { role: "stationManager", expected: false },
-    { role: "musicDirector", expected: false },
-    { role: "dj", expected: false },
-    { role: "member", expected: false },
-    { role: null, expected: false },
-  ] as const;
-
-  it.each(cases)(
-    "$role can promote to admin = $expected",
-    ({ role, expected }) => {
-      expect(canPromoteToAdmin(role)).toBe(expected);
-    }
-  );
-});
-
 describe("canAssignRoles", () => {
   const cases = [
-    { role: "admin", expected: true },
     { role: "stationManager", expected: true },
     { role: "musicDirector", expected: false },
     { role: "dj", expected: false },
@@ -123,17 +97,8 @@ describe("canAssignRoles", () => {
 });
 
 describe("getAssignableRoles", () => {
-  it("admin can assign all roles", () => {
-    expect(getAssignableRoles("admin")).toEqual([...ROLES]);
-  });
-
-  it("stationManager can assign all except admin", () => {
-    const assignable = getAssignableRoles("stationManager");
-    expect(assignable).toContain("stationManager");
-    expect(assignable).toContain("musicDirector");
-    expect(assignable).toContain("dj");
-    expect(assignable).toContain("member");
-    expect(assignable).not.toContain("admin");
+  it("stationManager can assign all roles", () => {
+    expect(getAssignableRoles("stationManager")).toEqual([...ROLES]);
   });
 
   const nonAssignerRoles = ["musicDirector", "dj", "member", null] as const;
