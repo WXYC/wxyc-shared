@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import type {
   FlowsheetEntryResponse as ManualFlowsheetEntryResponse,
   Album as ManualAlbum,
+  Label as ManualLabel,
   DJ as ManualDJ,
   ScheduleShift as ManualScheduleShift,
   SongRequest as ManualSongRequest,
@@ -28,6 +29,8 @@ import {
   FlowsheetEntryResponseFromJSON,
   Album as GeneratedAlbum,
   AlbumFromJSON,
+  Label as GeneratedLabel,
+  LabelFromJSON,
   DJ as GeneratedDJ,
   DJFromJSON,
   ScheduleShift as GeneratedScheduleShift,
@@ -107,6 +110,7 @@ describe('DTO Compatibility with Generated Types', () => {
         genre_id: 5,
         format_id: 1,
         label: 'Test Label',
+        label_id: 1,
         add_date: '2024-01-15T00:00:00Z',
       };
 
@@ -118,6 +122,41 @@ describe('DTO Compatibility with Generated Types', () => {
       // Manual type keeps them as strings (matching raw JSON)
       expect(generated.add_date).toBeDefined();
       expect(manual.add_date).toBeDefined();
+    });
+  });
+
+  describe('Label', () => {
+    it('should be assignable from generated type', () => {
+      const generated: GeneratedLabel = {
+        id: 1,
+        label_name: 'Merge Records',
+      };
+
+      const manual: ManualLabel = generated;
+      expect(manual.label_name).toBe('Merge Records');
+    });
+
+    it('should handle optional parent_label_id', () => {
+      const json = {
+        id: 1,
+        label_name: 'Domino USA',
+        parent_label_id: 42,
+      };
+
+      const generated = LabelFromJSON(json);
+      const manual: ManualLabel = json as ManualLabel;
+
+      expect(generated.parent_label_id).toBe(manual.parent_label_id);
+    });
+
+    it('should parse JSON with missing optional fields', () => {
+      const json = {
+        id: 1,
+        label_name: 'Sub Pop',
+      };
+
+      const generated = LabelFromJSON(json);
+      expect(generated.parent_label_id).toBeUndefined();
     });
   });
 
