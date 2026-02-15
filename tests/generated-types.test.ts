@@ -14,6 +14,10 @@ import {
   Album,
   AlbumFromJSON,
   AlbumToJSON,
+  Label,
+  LabelFromJSON,
+  LabelToJSON,
+  instanceOfLabel,
   DJ,
   DJFromJSON,
   ScheduleShift,
@@ -151,6 +155,53 @@ describe('Generated TypeScript Types', () => {
 
       expect(json.id).toBe(sampleAlbum.id);
       expect(json.album_title).toBe(sampleAlbum.album_title);
+    });
+  });
+
+  describe('Label', () => {
+    const sampleLabel = {
+      id: 1,
+      label_name: 'Merge Records',
+      parent_label_id: null,
+    };
+
+    it('should parse JSON to Label', () => {
+      const label = LabelFromJSON(sampleLabel);
+
+      expect(label.id).toBe(1);
+      expect(label.label_name).toBe('Merge Records');
+    });
+
+    it('should handle optional parent_label_id', () => {
+      const label = LabelFromJSON({
+        id: 2,
+        label_name: 'Domino USA',
+        parent_label_id: 42,
+      });
+
+      expect(label.parent_label_id).toBe(42);
+    });
+
+    it('should handle missing optional fields', () => {
+      const label = LabelFromJSON({
+        id: 1,
+        label_name: 'Sub Pop',
+      });
+
+      expect(label.parent_label_id).toBeUndefined();
+    });
+
+    it('should validate with instanceOf check', () => {
+      expect(instanceOfLabel(sampleLabel)).toBe(true);
+      expect(instanceOfLabel({ id: 1 })).toBe(false); // missing label_name
+    });
+
+    it('should round-trip JSON serialization', () => {
+      const label = LabelFromJSON(sampleLabel);
+      const json = LabelToJSON(label);
+
+      expect(json.id).toBe(sampleLabel.id);
+      expect(json.label_name).toBe(sampleLabel.label_name);
     });
   });
 

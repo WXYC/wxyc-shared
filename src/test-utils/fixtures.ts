@@ -18,6 +18,7 @@ import type {
   FlowsheetV2TalksetEntry,
   FlowsheetV2BreakpointEntry,
   FlowsheetV2MessageEntry,
+  Label,
   OnAirDJ,
   RotationEntry,
   DJ,
@@ -46,6 +47,21 @@ export const testArtist2: Artist = {
 };
 
 // ============================================================================
+// Labels
+// ============================================================================
+
+export const testLabel: Label = {
+  id: 1,
+  label_name: 'Test Label',
+};
+
+export const testLabel2: Label = {
+  id: 2,
+  label_name: 'Another Label',
+  parent_label_id: 1,
+};
+
+// ============================================================================
 // Albums
 // ============================================================================
 
@@ -57,6 +73,7 @@ export const testAlbum: Album = {
   genre_id: 2,
   format_id: 1,
   label: 'Test Label',
+  label_id: 1,
   add_date: new Date('2024-01-15'),
 };
 
@@ -68,6 +85,7 @@ export const testAlbum2: Album = {
   genre_id: 5,
   format_id: 2,
   label: 'Another Label',
+  label_id: 2,
   add_date: new Date('2024-02-20'),
 };
 

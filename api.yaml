@@ -163,6 +163,8 @@ components:
               type: string
             record_label:
               type: string
+            label_id:
+              type: integer
             rotation_id:
               type: integer
             rotation_bin:
@@ -224,6 +226,8 @@ components:
               type: string
             record_label:
               type: string
+            label_id:
+              type: integer
             request_flag:
               type: boolean
             album_id:
@@ -301,6 +305,8 @@ components:
           type: boolean
         record_label:
           type: string
+        label_id:
+          type: integer
 
     FlowsheetCreateMessage:
       type: object
@@ -321,6 +327,8 @@ components:
           type: string
         record_label:
           type: string
+        label_id:
+          type: integer
         request_flag:
           type: boolean
 
@@ -837,6 +845,8 @@ components:
           type: integer
         label:
           type: string
+        label_id:
+          type: integer
         add_date:
           type: string
           format: date-time
@@ -880,6 +890,8 @@ components:
           type: string
         label:
           type: string
+        label_id:
+          type: integer
         # Optional fields from fuzzy search
         album_dist:
           type: number
@@ -909,6 +921,8 @@ components:
           type: integer
         label:
           type: string
+        label_id:
+          type: integer
         genre_id:
           type: integer
         format_id:
@@ -917,6 +931,29 @@ components:
           type: integer
         alternate_artist_name:
           type: string
+
+    Label:
+      type: object
+      required:
+        - id
+        - label_name
+      properties:
+        id:
+          type: integer
+        label_name:
+          type: string
+        parent_label_id:
+          type: integer
+
+    CreateLabelRequest:
+      type: object
+      required:
+        - label_name
+      properties:
+        label_name:
+          type: string
+        parent_label_id:
+          type: integer
 
     AddArtistRequest:
       type: object
@@ -2638,6 +2675,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AlbumInfoResponse'
+
+  /library/labels:
+    get:
+      summary: Get all labels
+      tags:
+        - Library
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          description: Search query for label name prefix (optional, returns all labels if omitted)
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of labels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Label'
+    post:
+      summary: Create a new label
+      tags:
+        - Library
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLabelRequest'
+      responses:
+        '200':
+          description: Created or existing label
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Label'
 
   /library/tracks:
     get:

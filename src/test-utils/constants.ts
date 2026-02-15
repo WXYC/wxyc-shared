@@ -39,6 +39,11 @@ export const TEST_ENTITY_IDS = {
     MEDIUM: 5002,
     LIGHT: 5003,
   },
+  LABEL: {
+    MERGE_RECORDS: 6001,
+    SUB_POP: 6002,
+    DOMINO: 6003,
+  },
 } as const;
 
 // Test strings for search queries
