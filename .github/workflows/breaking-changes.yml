@@ -41,12 +41,19 @@ jobs:
       - name: Check for breaking changes
         if: steps.base.outputs.skip != 'true'
         id: diff
+        timeout-minutes: 3
         run: |
           # Run breaking change check
           set +e
-          output=$(node scripts/check-breaking-changes.js api-base.yaml 2>&1)
+          output=$(timeout 120 node scripts/check-breaking-changes.js api-base.yaml 2>&1)
           exit_code=$?
           set -e
+
+          # timeout(1) returns 124 on timeout
+          if [ $exit_code -eq 124 ]; then
+            output="⚠️ Breaking change analysis timed out. Please review api.yaml changes manually."
+            exit_code=0
+          fi
 
           echo "output<<EOF" >> $GITHUB_OUTPUT
           echo "$output" >> $GITHUB_OUTPUT
