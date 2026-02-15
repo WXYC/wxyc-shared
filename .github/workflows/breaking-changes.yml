@@ -27,56 +27,21 @@ jobs:
           }
         id: base
 
-      - name: Setup Node.js
-        if: steps.base.outputs.skip != 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        if: steps.base.outputs.skip != 'true'
-        run: npm ci --ignore-scripts
-
       - name: Check for breaking changes
         if: steps.base.outputs.skip != 'true'
         id: diff
-        timeout-minutes: 3
-        run: |
-          # Run breaking change check
-          set +e
-          output=$(timeout 120 node scripts/check-breaking-changes.js api-base.yaml 2>&1)
-          exit_code=$?
-          set -e
-
-          # timeout(1) returns 124 on timeout
-          if [ $exit_code -eq 124 ]; then
-            output="⚠️ Breaking change analysis timed out. Please review api.yaml changes manually."
-            exit_code=0
-          fi
-
-          echo "output<<EOF" >> $GITHUB_OUTPUT
-          echo "$output" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-          if [ $exit_code -eq 1 ]; then
-            echo "breaking=true" >> $GITHUB_OUTPUT
-          else
-            echo "breaking=false" >> $GITHUB_OUTPUT
-          fi
-
-          # Print output to job log
-          echo "$output"
-
-          # Don't fail the step yet - we'll handle it after commenting
-          exit 0
+        uses: oasdiff/oasdiff-action/breaking@main
+        with:
+          base: api-base.yaml
+          revision: api.yaml
+          fail-on: ERR
 
       - name: Comment on PR (Breaking Changes Found)
-        if: steps.base.outputs.skip != 'true' && steps.diff.outputs.breaking == 'true'
+        if: failure() && steps.base.outputs.skip != 'true'
         uses: actions/github-script@v7
         with:
           script: |
-            const output = `${{ steps.diff.outputs.output }}`;
+            const output = `${{ steps.diff.outputs.breaking }}`;
 
             const body = `## Breaking API Changes Detected
 
@@ -117,7 +82,6 @@ jobs:
             );
 
             if (botComment) {
-              // Update existing comment
               await github.rest.issues.updateComment({
                 comment_id: botComment.id,
                 owner: context.repo.owner,
@@ -125,7 +89,6 @@ jobs:
                 body,
               });
             } else {
-              // Create new comment
               await github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
@@ -135,11 +98,10 @@ jobs:
             }
 
       - name: Comment on PR (No Breaking Changes)
-        if: steps.base.outputs.skip != 'true' && steps.diff.outputs.breaking == 'false'
+        if: success() && steps.base.outputs.skip != 'true'
         uses: actions/github-script@v7
         with:
           script: |
-            // Check if there was a previous breaking changes comment
             const { data: comments } = await github.rest.issues.listComments({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -152,7 +114,6 @@ jobs:
             );
 
             if (botComment) {
-              // Update to show resolved
               const body = `## ~~Breaking API Changes Detected~~
 
               Previously detected breaking changes have been resolved.
@@ -167,10 +128,3 @@ jobs:
                 body,
               });
             }
-
-      - name: Fail if breaking changes found
-        if: steps.base.outputs.skip != 'true' && steps.diff.outputs.breaking == 'true'
-        run: |
-          echo "Breaking changes detected in api.yaml"
-          echo "Please review the PR comment for details"
-          exit 1
