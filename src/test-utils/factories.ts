@@ -303,7 +303,7 @@ export function createTestSongRequest(
     id: generateId(),
     device_id: `device-${generateId()}`,
     message: 'Play some jazz please',
-    created_at: new Date(),
+    created_at: new Date().toISOString(),
     status: 'pending',
     ...overrides,
   };

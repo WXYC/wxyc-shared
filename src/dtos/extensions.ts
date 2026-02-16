@@ -14,6 +14,9 @@ import type {
   FlowsheetMessageEntry,
   FlowsheetBreakpointEntry,
   FlowsheetShowBlockEntry,
+  FlowsheetCreateSongFromCatalog,
+  FlowsheetCreateSongFreeform,
+  FlowsheetCreateMessage,
   FlowsheetV2TrackEntry,
   FlowsheetV2ShowStartEntry,
   FlowsheetV2ShowEndEntry,
@@ -60,6 +63,12 @@ export type FlowsheetEntry =
   | FlowsheetBreakpointEntry
   | FlowsheetShowBlockEntry
   | FlowsheetMessageEntry;
+
+/** Union type for POST /flowsheet request body (oneOf in OpenAPI) */
+export type FlowsheetPostRequest =
+  | FlowsheetCreateSongFromCatalog
+  | FlowsheetCreateSongFreeform
+  | FlowsheetCreateMessage;
 
 /** Union type for all V2 flowsheet entry types (discriminated by entry_type) */
 export type FlowsheetV2Entry =

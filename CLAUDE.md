@@ -36,12 +36,16 @@ The `.github/workflows/publish.yml` workflow handles the rest.
 
 ## Code Generation
 
-DTOs are generated from `api.yaml`:
+DTOs are generated from `api.yaml`. TypeScript uses `openapi-typescript` (pure Node.js); Swift and Kotlin use the Java-based `openapi-generator-cli`:
 ```bash
-npm run generate:typescript  # TypeScript types
-npm run generate:swift       # iOS types
-npm run generate:kotlin      # Android types
+npm run generate:typescript  # TypeScript types (openapi-typescript, no JVM)
+npm run generate:swift       # iOS types (openapi-generator-cli, requires Java)
+npm run generate:kotlin      # Android types (openapi-generator-cli, requires Java)
 ```
+
+The codegen script (`scripts/generate-models.js`) produces:
+- `src/generated/openapi-types.d.ts` -- raw openapi-typescript output
+- `src/generated/models/index.ts` -- re-export layer with const objects for enums
 
 Run `npm run check:breaking` before changing `api.yaml` to detect breaking changes.
 
