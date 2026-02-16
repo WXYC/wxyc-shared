@@ -74,7 +74,7 @@ export const testAlbum: Album = {
   format_id: 1,
   label: 'Test Label',
   label_id: 1,
-  add_date: new Date('2024-01-15'),
+  add_date: '2024-01-15T00:00:00.000Z',
 };
 
 export const testAlbum2: Album = {
@@ -86,12 +86,12 @@ export const testAlbum2: Album = {
   format_id: 2,
   label: 'Another Label',
   label_id: 2,
-  add_date: new Date('2024-02-20'),
+  add_date: '2024-02-20T00:00:00.000Z',
 };
 
 export const testAlbumSearchResult: AlbumSearchResult = {
   id: 1,
-  add_date: new Date('2024-01-15'),
+  add_date: '2024-01-15T00:00:00.000Z',
   album_title: 'Test Album',
   artist_name: 'Test Artist',
   code_letters: 'RO',
@@ -141,7 +141,7 @@ export const testOnAirDJ: OnAirDJ = {
 // Flowsheet V2
 // ============================================================================
 
-const testV2AddTime = new Date('2024-06-15T14:30:00.000Z');
+const testV2AddTime = '2024-06-15T14:30:00.000Z';
 
 export const testV2TrackEntry: FlowsheetV2TrackEntry = {
   id: 100,
@@ -232,7 +232,7 @@ export const testRotation: RotationEntry = {
   id: 1,
   album_id: 1,
   rotation_bin: 'H',
-  add_date: new Date('2024-01-01'),
+  add_date: '2024-01-01',
   kill_date: null,
 };
 
@@ -251,7 +251,7 @@ export const testBinEntry: BinEntry = {
   id: 1,
   dj_id: 1,
   album_id: 1,
-  added_at: new Date('2024-01-15T12:00:00Z'),
+  added_at: '2024-01-15T12:00:00Z',
   album_title: 'Test Album',
   artist_name: 'Test Artist',
   code_letters: 'RO',

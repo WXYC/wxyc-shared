@@ -343,6 +343,20 @@ npm run test:e2e
 
 # Type check
 npm run lint
+
+# Generate TypeScript types from api.yaml
+npm run generate:typescript
+```
+
+### Code Generation
+
+TypeScript types are generated from `api.yaml` using [`openapi-typescript`](https://openapi-ts.dev/) (pure Node.js, no JVM required):
+
+```bash
+npm run generate:typescript  # TypeScript types (openapi-typescript)
+npm run generate:swift       # iOS types (openapi-generator-cli, requires Java)
+npm run generate:kotlin      # Android types (openapi-generator-cli, requires Java)
+npm run generate:python      # Python models (datamodel-codegen)
 ```
 
 ## E2E Tests
@@ -355,7 +369,9 @@ See [`railway/`](./railway/) for the Railway service topology, environment varia
 
 ## Contributing
 
-1. Add new DTOs in `src/dtos/`
-2. Export them from `src/dtos/index.ts`
-3. Add corresponding test fixtures/factories
-4. Run `npm run lint` to verify types
+1. Define new schemas in `api.yaml` (the OpenAPI spec is the single source of truth for all DTOs)
+2. Run `npm run generate:typescript` to regenerate TypeScript types
+3. Export them from `src/dtos/index.ts`
+4. Add corresponding test fixtures/factories
+5. Run `npm run lint` to verify types
+6. If Python services consume the new types, run `npm run generate:python` to update the generated Python models

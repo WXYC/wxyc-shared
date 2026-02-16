@@ -2,7 +2,7 @@
  * Generated Types E2E Tests
  *
  * These tests validate that the generated TypeScript types correctly
- * parse real API responses from the backend.
+ * describe real API responses from the backend.
  *
  * Prerequisites:
  * - npm run generate:typescript has been run
@@ -13,23 +13,15 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createE2EClient, E2EClient, getE2EConfig } from '../setup.js';
-import {
+import type {
   FlowsheetEntryResponse,
-  FlowsheetEntryResponseFromJSON,
-  instanceOfFlowsheetEntryResponse,
   AlbumSearchResult,
-  AlbumSearchResultFromJSON,
   ScheduleShift,
-  ScheduleShiftFromJSON,
   FormatEntry,
-  FormatEntryFromJSON,
   GenreEntry,
-  GenreEntryFromJSON,
   OnAirDJ,
-  OnAirDJFromJSON,
   Rotation,
-  RotationFromJSON,
-} from '../../generated/typescript/models/index.js';
+} from '../../src/generated/models/index.js';
 
 let client: E2EClient;
 
@@ -41,7 +33,7 @@ describe('Generated Type Parsing (E2E)', () => {
 
   describe('FlowsheetEntryResponse', () => {
     it('parses real flowsheet entries without errors', async () => {
-      const response = await client.get<unknown[]>('/flowsheet?limit=10');
+      const response = await client.get<FlowsheetEntryResponse[]>('/flowsheet?limit=10');
 
       if (!response.ok) {
         console.log('Skipping: Backend not available');
@@ -50,38 +42,25 @@ describe('Generated Type Parsing (E2E)', () => {
 
       expect(Array.isArray(response.body)).toBe(true);
 
-      for (const raw of response.body) {
-        // Parse using generated function
-        const entry: FlowsheetEntryResponse = FlowsheetEntryResponseFromJSON(raw);
-
-        // Verify required fields are present and typed correctly
+      for (const entry of response.body) {
         expect(typeof entry.id).toBe('number');
         expect(typeof entry.play_order).toBe('number');
         expect(typeof entry.show_id).toBe('number');
         expect(typeof entry.request_flag).toBe('boolean');
-
-        // Verify instance check works
-        expect(instanceOfFlowsheetEntryResponse(raw)).toBe(true);
       }
     });
 
     it('handles song entries with all optional fields', async () => {
-      const response = await client.get<unknown[]>('/flowsheet?limit=50');
+      const response = await client.get<FlowsheetEntryResponse[]>('/flowsheet?limit=50');
 
       if (!response.ok) {
         console.log('Skipping: Backend not available');
         return;
       }
 
-      // Find an entry with song data
-      const songEntries = response.body.filter(
-        (e: unknown) => (e as Record<string, unknown>).track_title
-      );
+      const songEntries = response.body.filter((e) => e.track_title);
 
-      for (const raw of songEntries) {
-        const entry = FlowsheetEntryResponseFromJSON(raw);
-
-        // Song fields should be accessible
+      for (const entry of songEntries) {
         if (entry.track_title) {
           expect(typeof entry.track_title).toBe('string');
         }
@@ -98,17 +77,14 @@ describe('Generated Type Parsing (E2E)', () => {
     });
 
     it('handles metadata fields correctly', async () => {
-      const response = await client.get<unknown[]>('/flowsheet?limit=50');
+      const response = await client.get<FlowsheetEntryResponse[]>('/flowsheet?limit=50');
 
       if (!response.ok) {
         console.log('Skipping: Backend not available');
         return;
       }
 
-      for (const raw of response.body) {
-        const entry = FlowsheetEntryResponseFromJSON(raw);
-
-        // Nullable fields should be undefined or the correct type
+      for (const entry of response.body) {
         if (entry.artwork_url !== undefined && entry.artwork_url !== null) {
           expect(typeof entry.artwork_url).toBe('string');
         }
@@ -124,7 +100,7 @@ describe('Generated Type Parsing (E2E)', () => {
 
   describe('AlbumSearchResult', () => {
     it('parses real library search results', async () => {
-      const response = await client.get<unknown[]>('/library?n=10');
+      const response = await client.get<AlbumSearchResult[]>('/library?n=10');
 
       if (!response.ok) {
         console.log('Skipping: Backend not available');
@@ -133,17 +109,13 @@ describe('Generated Type Parsing (E2E)', () => {
 
       expect(Array.isArray(response.body)).toBe(true);
 
-      for (const raw of response.body) {
-        const album: AlbumSearchResult = AlbumSearchResultFromJSON(raw);
-
-        // Required fields
+      for (const album of response.body) {
         expect(typeof album.id).toBe('number');
         expect(typeof album.album_title).toBe('string');
         expect(typeof album.artist_name).toBe('string');
         expect(typeof album.code_letters).toBe('string');
         expect(typeof album.code_number).toBe('number');
 
-        // Optional rotation fields
         if (album.rotation_bin) {
           expect(['H', 'M', 'L', 'S']).toContain(album.rotation_bin);
         }
@@ -153,7 +125,7 @@ describe('Generated Type Parsing (E2E)', () => {
 
   describe('ScheduleShift', () => {
     it('parses real schedule shifts with day enum', async () => {
-      const response = await client.get<unknown[]>('/schedule/shifts');
+      const response = await client.get<ScheduleShift[]>('/schedule/shifts');
 
       if (!response.ok) {
         console.log('Skipping: Backend not available');
@@ -164,9 +136,7 @@ describe('Generated Type Parsing (E2E)', () => {
 
       const validDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-      for (const raw of response.body) {
-        const shift: ScheduleShift = ScheduleShiftFromJSON(raw);
-
+      for (const shift of response.body) {
         expect(typeof shift.id).toBe('number');
         expect(typeof shift.dj_id).toBe('number');
         expect(typeof shift.dj_name).toBe('string');
@@ -179,7 +149,7 @@ describe('Generated Type Parsing (E2E)', () => {
 
   describe('FormatEntry', () => {
     it('parses format entries', async () => {
-      const response = await client.get<unknown[]>('/library/formats');
+      const response = await client.get<FormatEntry[]>('/library/formats');
 
       if (!response.ok) {
         console.log('Skipping: Backend not available');
@@ -189,9 +159,7 @@ describe('Generated Type Parsing (E2E)', () => {
       expect(Array.isArray(response.body)).toBe(true);
       expect(response.body.length).toBeGreaterThan(0);
 
-      for (const raw of response.body) {
-        const format: FormatEntry = FormatEntryFromJSON(raw);
-
+      for (const format of response.body) {
         expect(typeof format.id).toBe('number');
         expect(typeof format.format_name).toBe('string');
       }
@@ -200,7 +168,7 @@ describe('Generated Type Parsing (E2E)', () => {
 
   describe('GenreEntry', () => {
     it('parses genre entries with genre enum', async () => {
-      const response = await client.get<unknown[]>('/library/genres');
+      const response = await client.get<GenreEntry[]>('/library/genres');
 
       if (!response.ok) {
         console.log('Skipping: Backend not available');
@@ -223,9 +191,7 @@ describe('Generated Type Parsing (E2E)', () => {
         'Unknown',
       ];
 
-      for (const raw of response.body) {
-        const genre: GenreEntry = GenreEntryFromJSON(raw);
-
+      for (const genre of response.body) {
         expect(typeof genre.id).toBe('number');
         expect(validGenres).toContain(genre.genre_name);
         expect(typeof genre.code_letters).toBe('string');
@@ -235,7 +201,7 @@ describe('Generated Type Parsing (E2E)', () => {
 
   describe('OnAirDJ', () => {
     it('parses on-air DJ list', async () => {
-      const response = await client.get<unknown[]>('/flowsheet/djs-on-air');
+      const response = await client.get<OnAirDJ[]>('/flowsheet/djs-on-air');
 
       if (!response.ok) {
         console.log('Skipping: Backend not available');
@@ -244,9 +210,7 @@ describe('Generated Type Parsing (E2E)', () => {
 
       expect(Array.isArray(response.body)).toBe(true);
 
-      for (const raw of response.body) {
-        const dj: OnAirDJ = OnAirDJFromJSON(raw);
-
+      for (const dj of response.body) {
         expect(typeof dj.id).toBe('number');
         expect(typeof dj.dj_name).toBe('string');
       }
@@ -255,7 +219,7 @@ describe('Generated Type Parsing (E2E)', () => {
 
   describe('Rotation', () => {
     it('parses rotation entries with bin enum', async () => {
-      const response = await client.get<unknown[]>('/library/rotation');
+      const response = await client.get<Rotation[]>('/library/rotation');
 
       if (!response.ok) {
         console.log('Skipping: Backend not available');
@@ -266,10 +230,7 @@ describe('Generated Type Parsing (E2E)', () => {
 
       const validBins = ['H', 'M', 'L', 'S'];
 
-      for (const raw of response.body) {
-        const rotation: Rotation = RotationFromJSON(raw);
-
-        // Check key fields
+      for (const rotation of response.body) {
         if (rotation.id !== undefined) {
           expect(typeof rotation.id).toBe('number');
         }
