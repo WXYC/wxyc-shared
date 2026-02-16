@@ -39,7 +39,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "prepare": "npm run build",
+    "prepare": "npm run generate:typescript && npm run build",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
