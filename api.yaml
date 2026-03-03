@@ -1981,6 +1981,133 @@ components:
           additionalProperties: true
           description: Cache hit/miss statistics from the lookup
 
+    # ===================
+    # Proxy / Config Types
+    # ===================
+
+    AppConfig:
+      type: object
+      required:
+        - posthogApiKey
+        - posthogHost
+        - requestOMaticUrl
+        - apiBaseUrl
+      properties:
+        posthogApiKey:
+          type: string
+          description: PostHog analytics write key (public by design)
+        posthogHost:
+          type: string
+          description: PostHog ingestion host
+        requestOMaticUrl:
+          type: string
+          description: Request-o-matic service URL for song requests
+        apiBaseUrl:
+          type: string
+          description: Backend API base URL
+
+    AlbumMetadataResponse:
+      type: object
+      properties:
+        discogsReleaseId:
+          type: integer
+          description: Discogs release ID
+        discogsUrl:
+          type: string
+          description: Discogs release page URL
+        releaseYear:
+          type: integer
+          description: Release year from Discogs
+        artworkUrl:
+          type: string
+          description: Album artwork image URL
+        spotifyUrl:
+          type: string
+          description: Spotify URL for the album or track
+        appleMusicUrl:
+          type: string
+          description: Apple Music URL for the album or track
+        youtubeMusicUrl:
+          type: string
+          description: YouTube Music search URL
+        bandcampUrl:
+          type: string
+          description: Bandcamp search URL
+        soundcloudUrl:
+          type: string
+          description: SoundCloud search URL
+
+    ArtistMetadataResponse:
+      type: object
+      properties:
+        discogsArtistId:
+          type: integer
+          description: Discogs artist ID
+        bio:
+          type: string
+          description: Artist biography from Discogs (markup cleaned)
+        wikipediaUrl:
+          type: string
+          description: Wikipedia URL for the artist
+
+    ArtworkSearchResponse:
+      type: object
+      properties:
+        artworkUrl:
+          type: string
+          nullable: true
+          description: Best-match artwork image URL
+        source:
+          type: string
+          nullable: true
+          description: Provider that supplied the artwork (e.g. "discogs")
+        confidence:
+          type: number
+          format: double
+          description: Confidence score of the match (0-1)
+
+    EntityResolveResponse:
+      type: object
+      required:
+        - name
+        - type
+        - id
+      properties:
+        name:
+          type: string
+          description: Entity name
+        type:
+          type: string
+          enum:
+            - artist
+            - release
+            - master
+          description: Discogs entity type
+        id:
+          type: integer
+          description: Discogs entity ID
+
+    SpotifyTrackResponse:
+      type: object
+      required:
+        - title
+        - artist
+        - album
+      properties:
+        title:
+          type: string
+          description: Track title
+        artist:
+          type: string
+          description: Primary artist name
+        album:
+          type: string
+          description: Album name
+        artworkUrl:
+          type: string
+          nullable: true
+          description: Album artwork URL from Spotify
+
 security:
   - BearerAuth: []
 
@@ -2948,6 +3075,227 @@ paths:
                 $ref: '#/components/schemas/LookupResponse'
         '422':
           description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  # ===================
+  # Config & Proxy Endpoints
+  # ===================
+
+  /config:
+    get:
+      summary: Get app bootstrap configuration
+      description: Returns non-sensitive configuration for app bootstrap. Unauthenticated.
+      security: []
+      responses:
+        '200':
+          description: App configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppConfig'
+
+  /proxy/artwork/search:
+    get:
+      summary: Search for album artwork
+      description: Searches for album artwork via Discogs-backed ArtworkFinder. Requires anonymous session auth.
+      parameters:
+        - name: artistName
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Artist name to search for
+        - name: releaseTitle
+          in: query
+          schema:
+            type: string
+          description: Release/album title
+      responses:
+        '200':
+          description: Artwork search result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtworkSearchResponse'
+        '400':
+          description: Missing required parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /proxy/metadata/album:
+    get:
+      summary: Get album metadata
+      description: Fetches album metadata from Discogs, Spotify, Apple Music, and search URL providers. Requires anonymous session auth.
+      parameters:
+        - name: artistName
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Artist name
+        - name: releaseTitle
+          in: query
+          schema:
+            type: string
+          description: Release/album title
+        - name: trackTitle
+          in: query
+          schema:
+            type: string
+          description: Track title (used as fallback if releaseTitle not provided)
+      responses:
+        '200':
+          description: Album metadata from multiple providers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumMetadataResponse'
+        '400':
+          description: Missing required parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /proxy/metadata/artist:
+    get:
+      summary: Get artist metadata
+      description: Fetches artist bio and Wikipedia URL from Discogs by artist ID. Requires anonymous session auth.
+      parameters:
+        - name: artistId
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Discogs artist ID
+      responses:
+        '200':
+          description: Artist metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistMetadataResponse'
+        '400':
+          description: Missing or invalid parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Artist not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /proxy/entity/resolve:
+    get:
+      summary: Resolve a Discogs entity
+      description: Resolves a Discogs entity (artist, release, or master) by type and ID. Requires anonymous session auth.
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - artist
+              - release
+              - master
+          description: Entity type
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Discogs entity ID
+      responses:
+        '200':
+          description: Resolved entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntityResolveResponse'
+        '400':
+          description: Missing or invalid parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Entity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /proxy/spotify/track/{id}:
+    get:
+      summary: Get Spotify track metadata
+      description: Fetches track metadata from Spotify using backend credentials. Requires anonymous session auth.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Spotify track ID
+      responses:
+        '200':
+          description: Spotify track metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpotifyTrackResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Track not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '502':
+          description: Spotify API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: Spotify integration not configured
           content:
             application/json:
               schema:
