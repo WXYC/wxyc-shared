@@ -31,3 +31,4 @@ generated/
 src/generated/
 openapitools.json
 .api-base-temp.yaml
+worklog/
