@@ -14,7 +14,7 @@ describe('Flowsheet E2E', () => {
 
   beforeAll(async () => {
     // Wait for backend to be ready
-    await waitForService(`${config.baseUrl}/health`);
+    await waitForService(`${config.baseUrl}/healthcheck`);
     client = createE2EClient();
   });
 

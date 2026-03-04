@@ -168,3 +168,126 @@ export async function waitForService(
 
   throw new Error(`Service at ${url} did not become ready within ${timeoutMs}ms`);
 }
+
+/**
+ * Authentication helper for E2E tests.
+ * Signs in via better-auth and obtains a JWT for backend requests.
+ */
+export class E2EAuthHelper {
+  private authUrl: string;
+  private sessionCookies: string[] = [];
+
+  constructor(authUrl: string) {
+    this.authUrl = authUrl;
+  }
+
+  /**
+   * Sign in with email/password via better-auth.
+   * Returns the session cookies for subsequent requests.
+   */
+  async signIn(email: string, password: string): Promise<{ cookies: string[]; session: unknown }> {
+    const response = await fetch(`${this.authUrl}/sign-in/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+      redirect: 'manual',
+    });
+
+    if (!response.ok && response.status !== 302) {
+      const body = await response.text().catch(() => '');
+      throw new Error(
+        `Sign-in failed with status ${response.status}: ${body}`
+      );
+    }
+
+    // Extract Set-Cookie headers
+    this.sessionCookies = extractSetCookieHeaders(response.headers);
+
+    const session = response.headers.get('content-type')?.includes('json')
+      ? await response.json()
+      : null;
+
+    return { cookies: this.sessionCookies, session };
+  }
+
+  /**
+   * Get a JWT token using the session cookies from a prior sign-in.
+   * Returns the decoded payload alongside the raw token.
+   */
+  async getJWTToken(): Promise<{ token: string; payload: Record<string, unknown> } | null> {
+    if (this.sessionCookies.length === 0) {
+      throw new Error('Must call signIn() before getJWTToken()');
+    }
+
+    const cookieHeader = this.sessionCookies
+      .map((c) => c.split(';')[0])
+      .join('; ');
+
+    const response = await fetch(`${this.authUrl}/token`, {
+      method: 'GET',
+      headers: { cookie: cookieHeader },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as { token?: string };
+    const token = data.token;
+    if (!token) {
+      return null;
+    }
+
+    // Decode JWT payload (no verification — the backend does that)
+    const payloadB64 = token.split('.')[1];
+    const payload = JSON.parse(
+      Buffer.from(payloadB64, 'base64url').toString('utf-8')
+    );
+
+    return { token, payload };
+  }
+
+  /**
+   * Convenience: sign in and immediately configure an E2EClient with the JWT.
+   */
+  async authenticateClient(
+    client: E2EClient,
+    email: string,
+    password: string
+  ): Promise<{ payload: Record<string, unknown> }> {
+    await this.signIn(email, password);
+    const jwt = await this.getJWTToken();
+
+    if (!jwt) {
+      throw new Error('Failed to obtain JWT after sign-in');
+    }
+
+    client.setAuthToken(jwt.token);
+    return { payload: jwt.payload };
+  }
+}
+
+/**
+ * Extract Set-Cookie header values from a Response.
+ * Handles runtimes where getSetCookie() may not be available.
+ */
+function extractSetCookieHeaders(headers: Headers): string[] {
+  if (typeof headers.getSetCookie === 'function') {
+    const cookies = headers.getSetCookie();
+    if (cookies.length > 0) return cookies;
+  }
+
+  const raw = headers.get('set-cookie');
+  if (!raw) return [];
+
+  // Split on ", " followed by a cookie-name=
+  return raw.split(/,\s*(?=[A-Za-z0-9_.-]+=)/).map((s) => s.trim());
+}
+
+/**
+ * Create an auth helper using the E2E config
+ */
+export function createE2EAuthHelper(config?: Partial<E2EConfig>): E2EAuthHelper {
+  const merged = { ...getE2EConfig(), ...config };
+  return new E2EAuthHelper(merged.authUrl);
+}
