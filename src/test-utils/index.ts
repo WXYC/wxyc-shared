@@ -9,3 +9,4 @@ export * from './factories.js';
 export * from './assertions.js';
 export * from './constants.js';
 export * from './time.js';
+export * from './wxyc-example-data.js';
