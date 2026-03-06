@@ -1,0 +1,74 @@
+import { describe, it, expect } from 'vitest';
+import {
+  wxycExampleArtists,
+  wxycExampleAlbums,
+  wxycExampleFlowsheetEntries,
+  wxycExampleSearchResults,
+  wxycExampleArtistList,
+  wxycExampleAlbumList,
+  wxycExampleFlowsheetList,
+} from '../src/test-utils/wxyc-example-data.js';
+
+describe('WXYC Example Data', () => {
+  it('provides exactly 6 example artists', () => {
+    expect(wxycExampleArtistList).toHaveLength(6);
+  });
+
+  it('provides exactly 5 example albums', () => {
+    expect(wxycExampleAlbumList).toHaveLength(5);
+  });
+
+  it('provides exactly 4 example flowsheet entries', () => {
+    expect(wxycExampleFlowsheetList).toHaveLength(4);
+  });
+
+  it('artist IDs are in the 8000 range', () => {
+    for (const artist of wxycExampleArtistList) {
+      expect(artist.id).toBeGreaterThanOrEqual(8000);
+      expect(artist.id).toBeLessThan(9000);
+    }
+  });
+
+  it('album IDs are in the 9000 range', () => {
+    for (const album of wxycExampleAlbumList) {
+      expect(album.id).toBeGreaterThanOrEqual(9000);
+      expect(album.id).toBeLessThan(10000);
+    }
+  });
+
+  it('flowsheet entry IDs are in the 10000 range', () => {
+    for (const entry of wxycExampleFlowsheetList) {
+      expect(entry.id).toBeGreaterThanOrEqual(10000);
+      expect(entry.id).toBeLessThan(11000);
+    }
+  });
+
+  it('album artist_ids reference valid example artists', () => {
+    const artistIds = new Set(wxycExampleArtistList.map(a => a.id));
+    for (const album of wxycExampleAlbumList) {
+      expect(artistIds.has(album.artist_id)).toBe(true);
+    }
+  });
+
+  it('does not include mainstream artists', () => {
+    const mainstream = ['Queen', 'Radiohead', 'Beatles', 'Led Zeppelin', 'Nirvana'];
+    for (const artist of wxycExampleArtistList) {
+      for (const name of mainstream) {
+        expect(artist.artist_name).not.toContain(name);
+      }
+    }
+  });
+
+  it('named objects match convenience arrays', () => {
+    expect(Object.values(wxycExampleArtists)).toEqual(wxycExampleArtistList);
+    expect(Object.values(wxycExampleAlbums)).toEqual(wxycExampleAlbumList);
+    expect(Object.values(wxycExampleFlowsheetEntries)).toEqual(wxycExampleFlowsheetList);
+  });
+
+  it('search results reference valid artist names', () => {
+    const artistNames = new Set(wxycExampleArtistList.map(a => a.artist_name));
+    for (const result of Object.values(wxycExampleSearchResults)) {
+      expect(artistNames.has(result.artist_name)).toBe(true);
+    }
+  });
+});

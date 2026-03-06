@@ -1,6 +1,6 @@
 {
   "name": "@wxyc/shared",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Shared DTOs, validation, test utilities, and E2E tests for WXYC services",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -56,7 +56,8 @@
   },
   "files": [
     "dist",
-    "api.yaml"
+    "api.yaml",
+    "src/test-utils/wxyc-example-data.json"
   ],
   "devDependencies": {
     "@openapitools/openapi-generator-cli": "^2.15.3",
