@@ -55,6 +55,8 @@ TEST_HOST=http://localhost
 AUTH_BYPASS=true
 AUTH_USERNAME=test_dj1
 AUTH_PASSWORD=testpassword123
+TUBAFRENZY_URL=http://localhost:8080
+MIRROR_API_KEY=wxyc-local-dev-mirror-key
 EOF
 }
 
