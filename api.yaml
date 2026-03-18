@@ -315,6 +315,10 @@ components:
       properties:
         message:
           type: string
+        entry_type:
+          type: string
+          enum: [talkset, breakpoint, message]
+          description: Explicit entry type. If omitted, the backend infers from message content.
 
     FlowsheetUpdateRequest:
       type: object
