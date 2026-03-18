@@ -8,6 +8,7 @@
 export interface E2EConfig {
   baseUrl: string;
   authUrl: string;
+  tubafrenzyUrl: string;
   testDjEmail?: string;
   testDjPassword?: string;
 }
@@ -19,6 +20,7 @@ export function getE2EConfig(): E2EConfig {
   return {
     baseUrl: process.env.E2E_BASE_URL || 'http://localhost:8080',
     authUrl: process.env.E2E_AUTH_URL || 'http://localhost:8081/auth',
+    tubafrenzyUrl: process.env.E2E_TUBAFRENZY_URL || 'http://localhost:8080',
     testDjEmail: process.env.E2E_TEST_DJ_EMAIL,
     testDjPassword: process.env.E2E_TEST_DJ_PASSWORD,
   };
@@ -290,4 +292,31 @@ function extractSetCookieHeaders(headers: Headers): string[] {
 export function createE2EAuthHelper(config?: Partial<E2EConfig>): E2EAuthHelper {
   const merged = { ...getE2EConfig(), ...config };
   return new E2EAuthHelper(merged.authUrl);
+}
+
+/**
+ * Poll a function until it returns a non-null value or times out.
+ *
+ * @param fn - Async function that returns `null` when the condition is not yet met
+ * @param timeoutMs - Maximum time to wait (default 15s)
+ * @param intervalMs - Delay between polls (default 500ms)
+ * @returns The first non-null value returned by `fn`
+ * @throws Error if the timeout is reached
+ */
+export async function pollUntil<T>(
+  fn: () => Promise<T | null>,
+  timeoutMs = 15000,
+  intervalMs = 500
+): Promise<T> {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const result = await fn();
+    if (result !== null) {
+      return result;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(`pollUntil timed out after ${timeoutMs}ms`);
 }
