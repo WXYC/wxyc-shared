@@ -978,7 +978,7 @@ components:
       properties:
         artist_name:
           type: string
-        album_name:
+        album_title:
           type: string
         n:
           type: integer
