@@ -55,8 +55,8 @@ describe('Catalog E2E', () => {
       expect(Array.isArray(response.body)).toBe(true);
     });
 
-    it.skipIf(!hasCredentials)('should search albums by album name', async () => {
-      const response = await client.get<AlbumSearchResult[]>('/library?album_name=test');
+    it.skipIf(!hasCredentials)('should search albums by album title', async () => {
+      const response = await client.get<AlbumSearchResult[]>('/library?album_title=test');
 
       expect(response.ok).toBe(true);
       expect(Array.isArray(response.body)).toBe(true);
