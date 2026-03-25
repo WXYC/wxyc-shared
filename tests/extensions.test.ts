@@ -29,6 +29,7 @@ describe('Type Guards', () => {
         play_order: 100,
         show_id: 1,
         request_flag: false,
+        segue: false,
         track_title: 'Test Song',
         artist_name: 'Test Artist',
         album_title: 'Test Album',
@@ -44,6 +45,7 @@ describe('Type Guards', () => {
         play_order: 101,
         show_id: 1,
         request_flag: false,
+        segue: false,
         message: 'Talkset - station ID',
       };
 
@@ -56,6 +58,7 @@ describe('Type Guards', () => {
         play_order: 102,
         show_id: 1,
         request_flag: false,
+        segue: false,
       };
 
       expect(isFlowsheetSongEntry(entry)).toBe(false);
@@ -83,6 +86,7 @@ describe('Type Guards', () => {
         play_order: 100,
         show_id: 1,
         request_flag: false,
+        segue: false,
         track_title: 'Test Song',
       };
 
@@ -157,6 +161,7 @@ describe('Type Guards', () => {
         play_order: 100,
         show_id: 1,
         request_flag: false,
+        segue: false,
         message: 'Station announcement',
       };
 
@@ -169,6 +174,7 @@ describe('Type Guards', () => {
         play_order: 100,
         show_id: 1,
         request_flag: false,
+        segue: false,
         track_title: 'Test Song',
       };
 
@@ -197,6 +203,7 @@ describe('Type Guards', () => {
         play_order: 100,
         show_id: 1,
         request_flag: false,
+        segue: false,
         message: 'Talkset - station ID',
       };
 
@@ -209,6 +216,7 @@ describe('Type Guards', () => {
         play_order: 100,
         show_id: 1,
         request_flag: false,
+        segue: false,
         message: 'General announcement',
       };
 
@@ -223,6 +231,7 @@ describe('Type Guards', () => {
         play_order: 100,
         show_id: 1,
         request_flag: false,
+        segue: false,
         message: 'Breakpoint - 3:00 PM',
       };
 
@@ -235,6 +244,7 @@ describe('Type Guards', () => {
         play_order: 100,
         show_id: 1,
         request_flag: false,
+        segue: false,
         message: 'Regular message',
       };
 
@@ -291,6 +301,7 @@ describe('Union Types', () => {
         album_title: 'Album',
         record_label: 'Label',
         request_flag: false,
+        segue: false,
       };
 
       expect(isFlowsheetSongEntry(entry)).toBe(true);
