@@ -52,6 +52,7 @@ const sampleTrack: FlowsheetV2TrackEntry = {
   track_title: 'Paranoid Android',
   record_label: 'Parlophone',
   request_flag: false,
+  segue: false,
   rotation_bin: 'H',
   album_id: 1001,
   rotation_id: 5001,
@@ -167,6 +168,15 @@ describe('V2 Generated Types', () => {
       };
 
       expect(entry.show_id).toBeNull();
+    });
+
+    it('should accept segue: true on a track entry', () => {
+      const entry: FlowsheetV2TrackEntry = {
+        ...sampleTrack,
+        segue: true,
+      };
+
+      expect(entry.segue).toBe(true);
     });
   });
 

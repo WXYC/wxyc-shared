@@ -171,6 +171,8 @@ components:
               $ref: '#/components/schemas/RotationBin'
             request_flag:
               type: boolean
+            segue:
+              type: boolean
             # Message/breakpoint fields
             message:
               type: string
@@ -230,6 +232,8 @@ components:
               type: integer
             request_flag:
               type: boolean
+            segue:
+              type: boolean
             album_id:
               type: integer
             rotation_id:
@@ -284,6 +288,8 @@ components:
           type: integer
         request_flag:
           type: boolean
+        segue:
+          type: boolean
         record_label:
           type: string
 
@@ -302,6 +308,8 @@ components:
         track_title:
           type: string
         request_flag:
+          type: boolean
+        segue:
           type: boolean
         record_label:
           type: string
@@ -334,6 +342,8 @@ components:
         label_id:
           type: integer
         request_flag:
+          type: boolean
+        segue:
           type: boolean
 
     FlowsheetQueryParams:
@@ -498,6 +508,8 @@ components:
               type: string
               nullable: true
             request_flag:
+              type: boolean
+            segue:
               type: boolean
             rotation_bin:
               $ref: '#/components/schemas/RotationBin'

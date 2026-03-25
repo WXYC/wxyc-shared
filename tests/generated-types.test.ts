@@ -29,6 +29,7 @@ describe('Generated TypeScript Types', () => {
         play_order: 100,
         show_id: 42,
         request_flag: false,
+        segue: false,
         track_title: 'Test Song',
         album_title: 'Test Album',
         artist_name: 'Test Artist',
@@ -47,6 +48,7 @@ describe('Generated TypeScript Types', () => {
         play_order: 1,
         show_id: 1,
         request_flag: false,
+        segue: false,
         artwork_url: null,
         spotify_url: null,
         release_year: null,
@@ -62,6 +64,7 @@ describe('Generated TypeScript Types', () => {
         play_order: 50,
         show_id: 42,
         request_flag: false,
+        segue: false,
         message: 'Talkset - station ID',
       };
 

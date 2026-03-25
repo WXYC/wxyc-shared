@@ -118,6 +118,7 @@ export const testFlowsheetEntry: FlowsheetEntryResponse = {
   rotation_id: undefined,
   rotation_bin: undefined,
   request_flag: false,
+  segue: false,
 };
 
 export const testFlowsheetSongEntry: FlowsheetSongEntry = {
@@ -129,6 +130,7 @@ export const testFlowsheetSongEntry: FlowsheetSongEntry = {
   artist_name: 'Test Artist',
   record_label: 'Test Label',
   request_flag: false,
+  segue: false,
   album_id: 1,
 };
 
@@ -156,6 +158,7 @@ export const testV2TrackEntry: FlowsheetV2TrackEntry = {
   track_title: 'Test Track',
   record_label: 'Test Label',
   request_flag: false,
+  segue: false,
   rotation_bin: 'H',
 };
 
