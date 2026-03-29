@@ -2010,6 +2010,22 @@ components:
           type: string
           description: Backend API base URL
 
+    TrackListItem:
+      type: object
+      required:
+        - position
+        - title
+      properties:
+        position:
+          type: string
+          description: Track position (e.g. "1", "A1")
+        title:
+          type: string
+          description: Track title
+        duration:
+          type: string
+          description: Track duration (e.g. "5:23")
+
     AlbumMetadataResponse:
       type: object
       properties:
@@ -2025,6 +2041,30 @@ components:
         artworkUrl:
           type: string
           description: Album artwork image URL
+        genres:
+          type: array
+          items:
+            type: string
+          description: Discogs genre classifications
+        styles:
+          type: array
+          items:
+            type: string
+          description: Discogs style classifications (more specific than genres)
+        label:
+          type: string
+          description: Primary record label name
+        discogsArtistId:
+          type: integer
+          description: Discogs artist ID, for linking to artist metadata
+        fullReleaseDate:
+          type: string
+          description: Full release date when available (e.g. "2024-03-15")
+        tracklist:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackListItem'
+          description: Release tracklist
         spotifyUrl:
           type: string
           description: Spotify URL for the album or track
@@ -2049,10 +2089,13 @@ components:
           description: Discogs artist ID
         bio:
           type: string
-          description: Artist biography from Discogs (markup cleaned)
+          description: Artist biography from Discogs
         wikipediaUrl:
           type: string
           description: Wikipedia URL for the artist
+        imageUrl:
+          type: string
+          description: Artist image URL from Discogs
 
     ArtworkSearchResponse:
       type: object

@@ -13,6 +13,9 @@ import {
   type DJ,
   type ScheduleShift,
   type SongRequest,
+  type AlbumMetadataResponse,
+  type ArtistMetadataResponse,
+  type TrackListItem,
   RotationBin,
   DayOfWeek,
   Genre,
@@ -181,6 +184,93 @@ describe('Generated TypeScript Types', () => {
       };
 
       expect(request.status).toBe('pending');
+    });
+  });
+
+  describe('AlbumMetadataResponse', () => {
+    it('should accept enriched metadata fields', () => {
+      const response: AlbumMetadataResponse = {
+        discogsReleaseId: 12345,
+        releaseYear: 2024,
+        artworkUrl: 'https://example.com/art.jpg',
+        genres: ['Electronic', 'Experimental'],
+        styles: ['IDM', 'Ambient'],
+        label: 'Warp',
+        discogsArtistId: 67890,
+        fullReleaseDate: '2024-03-15',
+        tracklist: [
+          { position: '1', title: 'VI Scose Poise', duration: '5:23' },
+          { position: '2', title: 'Cfern' },
+        ],
+      };
+
+      expect(response.genres).toEqual(['Electronic', 'Experimental']);
+      expect(response.styles).toEqual(['IDM', 'Ambient']);
+      expect(response.label).toBe('Warp');
+      expect(response.discogsArtistId).toBe(67890);
+      expect(response.fullReleaseDate).toBe('2024-03-15');
+      expect(response.tracklist).toHaveLength(2);
+      expect(response.tracklist![0].duration).toBe('5:23');
+      expect(response.tracklist![1].duration).toBeUndefined();
+    });
+
+    it('should allow omitting all new optional fields', () => {
+      const response: AlbumMetadataResponse = {
+        discogsReleaseId: 12345,
+        artworkUrl: 'https://example.com/art.jpg',
+      };
+
+      expect(response.genres).toBeUndefined();
+      expect(response.styles).toBeUndefined();
+      expect(response.label).toBeUndefined();
+      expect(response.discogsArtistId).toBeUndefined();
+      expect(response.fullReleaseDate).toBeUndefined();
+      expect(response.tracklist).toBeUndefined();
+    });
+  });
+
+  describe('ArtistMetadataResponse', () => {
+    it('should accept imageUrl field', () => {
+      const response: ArtistMetadataResponse = {
+        discogsArtistId: 67890,
+        bio: 'Autechre are an English electronic music duo...',
+        wikipediaUrl: 'https://en.wikipedia.org/wiki/Autechre',
+        imageUrl: 'https://example.com/artist.jpg',
+      };
+
+      expect(response.imageUrl).toBe('https://example.com/artist.jpg');
+    });
+
+    it('should allow omitting imageUrl', () => {
+      const response: ArtistMetadataResponse = {
+        discogsArtistId: 67890,
+        bio: 'Autechre are an English electronic music duo...',
+      };
+
+      expect(response.imageUrl).toBeUndefined();
+    });
+  });
+
+  describe('TrackListItem', () => {
+    it('should require position and title', () => {
+      const track: TrackListItem = {
+        position: 'A1',
+        title: 'VI Scose Poise',
+      };
+
+      expect(track.position).toBe('A1');
+      expect(track.title).toBe('VI Scose Poise');
+      expect(track.duration).toBeUndefined();
+    });
+
+    it('should accept optional duration', () => {
+      const track: TrackListItem = {
+        position: '1',
+        title: 'VI Scose Poise',
+        duration: '5:23',
+      };
+
+      expect(track.duration).toBe('5:23');
     });
   });
 

@@ -214,6 +214,49 @@ describe('OpenAPI Specification', () => {
     it('should define DiscogsRelease', () => {
       expect(spec.components.schemas.DiscogsRelease).toBeDefined();
     });
+
+    it('should define TrackListItem schema', () => {
+      const schema = spec.components.schemas.TrackListItem as {
+        type: string;
+        required: string[];
+        properties: Record<string, { type: string }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.type).toBe('object');
+      expect(schema.required).toEqual(['position', 'title']);
+      expect(schema.properties.position.type).toBe('string');
+      expect(schema.properties.title.type).toBe('string');
+      expect(schema.properties.duration.type).toBe('string');
+    });
+  });
+
+  describe('Proxy Response Schemas', () => {
+    it('should define AlbumMetadataResponse with enriched fields', () => {
+      const schema = spec.components.schemas.AlbumMetadataResponse as {
+        properties: Record<string, { type: string; items?: { $ref?: string } }>;
+      };
+      expect(schema.properties.genres).toBeDefined();
+      expect(schema.properties.genres.type).toBe('array');
+      expect(schema.properties.styles).toBeDefined();
+      expect(schema.properties.styles.type).toBe('array');
+      expect(schema.properties.label).toBeDefined();
+      expect(schema.properties.label.type).toBe('string');
+      expect(schema.properties.discogsArtistId).toBeDefined();
+      expect(schema.properties.discogsArtistId.type).toBe('integer');
+      expect(schema.properties.fullReleaseDate).toBeDefined();
+      expect(schema.properties.fullReleaseDate.type).toBe('string');
+      expect(schema.properties.tracklist).toBeDefined();
+      expect(schema.properties.tracklist.type).toBe('array');
+      expect(schema.properties.tracklist.items?.$ref).toBe('#/components/schemas/TrackListItem');
+    });
+
+    it('should define ArtistMetadataResponse with imageUrl', () => {
+      const schema = spec.components.schemas.ArtistMetadataResponse as {
+        properties: Record<string, { type: string }>;
+      };
+      expect(schema.properties.imageUrl).toBeDefined();
+      expect(schema.properties.imageUrl.type).toBe('string');
+    });
   });
 
   describe('API Endpoints', () => {
