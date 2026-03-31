@@ -1892,6 +1892,10 @@ components:
         format:
           type: string
           description: Physical format (vinyl, CD, etc.)
+        label:
+          type: string
+          nullable: true
+          description: Record label name from the library catalog
         call_number:
           type: string
           description: >
