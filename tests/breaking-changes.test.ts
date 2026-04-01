@@ -1,53 +1,73 @@
 /**
  * Tests for OpenAPI breaking change detection
  *
- * These tests validate the breaking change detection logic and ensure
- * the CI pipeline can correctly identify API changes that would break
- * existing clients.
+ * These tests validate breaking change detection using oasdiff (Go CLI)
+ * and ensure the CI pipeline can correctly identify API changes that
+ * would break existing clients.
+ *
+ * Prerequisites: brew install oasdiff
  *
  * Uses minimal inline specs for fast, focused tests.
  */
 
-import { describe, it, expect } from 'vitest';
-// @ts-expect-error - openapi-diff doesn't have TS declarations
-import openapiDiff from 'openapi-diff';
+import { describe, it, expect, afterEach } from 'vitest';
+import { execSync } from 'child_process';
+import { writeFileSync, unlinkSync, existsSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 interface DiffResult {
   breakingDifferencesFound: boolean;
-  breakingDifferences?: BreakingDifference[];
-  nonBreakingDifferences?: unknown[];
-  unclassifiedDifferences?: unknown[];
+  output: string;
 }
 
-interface BreakingDifference {
-  type: string;
-  entity: string;
-  action: string;
-  sourceSpecEntityDetails: unknown[];
-  destinationSpecEntityDetails: unknown[];
-}
+const tempFiles: string[] = [];
+
+afterEach(() => {
+  for (const f of tempFiles) {
+    if (existsSync(f)) unlinkSync(f);
+  }
+  tempFiles.length = 0;
+});
 
 /**
- * Run openapi-diff to detect breaking changes
+ * Run oasdiff breaking check between two specs.
+ * Returns whether breaking changes were found (ERR-level).
  */
-async function detectBreakingChanges(
-  oldSpec: string,
-  newSpec: string
-): Promise<DiffResult> {
-  const result = await openapiDiff.diffSpecs({
-    sourceSpec: { content: oldSpec, location: 'old-spec.yaml', format: 'openapi3' },
-    destinationSpec: { content: newSpec, location: 'new-spec.yaml', format: 'openapi3' },
-  });
-  return result;
+function detectBreakingChanges(oldSpec: string, newSpec: string): DiffResult {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const oldPath = join(tmpdir(), `oasdiff-old-${id}.json`);
+  const newPath = join(tmpdir(), `oasdiff-new-${id}.json`);
+
+  writeFileSync(oldPath, oldSpec);
+  writeFileSync(newPath, newSpec);
+  tempFiles.push(oldPath, newPath);
+
+  try {
+    const output = execSync(`oasdiff breaking "${oldPath}" "${newPath}" --fail-on ERR`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return { breakingDifferencesFound: false, output };
+  } catch (error) {
+    const err = error as { status: number; stdout?: string; stderr?: string };
+    // oasdiff exits 1 when breaking changes found with --fail-on
+    if (err.status === 1) {
+      return { breakingDifferencesFound: true, output: err.stdout || err.stderr || '' };
+    }
+    throw error;
+  }
 }
 
 /**
  * Create a minimal OpenAPI spec with customizable components
  */
-function createMinimalSpec(options: {
-  paths?: Record<string, unknown>;
-  schemas?: Record<string, unknown>;
-} = {}): string {
+function createMinimalSpec(
+  options: {
+    paths?: Record<string, unknown>;
+    schemas?: Record<string, unknown>;
+  } = {}
+): string {
   const spec = {
     openapi: '3.0.0',
     info: { title: 'Test API', version: '1.0.0' },
@@ -87,7 +107,7 @@ function createMinimalSpec(options: {
 
 describe('Breaking Change Detection', () => {
   describe('Schema Changes', () => {
-    it('should detect removing a required field as breaking', async () => {
+    it('should detect removing a required field as breaking', () => {
       const oldSpec = createMinimalSpec({
         schemas: {
           TestModel: {
@@ -114,11 +134,11 @@ describe('Breaking Change Detection', () => {
         },
       });
 
-      const result = await detectBreakingChanges(oldSpec, newSpec);
+      const result = detectBreakingChanges(oldSpec, newSpec);
       expect(result.breakingDifferencesFound).toBe(true);
     });
 
-    it('should detect changing a field type as breaking', async () => {
+    it('should detect changing a field type as breaking', () => {
       const oldSpec = createMinimalSpec({
         schemas: {
           TestModel: {
@@ -143,13 +163,13 @@ describe('Breaking Change Detection', () => {
         },
       });
 
-      const result = await detectBreakingChanges(oldSpec, newSpec);
+      const result = detectBreakingChanges(oldSpec, newSpec);
       expect(result.breakingDifferencesFound).toBe(true);
     });
 
-    // Note: openapi-diff doesn't detect enum value removal as breaking
-    // This is a known limitation - for full enum coverage, consider oasdiff (Go tool)
-    it.skip('should detect removing an enum value as breaking (not supported by openapi-diff)', async () => {
+    // oasdiff classifies response enum value removal as info-level, not error,
+    // because removing a value from a response doesn't break client requests.
+    it('should NOT flag removing a response enum value as breaking (info-level)', () => {
       const oldSpec = createMinimalSpec({
         paths: {
           '/status': {
@@ -202,11 +222,72 @@ describe('Breaking Change Detection', () => {
         },
       });
 
-      const result = await detectBreakingChanges(oldSpec, newSpec);
+      const result = detectBreakingChanges(oldSpec, newSpec);
+      expect(result.breakingDifferencesFound).toBe(false);
+    });
+
+    it('should detect removing a request enum value as breaking', () => {
+      const oldSpec = createMinimalSpec({
+        paths: {
+          '/status': {
+            post: {
+              summary: 'Set status',
+              requestBody: {
+                required: true,
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/StatusRequest' },
+                  },
+                },
+              },
+              responses: { '200': { description: 'Success' } },
+            },
+          },
+        },
+        schemas: {
+          StatusRequest: {
+            type: 'object',
+            required: ['status'],
+            properties: {
+              status: { type: 'string', enum: ['pending', 'active', 'completed'] },
+            },
+          },
+        },
+      });
+
+      const newSpec = createMinimalSpec({
+        paths: {
+          '/status': {
+            post: {
+              summary: 'Set status',
+              requestBody: {
+                required: true,
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/StatusRequest' },
+                  },
+                },
+              },
+              responses: { '200': { description: 'Success' } },
+            },
+          },
+        },
+        schemas: {
+          StatusRequest: {
+            type: 'object',
+            required: ['status'],
+            properties: {
+              status: { type: 'string', enum: ['pending', 'active'] }, // 'completed' removed
+            },
+          },
+        },
+      });
+
+      const result = detectBreakingChanges(oldSpec, newSpec);
       expect(result.breakingDifferencesFound).toBe(true);
     });
 
-    it('should NOT flag adding an optional field as breaking', async () => {
+    it('should NOT flag adding an optional field as breaking', () => {
       const oldSpec = createMinimalSpec({
         schemas: {
           TestModel: {
@@ -232,11 +313,11 @@ describe('Breaking Change Detection', () => {
         },
       });
 
-      const result = await detectBreakingChanges(oldSpec, newSpec);
+      const result = detectBreakingChanges(oldSpec, newSpec);
       expect(result.breakingDifferencesFound).toBe(false);
     });
 
-    it('should NOT flag adding a new enum value as breaking', async () => {
+    it('should NOT flag adding a new enum value as breaking', () => {
       const oldSpec = createMinimalSpec({
         paths: {
           '/status': {
@@ -289,13 +370,13 @@ describe('Breaking Change Detection', () => {
         },
       });
 
-      const result = await detectBreakingChanges(oldSpec, newSpec);
+      const result = detectBreakingChanges(oldSpec, newSpec);
       expect(result.breakingDifferencesFound).toBe(false);
     });
   });
 
   describe('Endpoint Changes', () => {
-    it('should detect removing an endpoint as breaking', async () => {
+    it('should detect removing an endpoint as breaking', () => {
       const oldSpec = createMinimalSpec({
         paths: {
           '/users': {
@@ -325,11 +406,11 @@ describe('Breaking Change Detection', () => {
         },
       });
 
-      const result = await detectBreakingChanges(oldSpec, newSpec);
+      const result = detectBreakingChanges(oldSpec, newSpec);
       expect(result.breakingDifferencesFound).toBe(true);
     });
 
-    it('should detect removing an HTTP method as breaking', async () => {
+    it('should detect removing an HTTP method as breaking', () => {
       const oldSpec = createMinimalSpec({
         paths: {
           '/users': {
@@ -357,11 +438,11 @@ describe('Breaking Change Detection', () => {
         },
       });
 
-      const result = await detectBreakingChanges(oldSpec, newSpec);
+      const result = detectBreakingChanges(oldSpec, newSpec);
       expect(result.breakingDifferencesFound).toBe(true);
     });
 
-    it('should NOT flag adding a new endpoint as breaking', async () => {
+    it('should NOT flag adding a new endpoint as breaking', () => {
       const oldSpec = createMinimalSpec({
         paths: {
           '/users': {
@@ -390,15 +471,15 @@ describe('Breaking Change Detection', () => {
         },
       });
 
-      const result = await detectBreakingChanges(oldSpec, newSpec);
+      const result = detectBreakingChanges(oldSpec, newSpec);
       expect(result.breakingDifferencesFound).toBe(false);
     });
   });
 
   describe('Self-consistency', () => {
-    it('identical specs should have no breaking changes', async () => {
+    it('identical specs should have no breaking changes', () => {
       const spec = createMinimalSpec();
-      const result = await detectBreakingChanges(spec, spec);
+      const result = detectBreakingChanges(spec, spec);
       expect(result.breakingDifferencesFound).toBe(false);
     });
   });
