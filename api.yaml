@@ -908,6 +908,9 @@ components:
           type: integer
         plays:
           type: integer
+        on_streaming:
+          type: boolean
+          description: True if this release is available on at least one streaming service. False means only available in the WXYC physical library. Null if unknown.
 
     AddAlbumRequest:
       type: object
@@ -1905,6 +1908,9 @@ components:
         library_url:
           type: string
           description: URL to view this release in the WXYC library
+        on_streaming:
+          type: boolean
+          description: True if this release is available on at least one streaming service. False means only available in the WXYC physical library. Null if unknown.
 
     DiscogsMatchResult:
       type: object
