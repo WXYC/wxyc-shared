@@ -16,7 +16,7 @@ databases:
   postgres-nard:
     plugin: postgresql
     description: >
-      Discogs metadata cache. Populated by discogs-cache ETL.
+      Discogs metadata cache. Populated by discogs-etl ETL.
       Shared by request-o-matic and library-metadata-lookup.
 
 # ---------------------------------------------------------------------------

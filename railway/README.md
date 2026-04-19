@@ -12,7 +12,7 @@ flowchart TB
     LML[library-metadata-lookup<br/>WXYC/library-metadata-lookup]
     SQLite[(library.db<br/>SQLite)]
     PG[(Postgres-Nard<br/>Discogs cache)]
-    ETL[discogs-cache ETL<br/>WXYC/discogs-cache]
+    ETL[discogs-etl ETL<br/>WXYC/discogs-etl]
 
     ROM --> Slack
     ROM --> Groq
@@ -51,7 +51,7 @@ Searches the library catalog and cross-references with Discogs metadata. Extract
 
 ### Postgres-Nard
 
-PostgreSQL database used as a Discogs metadata cache. Populated by the [discogs-cache](https://github.com/WXYC/discogs-cache) ETL pipeline.
+PostgreSQL database used as a Discogs metadata cache. Populated by the [discogs-etl](https://github.com/WXYC/discogs-etl) ETL pipeline.
 
 Shared by both request-o-matic and library-metadata-lookup via the `DATABASE_URL_DISCOGS` environment variable.
 
