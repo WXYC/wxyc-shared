@@ -870,6 +870,9 @@ components:
           type: integer
         alternate_artist_name:
           type: string
+        album_artist:
+          type: string
+          description: Credited album artist for compilations (e.g., "Kruder & Dorfmeister" on a DJ-Kicks release filed under Various Artists).
 
     AlbumSearchResult:
       type: object
@@ -923,6 +926,9 @@ components:
         on_streaming:
           type: boolean
           description: True if this release is available on at least one streaming service. False means only available in the WXYC physical library. Null if unknown.
+        album_artist:
+          type: string
+          description: Credited album artist for compilations.
 
     AddAlbumRequest:
       type: object
@@ -949,6 +955,8 @@ components:
         disc_quantity:
           type: integer
         alternate_artist_name:
+          type: string
+        album_artist:
           type: string
 
     Label:
