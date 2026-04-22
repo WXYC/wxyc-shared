@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      better-auth:
+        patterns:
+          - "better-auth"
+          - "@better-auth/*"
+      dev-dependencies:
+        dependency-type: "development"
+        exclude-patterns:
+          - "better-auth"
+          - "@better-auth/*"
+      production-dependencies:
+        dependency-type: "production"
+        exclude-patterns:
+          - "better-auth"
+          - "@better-auth/*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
