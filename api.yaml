@@ -543,6 +543,10 @@ components:
             artist_wikipedia_url:
               type: string
               nullable: true
+            on_streaming:
+              type: boolean
+              nullable: true
+              description: Whether this album is available on streaming platforms. False means WXYC library exclusive. Null if unknown.
 
     FlowsheetV2ShowStartEntry:
       description: V2 show start event - when a show begins
