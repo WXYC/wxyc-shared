@@ -929,6 +929,14 @@ components:
         album_artist:
           type: string
           description: Credited album artist for compilations.
+        date_lost:
+          type: string
+          format: date-time
+          description: When the release was marked missing from the physical library. Null if in library.
+        date_found:
+          type: string
+          format: date-time
+          description: When a previously missing release was found. Null if never lost.
 
     AddAlbumRequest:
       type: object
@@ -2962,6 +2970,60 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/TrackSearchResult'
+
+  /library/{id}/missing:
+    patch:
+      summary: Mark album as missing from library
+      tags:
+        - Library
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Successfully marked album as missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumSearchResult'
+        '404':
+          description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/{id}/found:
+    patch:
+      summary: Mark album as found in library
+      tags:
+        - Library
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Successfully marked album as found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumSearchResult'
+        '404':
+          description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /schedule:
     get:
