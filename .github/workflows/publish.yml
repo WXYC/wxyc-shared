@@ -21,6 +21,9 @@ jobs:
           registry-url: 'https://npm.pkg.github.com'
           scope: '@wxyc'
 
+      - name: Install oasdiff
+        run: GOBIN=/usr/local/bin go install github.com/oasdiff/oasdiff@latest
+
       - name: Install dependencies (skip build)
         run: npm ci --ignore-scripts
 
