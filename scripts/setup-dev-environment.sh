@@ -61,6 +61,7 @@ BETTER_AUTH_JWKS_URL=http://localhost:${auth_port}/auth/jwks
 BETTER_AUTH_ISSUER=http://localhost:${auth_port}
 BETTER_AUTH_AUDIENCE=http://localhost:${auth_port}
 BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:${frontend_port}
+FRONTEND_SOURCE=http://localhost:${frontend_port}
 TEST_HOST=http://localhost
 AUTH_BYPASS=true
 AUTH_USERNAME=test_dj1
@@ -98,7 +99,7 @@ find_available_port() {
             echo "$port"
             return 0
         fi
-        log_warn "Port $port is in use, trying $((port + 1))..."
+        log_warn "Port $port is in use, trying $((port + 1))..." >&2
         port=$((port + 1))
     done
     log_error "Could not find an available port starting from $1"
@@ -420,6 +421,7 @@ NEXT_PUBLIC_DASHBOARD_HOME_PAGE=/dashboard/flowsheet
 NEXT_PUBLIC_DEFAULT_EXPERIENCE=modern
 NEXT_PUBLIC_ENABLED_EXPERIENCES=modern,classic
 NEXT_PUBLIC_ALLOW_EXPERIENCE_SWITCHING=true
+NEXT_PUBLIC_ONBOARDING_TEMP_PASSWORD=temppass123
 EOF
     log_success ".env.local written"
 
