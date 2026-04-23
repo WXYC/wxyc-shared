@@ -941,6 +941,10 @@ components:
           type: string
           format: date-time
           description: When a previously missing release was found. Null if never lost.
+        artwork_url:
+          type: string
+          nullable: true
+          description: Album cover artwork URL from Discogs. Null if artwork has not been fetched yet or is unavailable.
 
     AddAlbumRequest:
       type: object
