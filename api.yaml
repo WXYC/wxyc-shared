@@ -2027,6 +2027,511 @@ components:
           additionalProperties: true
           description: Cache hit/miss statistics from the lookup
 
+    # ====================================
+    # LML Discogs & Metadata Service Types
+    # ====================================
+
+    DiscogsSearchRequest:
+      type: object
+      properties:
+        artist:
+          type: string
+        album:
+          type: string
+        track:
+          type: string
+        label:
+          type: string
+        format:
+          type: string
+
+    DiscogsEnrichedSearchResult:
+      type: object
+      description: A single search result from LML's Discogs search, enriched with streaming URLs and metadata.
+      required:
+        - release_id
+        - release_url
+      properties:
+        album:
+          type: string
+          nullable: true
+        artist:
+          type: string
+          nullable: true
+        release_id:
+          type: integer
+        release_url:
+          type: string
+        artwork_url:
+          type: string
+          nullable: true
+        confidence:
+          type: number
+          default: 0
+        release_year:
+          type: integer
+          nullable: true
+        artist_bio:
+          type: string
+          nullable: true
+        wikipedia_url:
+          type: string
+          nullable: true
+        spotify_url:
+          type: string
+          nullable: true
+        apple_music_url:
+          type: string
+          nullable: true
+        youtube_music_url:
+          type: string
+          nullable: true
+        bandcamp_url:
+          type: string
+          nullable: true
+        soundcloud_url:
+          type: string
+          nullable: true
+
+    DiscogsSearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscogsEnrichedSearchResult'
+          default: []
+        total:
+          type: integer
+          default: 0
+        cached:
+          type: boolean
+          default: false
+
+    DiscogsTrackItem:
+      type: object
+      description: A track on a release, with optional per-track artist credits (for compilations).
+      required:
+        - position
+        - title
+      properties:
+        position:
+          type: string
+        title:
+          type: string
+        duration:
+          type: string
+          nullable: true
+        artists:
+          type: array
+          items:
+            type: string
+          default: []
+
+    DiscogsArtistCredit:
+      type: object
+      description: An artist credit on a release (performer, producer, etc.).
+      required:
+        - name
+      properties:
+        artist_id:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        join:
+          type: string
+          default: ""
+          description: Join phrase (e.g. " & ", ", ")
+        role:
+          type: string
+          nullable: true
+          description: Role for extra artists (e.g. "Producer", "Mixed By")
+
+    DiscogsLabelCredit:
+      type: object
+      required:
+        - name
+      properties:
+        label_id:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        catno:
+          type: string
+          nullable: true
+          description: Catalog number
+
+    DiscogsReleaseVideo:
+      type: object
+      required:
+        - src
+      properties:
+        src:
+          type: string
+        title:
+          type: string
+          nullable: true
+        duration:
+          type: integer
+          nullable: true
+          description: Duration in seconds
+        embed:
+          type: boolean
+          default: true
+
+    DiscogsReleaseMetadata:
+      type: object
+      description: Full release metadata from LML, including tracklist and enriched credits.
+      required:
+        - release_id
+        - title
+        - artist
+        - release_url
+      properties:
+        release_id:
+          type: integer
+        title:
+          type: string
+        artist:
+          type: string
+        year:
+          type: integer
+          nullable: true
+        label:
+          type: string
+          nullable: true
+        artist_id:
+          type: integer
+          nullable: true
+        label_id:
+          type: integer
+          nullable: true
+        genres:
+          type: array
+          items:
+            type: string
+          default: []
+        styles:
+          type: array
+          items:
+            type: string
+          default: []
+        tracklist:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscogsTrackItem'
+          default: []
+        artwork_url:
+          type: string
+          nullable: true
+        release_url:
+          type: string
+        cached:
+          type: boolean
+          default: false
+        artists:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscogsArtistCredit'
+          default: []
+        extra_artists:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscogsArtistCredit'
+          default: []
+        labels:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscogsLabelCredit'
+          default: []
+        released:
+          type: string
+          nullable: true
+          description: Release date as ISO string
+        videos:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscogsReleaseVideo'
+          default: []
+
+    DiscogsResolvedToken:
+      type: object
+      description: A single resolved token from Discogs markup parsing. Discriminated by the `type` field.
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - plainText
+            - artistLink
+            - labelName
+            - releaseLink
+            - masterLink
+            - bold
+            - italic
+            - underline
+            - urlLink
+        text:
+          type: string
+          description: Content for plainText tokens
+        name:
+          type: string
+          description: Name for artistLink and labelName tokens
+        display_name:
+          type: string
+          description: Display name for artistLink tokens (disambiguation suffix stripped)
+        title:
+          type: string
+          description: Title for releaseLink and masterLink tokens
+        url:
+          type: string
+          description: URL for artistLink, releaseLink, masterLink tokens
+        href:
+          type: string
+          nullable: true
+          description: URL for urlLink tokens (null if URL is invalid)
+        content:
+          type: string
+          description: Content for bold, italic, underline, and urlLink tokens
+
+    DiscogsArtistDetails:
+      type: object
+      description: Full artist details from Discogs, including bio, aliases, and group members.
+      required:
+        - artist_id
+        - name
+      properties:
+        artist_id:
+          type: integer
+        name:
+          type: string
+        profile:
+          type: string
+          nullable: true
+        profile_tokens:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/DiscogsResolvedToken'
+          description: Pre-parsed structured tokens from the Discogs profile markup
+        image_url:
+          type: string
+          nullable: true
+        name_variations:
+          type: array
+          items:
+            type: string
+          default: []
+        aliases:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+          default: []
+        members:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              active:
+                type: boolean
+                default: true
+          default: []
+        urls:
+          type: array
+          items:
+            type: string
+          default: []
+        cached:
+          type: boolean
+          default: false
+
+    DiscogsReleaseInfo:
+      type: object
+      description: A single release from the track-releases search.
+      required:
+        - album
+        - artist
+        - release_id
+        - release_url
+      properties:
+        album:
+          type: string
+        artist:
+          type: string
+        release_id:
+          type: integer
+        release_url:
+          type: string
+        is_compilation:
+          type: boolean
+          default: false
+
+    DiscogsTrackReleasesResponse:
+      type: object
+      description: Response from LML's track-releases search endpoint.
+      properties:
+        track:
+          type: string
+        artist:
+          type: string
+          nullable: true
+        releases:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscogsReleaseInfo'
+          default: []
+        total:
+          type: integer
+          default: 0
+        cached:
+          type: boolean
+          default: false
+
+    # ============================
+    # Library Search Types
+    # ============================
+
+    LibrarySearchItem:
+      type: object
+      description: A single item from LML's library catalog search.
+      required:
+        - id
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+          nullable: true
+        artist:
+          type: string
+          nullable: true
+        call_letters:
+          type: string
+          nullable: true
+        artist_call_number:
+          type: integer
+          nullable: true
+        release_call_number:
+          type: integer
+          nullable: true
+        genre:
+          type: string
+          nullable: true
+        format:
+          type: string
+          nullable: true
+        alternate_artist_name:
+          type: string
+          nullable: true
+        label:
+          type: string
+          nullable: true
+        on_streaming:
+          type: boolean
+          nullable: true
+        call_number:
+          type: string
+          description: Computed call number (e.g. "Rock CD S 1/1")
+        library_url:
+          type: string
+          description: URL to the release on wxyc.info
+
+    LibrarySearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/LibrarySearchItem'
+        total:
+          type: integer
+        query:
+          type: string
+          nullable: true
+
+    # ============================
+    # Streaming Check Types
+    # ============================
+
+    StreamingCheckRequest:
+      type: object
+      required:
+        - artist
+        - title
+      properties:
+        artist:
+          type: string
+          description: Artist name to search for
+        title:
+          type: string
+          description: Album title to search for
+
+    StreamingSourceMatch:
+      type: object
+      description: A match found on a single streaming service.
+      required:
+        - url
+        - confidence
+      properties:
+        url:
+          type: string
+          description: URL to the matched album on the service
+        confidence:
+          type: number
+          description: Match confidence score (0-100)
+
+    StreamingCheckSources:
+      type: object
+      description: Per-service streaming match results.
+      properties:
+        spotify:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/StreamingSourceMatch'
+        deezer:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/StreamingSourceMatch'
+        apple_music:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/StreamingSourceMatch'
+        bandcamp:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/StreamingSourceMatch'
+
+    StreamingCheckResponse:
+      type: object
+      required:
+        - on_streaming
+        - sources
+      properties:
+        on_streaming:
+          type: boolean
+          nullable: true
+          description: True if found on any service, false if absent on all, null if inconclusive.
+        sources:
+          $ref: '#/components/schemas/StreamingCheckSources'
+
     # ===================
     # Proxy / Config Types
     # ===================
