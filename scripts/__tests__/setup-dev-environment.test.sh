@@ -186,6 +186,18 @@ teardown() {
     grep -q "start_frontend()" "$SCRIPT_PATH"
 }
 
+@test "script defines is_port_available function" {
+    grep -q "is_port_available()" "$SCRIPT_PATH"
+}
+
+@test "script defines find_available_port function" {
+    grep -q "find_available_port()" "$SCRIPT_PATH"
+}
+
+@test "script defines resolve_ports function" {
+    grep -q "resolve_ports()" "$SCRIPT_PATH"
+}
+
 # =============================================================================
 # Safety Tests
 # =============================================================================
@@ -225,8 +237,41 @@ teardown() {
 }
 
 @test "generate_backend_env includes required variables" {
-    grep -q "PORT=8080" "$SCRIPT_PATH"
+    # PORT= should appear in the template (parameterized, not hardcoded)
+    grep -A30 "generate_backend_env()" "$SCRIPT_PATH" | grep -q "PORT="
     grep -q "DB_HOST=localhost" "$SCRIPT_PATH"
     grep -q "BETTER_AUTH_URL=" "$SCRIPT_PATH"
     grep -q "AUTH_BYPASS=" "$SCRIPT_PATH"
+}
+
+@test "generate_backend_env includes AUTH_PORT" {
+    grep -A30 "generate_backend_env()" "$SCRIPT_PATH" | grep -q "AUTH_PORT="
+}
+
+# =============================================================================
+# Port Resolution Tests
+# =============================================================================
+
+@test "is_port_available uses lsof to check ports" {
+    grep -A5 "is_port_available()" "$SCRIPT_PATH" | grep -q "lsof"
+}
+
+@test "find_available_port skips already-resolved ports" {
+    grep -A20 "find_available_port()" "$SCRIPT_PATH" | grep -q "RESOLVED_PORTS"
+}
+
+@test "resolve_ports reads backend .env in frontend-only mode" {
+    grep -A30 "resolve_ports()" "$SCRIPT_PATH" | grep -q "FRONTEND_ONLY"
+}
+
+@test "frontend is started with dynamic PORT" {
+    grep -q 'PORT=\$FRONTEND_PORT npm run dev' "$SCRIPT_PATH"
+}
+
+@test "backend .env is always regenerated with backup" {
+    grep -q '\.env\.bak' "$SCRIPT_PATH"
+}
+
+@test "frontend .env.local is always regenerated with backup" {
+    grep -q '\.env\.local\.bak' "$SCRIPT_PATH"
 }
