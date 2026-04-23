@@ -7,6 +7,11 @@
 # - dj-site (Frontend)
 # - PostgreSQL database
 #
+# Ports are assigned dynamically. If the default port (8080, 8082, 3000) is
+# occupied, the next available port is used. The .env and .env.local files are
+# regenerated on each run to match the resolved ports (previous versions are
+# backed up to .env.bak / .env.local.bak).
+#
 # Usage: ./setup-dev-environment.sh [OPTIONS]
 #
 # Options:
@@ -35,27 +40,32 @@ log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
-# Generate default .env content for Backend-Service
+# Generate .env content for Backend-Service with resolved ports
 generate_backend_env() {
-    cat << 'EOF'
-PORT=8080
+    local backend_port=$1
+    local auth_port=$2
+    local frontend_port=$3
+
+    cat << EOF
+PORT=${backend_port}
 CI_PORT=8081
+AUTH_PORT=${auth_port}
 DB_HOST=localhost
 DB_NAME=wxyc_db
 DB_USERNAME=postgres
 DB_PASSWORD=postgres
 DB_PORT=5432
 CI_DB_PORT=5433
-BETTER_AUTH_URL=http://localhost:8082/auth
-BETTER_AUTH_JWKS_URL=http://localhost:8082/auth/jwks
-BETTER_AUTH_ISSUER=http://localhost:8082
-BETTER_AUTH_AUDIENCE=http://localhost:8082
-BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:3000
+BETTER_AUTH_URL=http://localhost:${auth_port}/auth
+BETTER_AUTH_JWKS_URL=http://localhost:${auth_port}/auth/jwks
+BETTER_AUTH_ISSUER=http://localhost:${auth_port}
+BETTER_AUTH_AUDIENCE=http://localhost:${auth_port}
+BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:${frontend_port}
 TEST_HOST=http://localhost
 AUTH_BYPASS=true
 AUTH_USERNAME=test_dj1
 AUTH_PASSWORD=testpassword123
-TUBAFRENZY_URL=http://localhost:8080
+TUBAFRENZY_URL=http://localhost:${backend_port}
 MIRROR_API_KEY=wxyc-local-dev-mirror-key
 EOF
 }
@@ -70,6 +80,29 @@ log_warn() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+# Port utility functions
+
+is_port_available() {
+    ! lsof -iTCP:"$1" -sTCP:LISTEN -P -n >/dev/null 2>&1
+}
+
+RESOLVED_PORTS=()
+
+find_available_port() {
+    local port=$1
+    for (( i=0; i<20; i++ )); do
+        if is_port_available "$port" && [[ ! " ${RESOLVED_PORTS[*]:-} " =~ " $port " ]]; then
+            RESOLVED_PORTS+=("$port")
+            echo "$port"
+            return 0
+        fi
+        log_warn "Port $port is in use, trying $((port + 1))..."
+        port=$((port + 1))
+    done
+    log_error "Could not find an available port starting from $1"
+    return 1
 }
 
 # Default configuration
@@ -89,10 +122,15 @@ FRONTEND_ONLY=false
 BACKEND_REPO="git@github.com:WXYC/Backend-Service.git"
 FRONTEND_REPO="git@github.com:WXYC/dj-site.git"
 
-# Service URLs for health checks
+# Service URLs for health checks (updated by resolve_ports)
 BACKEND_URL="http://localhost:8080"
 AUTH_URL="http://localhost:8082"
 FRONTEND_URL="http://localhost:3000"
+
+# Default ports
+DEFAULT_BACKEND_PORT=8080
+DEFAULT_AUTH_PORT=8082
+DEFAULT_FRONTEND_PORT=3000
 
 # Health check timeout (seconds)
 HEALTH_CHECK_TIMEOUT=60
@@ -227,6 +265,37 @@ check_dependencies() {
     log_success "All dependencies satisfied"
 }
 
+resolve_ports() {
+    log_info "Resolving available ports..."
+
+    if [[ "$FRONTEND_ONLY" == true ]]; then
+        # Backend is already running -- read its ports from existing .env
+        local backend_env="$WXYC_DEV_ROOT/Backend-Service/.env"
+        if [[ -f "$backend_env" ]]; then
+            BACKEND_PORT=$(grep '^PORT=' "$backend_env" | cut -d= -f2)
+            AUTH_PORT=$(grep '^AUTH_PORT=' "$backend_env" | cut -d= -f2)
+        fi
+        BACKEND_PORT=${BACKEND_PORT:-$DEFAULT_BACKEND_PORT}
+        AUTH_PORT=${AUTH_PORT:-$DEFAULT_AUTH_PORT}
+        log_info "Using backend ports from .env: backend=$BACKEND_PORT, auth=$AUTH_PORT"
+    else
+        BACKEND_PORT=$(find_available_port $DEFAULT_BACKEND_PORT) || exit 1
+        AUTH_PORT=$(find_available_port $DEFAULT_AUTH_PORT) || exit 1
+        log_success "Backend port: $BACKEND_PORT"
+        log_success "Auth port: $AUTH_PORT"
+    fi
+
+    if [[ "$BACKEND_ONLY" != true ]]; then
+        FRONTEND_PORT=$(find_available_port $DEFAULT_FRONTEND_PORT) || exit 1
+        log_success "Frontend port: $FRONTEND_PORT"
+    fi
+
+    # Update service URLs used for health checks and the banner
+    BACKEND_URL="http://localhost:$BACKEND_PORT"
+    AUTH_URL="http://localhost:$AUTH_PORT"
+    FRONTEND_URL="http://localhost:${FRONTEND_PORT:-$DEFAULT_FRONTEND_PORT}"
+}
+
 setup_repository() {
     local repo_url=$1
     local repo_dir=$2
@@ -299,12 +368,14 @@ wait_for_health() {
 start_backend_services() {
     local backend_dir="$WXYC_DEV_ROOT/Backend-Service"
 
-    # Create .env if it doesn't exist
-    if [[ ! -f "$backend_dir/.env" ]]; then
-        log_info "Creating default .env for backend..."
-        generate_backend_env > "$backend_dir/.env"
-        log_success ".env created"
+    # Always (re)generate .env with resolved ports
+    if [[ -f "$backend_dir/.env" ]]; then
+        cp "$backend_dir/.env" "$backend_dir/.env.bak"
+        log_info "Backed up existing .env to .env.bak"
     fi
+    log_info "Writing .env with resolved ports (backend=$BACKEND_PORT, auth=$AUTH_PORT)..."
+    generate_backend_env "$BACKEND_PORT" "$AUTH_PORT" "${FRONTEND_PORT:-$DEFAULT_FRONTEND_PORT}" > "$backend_dir/.env"
+    log_success ".env written"
 
     log_info "Starting PostgreSQL database..."
     cd "$backend_dir"
@@ -336,23 +407,25 @@ start_backend_services() {
 start_frontend() {
     local frontend_dir="$WXYC_DEV_ROOT/dj-site"
 
-    # Create .env.local if it doesn't exist
-    if [[ ! -f "$frontend_dir/.env.local" ]]; then
-        log_info "Creating .env.local for frontend..."
-        cat > "$frontend_dir/.env.local" << EOF
-NEXT_PUBLIC_BACKEND_URL=http://localhost:8080
-NEXT_PUBLIC_BETTER_AUTH_URL=http://localhost:8082/auth
+    # Always (re)generate .env.local with resolved ports
+    if [[ -f "$frontend_dir/.env.local" ]]; then
+        cp "$frontend_dir/.env.local" "$frontend_dir/.env.local.bak"
+        log_info "Backed up existing .env.local to .env.local.bak"
+    fi
+    log_info "Writing .env.local with resolved ports..."
+    cat > "$frontend_dir/.env.local" << EOF
+NEXT_PUBLIC_BACKEND_URL=http://localhost:${BACKEND_PORT}
+NEXT_PUBLIC_BETTER_AUTH_URL=http://localhost:${AUTH_PORT}/auth
 NEXT_PUBLIC_DASHBOARD_HOME_PAGE=/dashboard/flowsheet
 NEXT_PUBLIC_DEFAULT_EXPERIENCE=modern
 NEXT_PUBLIC_ENABLED_EXPERIENCES=modern,classic
 NEXT_PUBLIC_ALLOW_EXPERIENCE_SWITCHING=true
 EOF
-        log_success ".env.local created"
-    fi
+    log_success ".env.local written"
 
-    log_info "Starting frontend..."
+    log_info "Starting frontend on port $FRONTEND_PORT..."
     cd "$frontend_dir"
-    npm run dev &
+    PORT=$FRONTEND_PORT npm run dev &
     FRONTEND_PID=$!
     cd - > /dev/null
 
@@ -379,6 +452,11 @@ print_success_banner() {
 
     if [[ "$BACKEND_ONLY" != true ]]; then
         echo -e "  Frontend:     ${BLUE}$FRONTEND_URL${NC}"
+    fi
+
+    if [[ "${BACKEND_PORT:-}" != "$DEFAULT_BACKEND_PORT" || "${AUTH_PORT:-}" != "$DEFAULT_AUTH_PORT" || "${FRONTEND_PORT:-}" != "$DEFAULT_FRONTEND_PORT" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}NOTE: Some ports differ from defaults because the default ports were occupied.${NC}"
     fi
 
     echo ""
@@ -421,6 +499,9 @@ main() {
 
     # Check dependencies
     check_dependencies
+
+    # Resolve available ports before any env file generation
+    resolve_ports
 
     # Set up repositories
     if [[ "$FRONTEND_ONLY" != true ]]; then
