@@ -107,6 +107,61 @@ find_available_port() {
     return 1
 }
 
+# Kill a process and all its children
+kill_tree() {
+    local pid=$1
+    if kill -0 "$pid" 2>/dev/null; then
+        # Kill children first, then parent
+        pkill -P "$pid" 2>/dev/null || true
+        kill "$pid" 2>/dev/null || true
+    fi
+}
+
+# Stop services left running from a previous invocation. Reads PIDs from the
+# state file written by save_state() and kills any that are still alive, then
+# waits briefly for ports to be released before port resolution runs.
+stop_previous_services() {
+    if [[ ! -f "$STATE_FILE" ]]; then
+        return
+    fi
+
+    log_info "Cleaning up services from a previous run..."
+    local prev_backend_pid="" prev_frontend_pid="" prev_backend_dir=""
+    # Source is safe here: we wrote this file ourselves
+    source "$STATE_FILE"
+
+    if [[ -n "$prev_backend_pid" ]] && kill -0 "$prev_backend_pid" 2>/dev/null; then
+        log_info "  Stopping previous backend (PID $prev_backend_pid)..."
+        kill_tree "$prev_backend_pid"
+    fi
+
+    if [[ -n "$prev_frontend_pid" ]] && kill -0 "$prev_frontend_pid" 2>/dev/null; then
+        log_info "  Stopping previous frontend (PID $prev_frontend_pid)..."
+        kill_tree "$prev_frontend_pid"
+    fi
+
+    # Stop the previous Docker database if the backend dir is known
+    if [[ -n "$prev_backend_dir" && -d "$prev_backend_dir" ]]; then
+        log_info "  Stopping previous database..."
+        (cd "$prev_backend_dir" && npm run db:stop 2>/dev/null) || true
+    fi
+
+    rm -f "$STATE_FILE"
+
+    # Brief pause so OS releases the ports
+    sleep 1
+    log_success "Previous services stopped"
+}
+
+# Persist PIDs so the next invocation can clean them up
+save_state() {
+    cat > "$STATE_FILE" << EOF
+prev_backend_pid=${BACKEND_PID:-}
+prev_frontend_pid=${FRONTEND_PID:-}
+prev_backend_dir=${BACKEND_DIR:-}
+EOF
+}
+
 # Default configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Default to parent of wxyc-shared (so repos are siblings)
@@ -119,10 +174,14 @@ SKIP_CLONE=false
 SKIP_DEPS=false
 BACKEND_ONLY=false
 FRONTEND_ONLY=false
+SERVICES_STARTED=false
 
 # Directory overrides (e.g., for worktrees)
 BACKEND_DIR=""
 FRONTEND_DIR=""
+
+# State file for tracking PIDs across runs
+STATE_FILE=""  # Set after WXYC_DEV_ROOT is resolved
 
 # Repository URLs
 BACKEND_REPO="git@github.com:WXYC/Backend-Service.git"
@@ -292,7 +351,7 @@ resolve_ports() {
 
     if [[ "$FRONTEND_ONLY" == true ]]; then
         # Backend is already running -- read its ports from existing .env
-        local backend_env="$WXYC_DEV_ROOT/Backend-Service/.env"
+        local backend_env="$BACKEND_DIR/.env"
         if [[ -f "$backend_env" ]]; then
             BACKEND_PORT=$(grep '^PORT=' "$backend_env" | cut -d= -f2)
             AUTH_PORT=$(grep '^AUTH_PORT=' "$backend_env" | cut -d= -f2)
@@ -448,6 +507,21 @@ NEXT_PUBLIC_ONBOARDING_TEMP_PASSWORD=temppass123
 EOF
     log_success ".env.local written"
 
+    # Remove stale Next.js lock file from a previous crash
+    local lock_file="$frontend_dir/.next/dev/lock"
+    if [[ -f "$lock_file" ]]; then
+        # Check whether the holder is still alive by reading the lock's PID
+        local holder_pid
+        holder_pid=$(lsof -t "$lock_file" 2>/dev/null || true)
+        if [[ -n "$holder_pid" ]]; then
+            log_error "Another Next.js dev server is running in $(basename "$frontend_dir") (PID $holder_pid)"
+            log_error "Stop it first, or use a different directory with --frontend-dir"
+            return 1
+        fi
+        log_warn "Removing stale Next.js lock file"
+        rm -f "$lock_file"
+    fi
+
     log_info "Starting frontend on port $FRONTEND_PORT..."
     cd "$frontend_dir"
     PORT=$FRONTEND_PORT npm run dev &
@@ -496,23 +570,35 @@ print_success_banner() {
 }
 
 cleanup() {
+    # Prevent recursive invocation from the EXIT trap
+    trap - EXIT INT TERM
+
+    local exit_code=$?
+    # Nothing to tear down if services were never started
+    if [[ "$SERVICES_STARTED" != true ]]; then
+        exit "$exit_code"
+    fi
+
     log_info "Shutting down services..."
 
-    # Kill background processes
-    if [[ -n "${BACKEND_PID:-}" ]]; then
-        kill $BACKEND_PID 2>/dev/null || true
-    fi
+    # Kill background process trees (parent + children)
     if [[ -n "${FRONTEND_PID:-}" ]]; then
-        kill $FRONTEND_PID 2>/dev/null || true
+        kill_tree "$FRONTEND_PID"
+    fi
+    if [[ -n "${BACKEND_PID:-}" ]]; then
+        kill_tree "$BACKEND_PID"
     fi
 
     # Stop database
-    if [[ "$FRONTEND_ONLY" != true ]]; then
-        cd "$BACKEND_DIR" 2>/dev/null && npm run db:stop 2>/dev/null || true
+    if [[ "$FRONTEND_ONLY" != true && -n "${BACKEND_DIR:-}" ]]; then
+        (cd "$BACKEND_DIR" 2>/dev/null && npm run db:stop 2>/dev/null) || true
     fi
 
+    # Remove state file since we've cleaned up
+    rm -f "${STATE_FILE:-}"
+
     log_info "Cleanup complete"
-    exit 0
+    exit "$exit_code"
 }
 
 main() {
@@ -525,12 +611,18 @@ main() {
     # Check dependencies
     check_dependencies
 
-    # Resolve available ports before any env file generation
-    resolve_ports
-
-    # Resolve effective directories (--backend-dir/--frontend-dir override defaults)
+    # Resolve effective directories first (needed by resolve_ports and
+    # stop_previous_services)
     BACKEND_DIR="${BACKEND_DIR:-$WXYC_DEV_ROOT/Backend-Service}"
     FRONTEND_DIR="${FRONTEND_DIR:-$WXYC_DEV_ROOT/dj-site}"
+    STATE_FILE="$WXYC_DEV_ROOT/.wxyc-dev-pids"
+
+    # Kill orphan processes from a previous run so their ports are freed
+    # before we resolve new ports
+    stop_previous_services
+
+    # Resolve available ports before any env file generation
+    resolve_ports
 
     # Set up repositories
     if [[ "$FRONTEND_ONLY" != true ]]; then
@@ -543,8 +635,10 @@ main() {
         install_dependencies "$FRONTEND_DIR"
     fi
 
-    # Set up trap for cleanup
-    trap cleanup SIGINT SIGTERM
+    # Set up trap for cleanup — EXIT fires on errors, signals, and normal
+    # exit, preventing orphan processes
+    trap cleanup EXIT INT TERM
+    SERVICES_STARTED=true
 
     # Start services
     if [[ "$FRONTEND_ONLY" != true ]]; then
@@ -561,6 +655,9 @@ main() {
         fi
         start_frontend
     fi
+
+    # Save PIDs so the next run can clean up if we get killed ungracefully
+    save_state
 
     print_success_banner
 
