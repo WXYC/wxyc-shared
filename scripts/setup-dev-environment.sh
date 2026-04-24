@@ -45,6 +45,7 @@ generate_backend_env() {
     local backend_port=$1
     local auth_port=$2
     local frontend_port=$3
+    local db_port=${4:-5432}
 
     cat << EOF
 PORT=${backend_port}
@@ -54,7 +55,7 @@ DB_HOST=localhost
 DB_NAME=wxyc_db
 DB_USERNAME=postgres
 DB_PASSWORD=postgres
-DB_PORT=5432
+DB_PORT=${db_port}
 CI_DB_PORT=5433
 BETTER_AUTH_URL=http://localhost:${auth_port}/auth
 BETTER_AUTH_JWKS_URL=http://localhost:${auth_port}/auth/jwks
@@ -119,6 +120,10 @@ SKIP_DEPS=false
 BACKEND_ONLY=false
 FRONTEND_ONLY=false
 
+# Directory overrides (e.g., for worktrees)
+BACKEND_DIR=""
+FRONTEND_DIR=""
+
 # Repository URLs
 BACKEND_REPO="git@github.com:WXYC/Backend-Service.git"
 FRONTEND_REPO="git@github.com:WXYC/dj-site.git"
@@ -129,6 +134,7 @@ AUTH_URL="http://localhost:8082"
 FRONTEND_URL="http://localhost:3000"
 
 # Default ports
+DEFAULT_DB_PORT=5432
 DEFAULT_BACKEND_PORT=8080
 DEFAULT_AUTH_PORT=8082
 DEFAULT_FRONTEND_PORT=3000
@@ -144,11 +150,13 @@ WXYC Full-Stack Development Environment Setup
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --skip-clone      Skip repository cloning (use existing directories)
-  --skip-deps       Skip npm install
-  --backend-only    Only start backend services (no frontend)
-  --frontend-only   Only start frontend (assumes backend is running)
-  --help            Show this help message
+  --skip-clone          Skip repository cloning (use existing directories)
+  --skip-deps           Skip npm install
+  --backend-only        Only start backend services (no frontend)
+  --frontend-only       Only start frontend (assumes backend is running)
+  --backend-dir <path>  Use a specific directory for Backend-Service (e.g., a worktree)
+  --frontend-dir <path> Use a specific directory for dj-site (e.g., a worktree)
+  --help                Show this help message
 
 Environment Variables:
   WXYC_DEV_ROOT     Directory for WXYC repositories (default: $WXYC_DEV_ROOT)
@@ -167,6 +175,9 @@ Examples:
 
   # Start only backend for API development
   ./$(basename "$0") --backend-only
+
+  # Use a dj-site worktree
+  ./$(basename "$0") --skip-deps --frontend-dir /path/to/dj-site-worktree
 
 EOF
 }
@@ -189,6 +200,16 @@ parse_args() {
             --frontend-only)
                 FRONTEND_ONLY=true
                 shift
+                ;;
+            --backend-dir)
+                BACKEND_DIR="$2"
+                SKIP_CLONE=true
+                shift 2
+                ;;
+            --frontend-dir)
+                FRONTEND_DIR="$2"
+                SKIP_CLONE=true
+                shift 2
                 ;;
             --help|-h)
                 show_help
@@ -280,8 +301,10 @@ resolve_ports() {
         AUTH_PORT=${AUTH_PORT:-$DEFAULT_AUTH_PORT}
         log_info "Using backend ports from .env: backend=$BACKEND_PORT, auth=$AUTH_PORT"
     else
+        DB_PORT=$(find_available_port $DEFAULT_DB_PORT) || exit 1
         BACKEND_PORT=$(find_available_port $DEFAULT_BACKEND_PORT) || exit 1
         AUTH_PORT=$(find_available_port $DEFAULT_AUTH_PORT) || exit 1
+        log_success "Database port: $DB_PORT"
         log_success "Backend port: $BACKEND_PORT"
         log_success "Auth port: $AUTH_PORT"
     fi
@@ -367,7 +390,7 @@ wait_for_health() {
 }
 
 start_backend_services() {
-    local backend_dir="$WXYC_DEV_ROOT/Backend-Service"
+    local backend_dir="$BACKEND_DIR"
 
     # Always (re)generate .env with resolved ports
     if [[ -f "$backend_dir/.env" ]]; then
@@ -375,7 +398,7 @@ start_backend_services() {
         log_info "Backed up existing .env to .env.bak"
     fi
     log_info "Writing .env with resolved ports (backend=$BACKEND_PORT, auth=$AUTH_PORT)..."
-    generate_backend_env "$BACKEND_PORT" "$AUTH_PORT" "${FRONTEND_PORT:-$DEFAULT_FRONTEND_PORT}" > "$backend_dir/.env"
+    generate_backend_env "$BACKEND_PORT" "$AUTH_PORT" "${FRONTEND_PORT:-$DEFAULT_FRONTEND_PORT}" "${DB_PORT:-$DEFAULT_DB_PORT}" > "$backend_dir/.env"
     log_success ".env written"
 
     log_info "Starting PostgreSQL database..."
@@ -406,7 +429,7 @@ start_backend_services() {
 }
 
 start_frontend() {
-    local frontend_dir="$WXYC_DEV_ROOT/dj-site"
+    local frontend_dir="$FRONTEND_DIR"
 
     # Always (re)generate .env.local with resolved ports
     if [[ -f "$frontend_dir/.env.local" ]]; then
@@ -456,7 +479,7 @@ print_success_banner() {
         echo -e "  Frontend:     ${BLUE}$FRONTEND_URL${NC}"
     fi
 
-    if [[ "${BACKEND_PORT:-}" != "$DEFAULT_BACKEND_PORT" || "${AUTH_PORT:-}" != "$DEFAULT_AUTH_PORT" || "${FRONTEND_PORT:-}" != "$DEFAULT_FRONTEND_PORT" ]]; then
+    if [[ "${DB_PORT:-}" != "$DEFAULT_DB_PORT" || "${BACKEND_PORT:-}" != "$DEFAULT_BACKEND_PORT" || "${AUTH_PORT:-}" != "$DEFAULT_AUTH_PORT" || "${FRONTEND_PORT:-}" != "$DEFAULT_FRONTEND_PORT" ]]; then
         echo ""
         echo -e "  ${YELLOW}NOTE: Some ports differ from defaults because the default ports were occupied.${NC}"
     fi
@@ -485,7 +508,7 @@ cleanup() {
 
     # Stop database
     if [[ "$FRONTEND_ONLY" != true ]]; then
-        cd "$WXYC_DEV_ROOT/Backend-Service" 2>/dev/null && npm run db:stop 2>/dev/null || true
+        cd "$BACKEND_DIR" 2>/dev/null && npm run db:stop 2>/dev/null || true
     fi
 
     log_info "Cleanup complete"
@@ -505,15 +528,19 @@ main() {
     # Resolve available ports before any env file generation
     resolve_ports
 
+    # Resolve effective directories (--backend-dir/--frontend-dir override defaults)
+    BACKEND_DIR="${BACKEND_DIR:-$WXYC_DEV_ROOT/Backend-Service}"
+    FRONTEND_DIR="${FRONTEND_DIR:-$WXYC_DEV_ROOT/dj-site}"
+
     # Set up repositories
     if [[ "$FRONTEND_ONLY" != true ]]; then
-        setup_repository "$BACKEND_REPO" "$WXYC_DEV_ROOT/Backend-Service" "$BACKEND_BRANCH"
-        install_dependencies "$WXYC_DEV_ROOT/Backend-Service"
+        setup_repository "$BACKEND_REPO" "$BACKEND_DIR" "$BACKEND_BRANCH"
+        install_dependencies "$BACKEND_DIR"
     fi
 
     if [[ "$BACKEND_ONLY" != true ]]; then
-        setup_repository "$FRONTEND_REPO" "$WXYC_DEV_ROOT/dj-site" "$FRONTEND_BRANCH"
-        install_dependencies "$WXYC_DEV_ROOT/dj-site"
+        setup_repository "$FRONTEND_REPO" "$FRONTEND_DIR" "$FRONTEND_BRANCH"
+        install_dependencies "$FRONTEND_DIR"
     fi
 
     # Set up trap for cleanup
