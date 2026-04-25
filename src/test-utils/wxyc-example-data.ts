@@ -76,3 +76,16 @@ export const wxycExampleSearchResults = {
 export const wxycExampleArtistList = Object.values(wxycExampleArtists);
 export const wxycExampleAlbumList = Object.values(wxycExampleAlbums);
 export const wxycExampleFlowsheetList = Object.values(wxycExampleFlowsheetEntries);
+
+// ============================================================================
+// Canonical Artist Names (broader pool, names only)
+// ============================================================================
+//
+// Representative WXYC artists with 100+ flowsheet plays. Use for graph
+// examples, presentation data, large seed sets, and documentation samples
+// where you need names but not full Artist DB rows.
+//
+// Sourced from freeform-map-talk/canonical-artists.json.
+
+export const wxycCanonicalArtistNames: readonly string[] =
+  data.canonicalArtistNames as string[];

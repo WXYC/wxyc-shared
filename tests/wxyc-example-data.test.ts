@@ -7,6 +7,7 @@ import {
   wxycExampleArtistList,
   wxycExampleAlbumList,
   wxycExampleFlowsheetList,
+  wxycCanonicalArtistNames,
 } from '../src/test-utils/wxyc-example-data.js';
 
 describe('WXYC Example Data', () => {
@@ -69,6 +70,46 @@ describe('WXYC Example Data', () => {
     const artistNames = new Set(wxycExampleArtistList.map(a => a.artist_name));
     for (const result of Object.values(wxycExampleSearchResults)) {
       expect(artistNames.has(result.artist_name)).toBe(true);
+    }
+  });
+});
+
+describe('wxycCanonicalArtistNames', () => {
+  it('provides 100+ representative WXYC artist names', () => {
+    expect(wxycCanonicalArtistNames.length).toBeGreaterThanOrEqual(100);
+  });
+
+  it('includes a known sample of WXYC-representative artists', () => {
+    const expected = [
+      'Autechre',
+      'Stereolab',
+      'Yo La Tengo',
+      'Father John Misty',
+      'Large Professor',
+      'Sun Ra',
+      'Ali Farka Toure',
+      'Juana Molina',
+    ];
+    for (const name of expected) {
+      expect(wxycCanonicalArtistNames).toContain(name);
+    }
+  });
+
+  it('does not include mainstream artists', () => {
+    const mainstream = ['Queen', 'Radiohead', 'The Beatles', 'Led Zeppelin', 'Nirvana'];
+    for (const name of mainstream) {
+      expect(wxycCanonicalArtistNames).not.toContain(name);
+    }
+  });
+
+  it('contains no duplicates', () => {
+    expect(new Set(wxycCanonicalArtistNames).size).toBe(wxycCanonicalArtistNames.length);
+  });
+
+  it('contains no empty or whitespace-only entries', () => {
+    for (const name of wxycCanonicalArtistNames) {
+      expect(name.trim()).toBe(name);
+      expect(name.length).toBeGreaterThan(0);
     }
   });
 });
