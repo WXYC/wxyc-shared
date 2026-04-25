@@ -43,13 +43,29 @@ describe("roleToAuthorization", () => {
     ["station_manager", Authorization.SM, "snake_case variant"],
     ["musicDirector", Authorization.MD, "musicDirector role"],
     ["music_director", Authorization.MD, "snake_case variant"],
+    ["music-director", Authorization.MD, "kebab-case variant"],
     ["dj", Authorization.DJ, "dj role"],
     ["member", Authorization.NO, "member role"],
     ["user", Authorization.NO, "user fallback"],
     ["owner", Authorization.SM, "owner maps to SM"],
     [null, Authorization.NO, "null defaults to NO"],
     [undefined, Authorization.NO, "undefined defaults to NO"],
+    ["", Authorization.NO, "empty string defaults to NO"],
     ["unknown", Authorization.NO, "unknown defaults to NO"],
+    // Case insensitivity
+    ["STATIONMANAGER", Authorization.SM, "uppercase stationManager"],
+    ["MusicDirector", Authorization.MD, "PascalCase musicDirector"],
+    ["DJ", Authorization.DJ, "uppercase dj"],
+    ["Dj", Authorization.DJ, "TitleCase dj"],
+    ["Member", Authorization.NO, "TitleCase member"],
+    ["MEMBER", Authorization.NO, "uppercase member"],
+    ["User", Authorization.NO, "TitleCase user"],
+    ["Admin", Authorization.SM, "TitleCase admin"],
+    ["Owner", Authorization.SM, "TitleCase owner"],
+    // Whitespace handling
+    ["  stationManager  ", Authorization.SM, "leading/trailing whitespace stripped"],
+    ["  dj  ", Authorization.DJ, "whitespace around dj"],
+    ["   ", Authorization.NO, "whitespace-only string defaults to NO"],
   ];
 
   it.each(cases)("maps %s to %s (%s)", (role, expected) => {
