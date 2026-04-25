@@ -1876,13 +1876,43 @@ components:
             $ref: '#/components/schemas/DiscogsImage'
 
     # ============================
+    # Shared Streaming Types
+    # ============================
+
+    StreamingLinks:
+      type: object
+      description: >
+        Streaming service URLs for a release. Used across multiple schemas
+        (DiscogsMatchResult, DiscogsEnrichedSearchResult, AlbumMetadata, etc.)
+        to canonicalize the set of streaming fields.
+      properties:
+        spotify_url:
+          type: string
+          nullable: true
+          description: Spotify album URL
+        apple_music_url:
+          type: string
+          nullable: true
+          description: Apple Music album URL
+        youtube_music_url:
+          type: string
+          nullable: true
+          description: YouTube Music search URL
+        bandcamp_url:
+          type: string
+          nullable: true
+          description: Bandcamp album URL
+        soundcloud_url:
+          type: string
+          nullable: true
+          description: SoundCloud search URL
+
+    # ============================
     # Lookup Service Types
     # ============================
 
     LookupRequest:
       type: object
-      required:
-        - raw_message
       properties:
         artist:
           type: string
@@ -1895,7 +1925,9 @@ components:
           description: Parsed album name
         raw_message:
           type: string
-          description: Original request message (needed for ambiguous format detection)
+          description: >
+            Original request message (used for ambiguous format detection).
+            Optional when structured fields (artist, album, song) are provided.
 
     LibraryCatalogItem:
       type: object
@@ -1951,8 +1983,10 @@ components:
     DiscogsMatchResult:
       type: object
       description: >
-        A processed Discogs search result with artwork. Distinct from the raw
-        DiscogsSearchResult which mirrors the Discogs API response directly.
+        A processed Discogs search result with artwork and enriched metadata.
+        Distinct from the raw DiscogsSearchResult which mirrors the Discogs
+        API response directly. Streaming URL fields match the StreamingLinks
+        schema and will be migrated to use $ref in a future version.
       required:
         - release_id
         - release_url
@@ -1978,6 +2012,38 @@ components:
           maximum: 1
           default: 0
           description: Match confidence score
+        release_year:
+          type: integer
+          nullable: true
+          description: Release year from Discogs
+        artist_bio:
+          type: string
+          nullable: true
+          description: Artist biography from Discogs profile
+        wikipedia_url:
+          type: string
+          nullable: true
+          description: Wikipedia URL for the artist
+        spotify_url:
+          type: string
+          nullable: true
+          description: Spotify album URL
+        apple_music_url:
+          type: string
+          nullable: true
+          description: Apple Music album URL
+        youtube_music_url:
+          type: string
+          nullable: true
+          description: YouTube Music search URL
+        bandcamp_url:
+          type: string
+          nullable: true
+          description: Bandcamp album URL
+        soundcloud_url:
+          type: string
+          nullable: true
+          description: SoundCloud search URL
 
     LookupResultItem:
       type: object
