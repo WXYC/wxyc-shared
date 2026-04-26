@@ -251,6 +251,21 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties.bandcamp_id.type).toBe('string');
       expect(schema.properties.bandcamp_id.nullable).toBe(true);
     });
+
+    it('should attach optional reconciled_identity to LookupResultItem', () => {
+      const schema = spec.components.schemas.LookupResultItem as {
+        type: string;
+        required: string[];
+        properties: Record<string, { $ref?: string }>;
+      };
+      expect(schema).toBeDefined();
+      // reconciled_identity is optional (not in `required`) and refs the shared schema
+      expect(schema.required).toEqual(['library_item']);
+      expect(schema.properties.reconciled_identity).toBeDefined();
+      expect(schema.properties.reconciled_identity.$ref).toBe(
+        '#/components/schemas/ReconciledIdentity',
+      );
+    });
   });
 
   describe('Proxy Response Schemas', () => {

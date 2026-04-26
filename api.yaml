@@ -2082,7 +2082,7 @@ components:
 
     LookupResultItem:
       type: object
-      description: A single lookup result pairing a library item with optional artwork
+      description: A single lookup result pairing a library item with optional artwork and reconciled identity
       required:
         - library_item
       properties:
@@ -2090,6 +2090,8 @@ components:
           $ref: '#/components/schemas/LibraryCatalogItem'
         artwork:
           $ref: '#/components/schemas/DiscogsMatchResult'
+        reconciled_identity:
+          $ref: '#/components/schemas/ReconciledIdentity'
 
     LookupResponse:
       type: object
