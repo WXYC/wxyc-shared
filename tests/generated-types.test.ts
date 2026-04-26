@@ -16,6 +16,7 @@ import {
   type AlbumMetadataResponse,
   type ArtistMetadataResponse,
   type TrackListItem,
+  type ReconciledIdentity,
   RotationBin,
   DayOfWeek,
   Genre,
@@ -274,6 +275,43 @@ describe('Generated TypeScript Types', () => {
       };
 
       expect(track.duration).toBe('5:23');
+    });
+  });
+
+  describe('ReconciledIdentity', () => {
+    it('should accept all six external identifiers', () => {
+      const identity: ReconciledIdentity = {
+        discogs_artist_id: 7894,
+        musicbrainz_artist_id: 'd7b8a3a5-9080-487c-8c3c-2f6a3a3d44b2',
+        wikidata_qid: 'Q470892',
+        spotify_artist_id: '4uSftVc3FPWe6RJuMZNEe9',
+        apple_music_artist_id: '88495919',
+        bandcamp_id: 'stereolab',
+      };
+
+      expect(identity.discogs_artist_id).toBe(7894);
+      expect(identity.bandcamp_id).toBe('stereolab');
+    });
+
+    it('should allow all fields to be omitted (fully unresolved identity)', () => {
+      const identity: ReconciledIdentity = {};
+
+      expect(identity.discogs_artist_id).toBeUndefined();
+      expect(identity.spotify_artist_id).toBeUndefined();
+    });
+
+    it('should allow null for any identifier (resolved-but-absent)', () => {
+      const identity: ReconciledIdentity = {
+        discogs_artist_id: 7894,
+        musicbrainz_artist_id: null,
+        wikidata_qid: null,
+        spotify_artist_id: null,
+        apple_music_artist_id: null,
+        bandcamp_id: null,
+      };
+
+      expect(identity.discogs_artist_id).toBe(7894);
+      expect(identity.musicbrainz_artist_id).toBeNull();
     });
   });
 
