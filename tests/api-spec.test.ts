@@ -228,6 +228,29 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties.title.type).toBe('string');
       expect(schema.properties.duration.type).toBe('string');
     });
+
+    it('should define ReconciledIdentity with bare external IDs', () => {
+      const schema = spec.components.schemas.ReconciledIdentity as {
+        type: string;
+        properties: Record<string, { type: string; nullable?: boolean }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.type).toBe('object');
+      // All six identifier fields are bare IDs, all nullable.
+      // URL construction is the consumer's job — see WXYC/wxyc-shared#42.
+      expect(schema.properties.discogs_artist_id.type).toBe('integer');
+      expect(schema.properties.discogs_artist_id.nullable).toBe(true);
+      expect(schema.properties.musicbrainz_artist_id.type).toBe('string');
+      expect(schema.properties.musicbrainz_artist_id.nullable).toBe(true);
+      expect(schema.properties.wikidata_qid.type).toBe('string');
+      expect(schema.properties.wikidata_qid.nullable).toBe(true);
+      expect(schema.properties.spotify_artist_id.type).toBe('string');
+      expect(schema.properties.spotify_artist_id.nullable).toBe(true);
+      expect(schema.properties.apple_music_artist_id.type).toBe('string');
+      expect(schema.properties.apple_music_artist_id.nullable).toBe(true);
+      expect(schema.properties.bandcamp_id.type).toBe('string');
+      expect(schema.properties.bandcamp_id.nullable).toBe(true);
+    });
   });
 
   describe('Proxy Response Schemas', () => {

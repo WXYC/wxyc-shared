@@ -1907,6 +1907,41 @@ components:
           nullable: true
           description: SoundCloud search URL
 
+    ReconciledIdentity:
+      type: object
+      description: >
+        External identifiers for a real-world artist, suitable for joining
+        records across services. All fields are bare platform IDs; URL
+        construction is the consumer's responsibility (templates are stable
+        for Spotify, Apple Music, and Bandcamp; YouTube Music and SoundCloud
+        do not have stable per-ID URLs and are intentionally absent — those
+        belong on `StreamingLinks`, which serves the playback/result layer).
+      properties:
+        discogs_artist_id:
+          type: integer
+          nullable: true
+          description: Discogs artist ID
+        musicbrainz_artist_id:
+          type: string
+          nullable: true
+          description: MusicBrainz artist UUID
+        wikidata_qid:
+          type: string
+          nullable: true
+          description: Wikidata QID (e.g. "Q12345")
+        spotify_artist_id:
+          type: string
+          nullable: true
+          description: Spotify artist ID (the Spotify URI suffix)
+        apple_music_artist_id:
+          type: string
+          nullable: true
+          description: Apple Music artist ID
+        bandcamp_id:
+          type: string
+          nullable: true
+          description: Bandcamp slug (the subdomain in `<slug>.bandcamp.com`)
+
     # ============================
     # Lookup Service Types
     # ============================
