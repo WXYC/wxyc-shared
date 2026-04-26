@@ -1883,8 +1883,8 @@ components:
       type: object
       description: >
         Streaming service URLs for a release. Used across multiple schemas
-        (DiscogsMatchResult, DiscogsEnrichedSearchResult, AlbumMetadata, etc.)
-        to canonicalize the set of streaming fields.
+        (DiscogsMatchResult, AlbumMetadata, etc.) to canonicalize the set of
+        streaming fields.
       properties:
         spotify_url:
           type: string
@@ -2100,83 +2100,6 @@ components:
     # ====================================
     # LML Discogs & Metadata Service Types
     # ====================================
-
-    DiscogsSearchRequest:
-      type: object
-      properties:
-        artist:
-          type: string
-        album:
-          type: string
-        track:
-          type: string
-        label:
-          type: string
-        format:
-          type: string
-
-    DiscogsEnrichedSearchResult:
-      type: object
-      description: A single search result from LML's Discogs search, enriched with streaming URLs and metadata.
-      required:
-        - release_id
-        - release_url
-      properties:
-        album:
-          type: string
-          nullable: true
-        artist:
-          type: string
-          nullable: true
-        release_id:
-          type: integer
-        release_url:
-          type: string
-        artwork_url:
-          type: string
-          nullable: true
-        confidence:
-          type: number
-          default: 0
-        release_year:
-          type: integer
-          nullable: true
-        artist_bio:
-          type: string
-          nullable: true
-        wikipedia_url:
-          type: string
-          nullable: true
-        spotify_url:
-          type: string
-          nullable: true
-        apple_music_url:
-          type: string
-          nullable: true
-        youtube_music_url:
-          type: string
-          nullable: true
-        bandcamp_url:
-          type: string
-          nullable: true
-        soundcloud_url:
-          type: string
-          nullable: true
-
-    DiscogsSearchResponse:
-      type: object
-      properties:
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/DiscogsEnrichedSearchResult'
-          default: []
-        total:
-          type: integer
-          default: 0
-        cached:
-          type: boolean
-          default: false
 
     DiscogsTrackItem:
       type: object
