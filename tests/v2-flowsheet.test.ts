@@ -44,13 +44,15 @@ const baseFields = {
   add_time: '2024-06-15T14:30:00.000Z',
 };
 
+// Values drawn from the canonical Juana Molina / "la paradoja" fixture
+// in @wxyc/shared/test-utils (wxycExampleFlowsheetEntries).
 const sampleTrack: FlowsheetV2TrackEntry = {
   ...baseFields,
   entry_type: 'track',
-  artist_name: 'Radiohead',
-  album_title: 'OK Computer',
-  track_title: 'Paranoid Android',
-  record_label: 'Parlophone',
+  artist_name: 'Juana Molina',
+  album_title: 'DOGA',
+  track_title: 'la paradoja',
+  record_label: 'Sonamos',
   request_flag: false,
   segue: false,
   rotation_bin: 'H',
@@ -135,8 +137,8 @@ describe('V2 Generated Types', () => {
   describe('FlowsheetV2TrackEntry', () => {
     it('should accept a valid track entry', () => {
       expect(sampleTrack.entry_type).toBe('track');
-      expect(sampleTrack.artist_name).toBe('Radiohead');
-      expect(sampleTrack.track_title).toBe('Paranoid Android');
+      expect(sampleTrack.artist_name).toBe('Juana Molina');
+      expect(sampleTrack.track_title).toBe('la paradoja');
       expect(sampleTrack.rotation_bin).toBe(RotationBin.H);
       expect(sampleTrack.request_flag).toBe(false);
       expect(typeof sampleTrack.add_time).toBe('string');
