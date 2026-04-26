@@ -124,11 +124,12 @@ describe('wxycCanonicalArtistNames', () => {
     const diacriticNames = wxycCanonicalArtistNames.filter(name =>
       [...name].some(c => c.charCodeAt(0) > 127)
     );
-    expect(diacriticNames.length).toBeGreaterThanOrEqual(5);
+    expect(diacriticNames.length).toBeGreaterThanOrEqual(6);
     expect(diacriticNames).toContain('Nilüfer Yanya');
     expect(diacriticNames).toContain('Csillagrablók');
     expect(diacriticNames).toContain('Hermanos Gutiérrez');
     expect(diacriticNames).toContain('Sonido Dueñez'); // ñ (combining tilde)
     expect(diacriticNames).toContain('Aşıq Altay'); // multi-diacritic (Turkish ş + ı)
+    expect(diacriticNames).toContain('GIDEÖN'); // capital diacritic mid-word (Ö)
   });
 });
