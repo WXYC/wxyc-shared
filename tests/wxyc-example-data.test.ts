@@ -112,4 +112,13 @@ describe('wxycCanonicalArtistNames', () => {
       expect(name.length).toBeGreaterThan(0);
     }
   });
+
+  it('includes diacritic-bearing names so consumers can exercise Unicode normalization', () => {
+    const diacriticNames = wxycCanonicalArtistNames.filter(name =>
+      [...name].some(c => c.charCodeAt(0) > 127)
+    );
+    expect(diacriticNames.length).toBeGreaterThanOrEqual(3);
+    expect(diacriticNames).toContain('Nilüfer Yanya');
+    expect(diacriticNames).toContain('Csillagrablók');
+  });
 });
