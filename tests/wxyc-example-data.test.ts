@@ -11,16 +11,23 @@ import {
 } from '../src/test-utils/wxyc-example-data.js';
 
 describe('WXYC Example Data', () => {
-  it('provides exactly 6 example artists', () => {
-    expect(wxycExampleArtistList).toHaveLength(6);
+  it('provides exactly 9 example artists', () => {
+    expect(wxycExampleArtistList).toHaveLength(9);
   });
 
-  it('provides exactly 5 example albums', () => {
-    expect(wxycExampleAlbumList).toHaveLength(5);
+  it('provides exactly 8 example albums', () => {
+    expect(wxycExampleAlbumList).toHaveLength(8);
   });
 
-  it('provides exactly 4 example flowsheet entries', () => {
-    expect(wxycExampleFlowsheetList).toHaveLength(4);
+  it('provides exactly 7 example flowsheet entries', () => {
+    expect(wxycExampleFlowsheetList).toHaveLength(7);
+  });
+
+  it('includes diacritic-bearing structured fixtures (ü, ñ, multi-diacritic Turkish ş+ı)', () => {
+    const names = new Set(wxycExampleArtistList.map(a => a.artist_name));
+    expect(names.has('Nilüfer Yanya')).toBe(true);
+    expect(names.has('Sonido Dueñez')).toBe(true);
+    expect(names.has('Aşıq Altay')).toBe(true);
   });
 
   it('artist IDs are in the 8000 range', () => {
@@ -117,8 +124,11 @@ describe('wxycCanonicalArtistNames', () => {
     const diacriticNames = wxycCanonicalArtistNames.filter(name =>
       [...name].some(c => c.charCodeAt(0) > 127)
     );
-    expect(diacriticNames.length).toBeGreaterThanOrEqual(3);
+    expect(diacriticNames.length).toBeGreaterThanOrEqual(5);
     expect(diacriticNames).toContain('Nilüfer Yanya');
     expect(diacriticNames).toContain('Csillagrablók');
+    expect(diacriticNames).toContain('Hermanos Gutiérrez');
+    expect(diacriticNames).toContain('Sonido Dueñez'); // ñ (combining tilde)
+    expect(diacriticNames).toContain('Aşıq Altay'); // multi-diacritic (Turkish ş + ı)
   });
 });
