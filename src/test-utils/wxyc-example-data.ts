@@ -35,6 +35,12 @@ export const wxycExampleArtists = {
   jessicaPratt: artists[3]!,
   chuquimamaniCondori: artists[4]!,
   dukeEllingtonAndJohnColtrane: artists[5]!,
+  // Diacritic-bearing fixtures. Names from FLOWSHEET_ENTRY_PROD; library
+  // codes synthesized (these are streaming-only artists with no LIBRARY_CODE
+  // row) following the simplified 2-letter-genre convention used above.
+  niluferYanya: artists[6]!, // ü
+  sonidoDuenez: artists[7]!, // ñ (combining tilde)
+  asiqAltay: artists[8]!, // multi-diacritic (Turkish ş + ı)
 } as const;
 
 // ============================================================================
@@ -47,6 +53,9 @@ export const wxycExampleAlbums = {
   moonPix: albums[2]!,
   onYourOwnLoveAgain: albums[3]!,
   edits: albums[4]!,
+  painless: albums[5]!,
+  rebajadas2: albums[6]!,
+  musicFromTheCaucasus: albums[7]!,
 } as const;
 
 // ============================================================================
@@ -58,6 +67,9 @@ export const wxycExampleFlowsheetEntries = {
   jessicaPrattBackBaby: flowsheetEntries[1]!,
   chuquimamaniCondoriCallYourName: flowsheetEntries[2]!,
   dukeEllingtonSentimentalMood: flowsheetEntries[3]!,
+  niluferYanyaMidnightSun: flowsheetEntries[4]!,
+  sonidoDuenezMentirosoBoquisabroso: flowsheetEntries[5]!,
+  asiqAltayHuseyni: flowsheetEntries[6]!,
 } as const;
 
 // ============================================================================
