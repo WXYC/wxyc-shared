@@ -2100,6 +2100,13 @@ components:
         LML's `core/telemetry.py:get_cache_stats()` and forwarded onto Sentry
         trace data by both the LML transaction (LML#213) and the BS-side
         client span wrapping `lookupMetadata` (BS#646).
+      required:
+        - memory_hits
+        - pg_hits
+        - pg_misses
+        - api_calls
+        - pg_time_ms
+        - api_time_ms
       properties:
         memory_hits:
           type: integer
