@@ -2093,6 +2093,46 @@ components:
         reconciled_identity:
           $ref: '#/components/schemas/ReconciledIdentity'
 
+    CacheStats:
+      type: object
+      description: >
+        Cache hit/miss statistics for a single lookup operation. Populated by
+        LML's `core/telemetry.py:get_cache_stats()` and forwarded onto Sentry
+        trace data by both the LML transaction (LML#213) and the BS-side
+        client span wrapping `lookupMetadata` (BS#646).
+      required:
+        - memory_hits
+        - pg_hits
+        - pg_misses
+        - api_calls
+        - pg_time_ms
+        - api_time_ms
+      properties:
+        memory_hits:
+          type: integer
+          minimum: 0
+          description: Hits in LML's per-process in-memory TTL cache
+        pg_hits:
+          type: integer
+          minimum: 0
+          description: Hits in the discogs-cache PostgreSQL cache
+        pg_misses:
+          type: integer
+          minimum: 0
+          description: Misses in the discogs-cache PostgreSQL cache (forced an API call or fallback)
+        api_calls:
+          type: integer
+          minimum: 0
+          description: Number of Discogs API calls made during the lookup
+        pg_time_ms:
+          type: number
+          minimum: 0
+          description: Total milliseconds spent in PostgreSQL cache lookups
+        api_time_ms:
+          type: number
+          minimum: 0
+          description: Total milliseconds spent in Discogs API calls
+
     LookupResponse:
       type: object
       description: Response from the lookup service containing library search results and metadata
@@ -2130,9 +2170,7 @@ components:
           type: string
           description: Fuzzy-corrected artist name if different from the original
         cache_stats:
-          type: object
-          additionalProperties: true
-          description: Cache hit/miss statistics from the lookup
+          $ref: '#/components/schemas/CacheStats'
 
     # ====================================
     # LML Discogs & Metadata Service Types
