@@ -41,3 +41,20 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # Cross-service contract suite (see INVARIANTS.md, src/contracts.ts).
+      # When $E2E_BASE_URL is unset, every test in the file is `skipIf`-ed
+      # or `skip`-ed so vitest never reaches `beforeAll` (no live stack
+      # needed). When CI provides $E2E_BASE_URL + DJ credentials, the
+      # ENFORCED contracts (BEARER_IS_JWT_NOT_SESSION, FLOWSHEET_DJ_NAME_NON_NULL)
+      # run against the stack. The two NOT-YET-ENFORCED contracts
+      # (PLAY_ORDER, ROTATION_DEDUP) stay `it.skip` at source until
+      # WXYC/Backend-Service#693 + #694 land.
+      - name: Contract suite (E2E)
+        if: vars.E2E_BASE_URL != ''
+        run: npm run test:e2e:contracts
+        env:
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL }}
+          E2E_AUTH_URL: ${{ vars.E2E_AUTH_URL }}
+          E2E_TEST_DJ_EMAIL: ${{ secrets.E2E_TEST_DJ_EMAIL }}
+          E2E_TEST_DJ_PASSWORD: ${{ secrets.E2E_TEST_DJ_PASSWORD }}

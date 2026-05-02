@@ -44,6 +44,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e:contracts": "vitest run --config vitest.e2e.config.ts tests/e2e-contracts.test.ts",
     "test:setup-script": "bats scripts/__tests__/setup-dev-environment.test.sh",
     "lint": "tsc --noEmit --declaration false --declarationMap false",
     "clean": "rm -rf dist",
