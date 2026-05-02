@@ -5,7 +5,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
-    exclude: ['e2e/**/*'],
+    // E2E tests live under e2e/ and are excluded from `npm test`.
+    // tests/e2e-contracts.test.ts is also an E2E suite (see vitest.e2e.config.ts).
+    exclude: ['e2e/**/*', 'tests/e2e-contracts.test.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

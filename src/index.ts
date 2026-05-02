@@ -19,3 +19,4 @@
 export * from './dtos/index.js';
 export * from './test-utils/index.js';
 export * from './validation/index.js';
+export * from './contracts.js';
