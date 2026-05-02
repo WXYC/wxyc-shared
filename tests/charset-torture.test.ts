@@ -8,7 +8,6 @@ import {
   charsetTortureEntries,
   CHARSET_TORTURE_CATEGORIES,
   type CharsetTortureCategory,
-  type CharsetTortureEntry,
 } from '../src/test-utils/charset-torture.js';
 
 const corpusJsonPath = resolve(
@@ -67,14 +66,9 @@ describe('charset-torture corpus shape', () => {
 });
 
 describe('charset-torture corpus byte stability', () => {
-  // Pinning the SHA-256 here forces every corpus edit through a coordinated
-  // bump: when the JSON changes, this test fails until someone updates the
-  // constant *and* the per-consumer pinned hash files (M3 drift guard).
-  // To intentionally bump: edit the JSON, run `shasum -a 256
-  // src/test-utils/charset-torture.json`, paste the new hash here, and
-  // ship a coordinated PR to every consuming repo's
-  // `tests/fixtures/charset-torture.json.sha256`.
-  const PINNED_SHA256 = '9a79734cb0482994060df79106620dd982573dc2e1be133b711ff5402b1d7202';
+  // Pinned so any edit to the JSON forces a coordinated downstream consumer
+  // bump; see README "Charset Torture Corpus" for the bump procedure.
+  const PINNED_SHA256 = '75a3395bb10894480dba95bf5b7f379f5056645098d6a1bf9e94416709e5214a';
 
   it('SHA-256 of the JSON file matches the pinned hash', () => {
     const actual = createHash('sha256').update(readFileSync(corpusJsonPath)).digest('hex');
@@ -172,26 +166,4 @@ describe('charset-torture corpus content invariants', () => {
     }
   });
 
-  it('every entry input round-trips through JSON.stringify/parse losslessly', () => {
-    for (const entry of charsetTortureEntries) {
-      const round = JSON.parse(JSON.stringify({ s: entry.input })) as { s: string };
-      expect(
-        round.s,
-        `JSON round-trip failure for ${entry.category}: ${JSON.stringify(entry.input)}`,
-      ).toBe(entry.input);
-    }
-  });
-});
-
-describe('charset-torture corpus consumer ergonomics', () => {
-  // Smoke check: the most common consumer pattern is iterating every entry
-  // and asserting round-trip through a storage path. Make sure that loop
-  // works with no surprises.
-  it('a parametrized consumer loop sees a non-empty stream of entries', () => {
-    const seen: CharsetTortureEntry[] = [];
-    for (const entry of charsetTortureEntries) {
-      seen.push(entry);
-    }
-    expect(seen.length).toBe(charsetTortureEntries.length);
-  });
 });

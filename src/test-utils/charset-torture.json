@@ -7,7 +7,7 @@
       "expected_storage": "Canonical (mojibake-fixed) form. Equals input for non-mojibake categories.",
       "expected_match_form": "Output of to_match_form(expected_storage). NFKD + strip combining marks + lowercase + Greek sigma fold + trim. Null when WX-2 has not formalized the rule for this script.",
       "expected_ascii_form": "Output of to_ascii_form(expected_storage). Lowercase ASCII transliteration. Null for scripts without a defined transliteration in v1.",
-      "notes": "Why this entry exists; which V012/V013/LML#168 incident or category it pins."
+      "notes": "Why this entry exists; which encoding incident or hazard category it pins."
     },
     "sources": [
       "WXYC/docs#6 (Mojibake Cleanup epic) — V012 round-trippable fix-pairs and V013 lossy rows",
