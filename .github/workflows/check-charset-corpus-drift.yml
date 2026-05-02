@@ -42,6 +42,10 @@ on:
         description: "GitHub token with read:packages on the WXYC org"
         required: true
 
+concurrency:
+  group: charset-corpus-drift-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   drift-check:
     runs-on: ubuntu-latest
@@ -63,16 +67,18 @@ jobs:
       - name: Pack @wxyc/shared and extract the corpus
         env:
           NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
+          PACKAGE_VERSION: ${{ inputs.package-version }}
         run: |
           set -euo pipefail
           mkdir -p extract
           cd extract
-          npm pack "@wxyc/shared@${{ inputs.package-version }}" --silent
+          npm pack "@wxyc/shared@${PACKAGE_VERSION}" --silent
           tar -xzf wxyc-shared-*.tgz package/src/test-utils/charset-torture.json
-          ls -la package/src/test-utils/
 
       - name: Compare SHA-256 against the pinned hash
+        env:
+          EXPECTED_SHA: ${{ inputs.pinned-sha256 }}
         run: |
           bash wxyc-shared/scripts/check-corpus-drift.sh \
             extract/package/src/test-utils/charset-torture.json \
-            "${{ inputs.pinned-sha256 }}"
+            "${EXPECTED_SHA}"
