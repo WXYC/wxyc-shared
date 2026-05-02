@@ -33,37 +33,11 @@ export interface CharsetTortureEntry {
   notes: string;
 }
 
-export type CharsetTortureCategory =
-  | 'greek'
-  | 'cyrillic'
-  | 'cjk'
-  | 'arabic'
-  | 'hebrew'
-  | 'emoji'
-  | 'latin_extended'
-  | 'bidi_marks'
-  | 'zwj'
-  | 'normalization'
-  | 'mojibake_known'
-  | 'quoting';
-
-export interface CharsetTortureCorpus {
-  meta: {
-    description: string;
-    version: number;
-    schema: Record<string, string>;
-    sources: string[];
-  };
-  categories: Record<CharsetTortureCategory, CharsetTortureEntry[]>;
-}
-
-export const charsetTortureCorpus = data as CharsetTortureCorpus;
-
 /**
  * Required category coverage. Adding a category requires a corpus version
  * bump and a coordinated update to every consumer's pinned SHA-256.
  */
-export const CHARSET_TORTURE_CATEGORIES: readonly CharsetTortureCategory[] = [
+export const CHARSET_TORTURE_CATEGORIES = [
   'greek',
   'cyrillic',
   'cjk',
@@ -76,7 +50,21 @@ export const CHARSET_TORTURE_CATEGORIES: readonly CharsetTortureCategory[] = [
   'normalization',
   'mojibake_known',
   'quoting',
-];
+] as const;
+
+export type CharsetTortureCategory = (typeof CHARSET_TORTURE_CATEGORIES)[number];
+
+export interface CharsetTortureCorpus {
+  meta: {
+    description: string;
+    version: number;
+    schema: Record<string, string>;
+    sources: string[];
+  };
+  categories: Record<CharsetTortureCategory, CharsetTortureEntry[]>;
+}
+
+export const charsetTortureCorpus = data as CharsetTortureCorpus;
 
 /** All entries flattened across categories — convenient for parametrized tests. */
 export const charsetTortureEntries: ReadonlyArray<
