@@ -326,6 +326,184 @@ if (hasPermission(user.role, "catalog", "write")) {
 | `hasCapability(caps, cap)` | Check if user has capability |
 | `canAssignCapability(user, cap)` | Check if user can assign capability |
 
+## Charset Torture Corpus
+
+`src/test-utils/charset-torture.json` is the canonical UTF-8 torture-corpus shared by every WXYC repo's CI. Each entry is one realistic encoding hazard (Greek sigma forms, CJK, emoji, NFC/NFD pairs, Latin-1-as-UTF-8 mojibake, embedded NUL bytes, etc.). The contract every consuming repo must satisfy:
+
+> Load the corpus, write each `entry.input` through your primary storage path, read it back, and assert byte equality.
+
+If any byte gets dropped, mis-decoded, or silently re-normalized anywhere in any pipeline, that repo's CI fails on the next push.
+
+### Schema
+
+```ts
+interface CharsetTortureEntry {
+  input: string;              // raw UTF-8 the storage layer must round-trip
+  expected_storage: string;   // canonical (mojibake-fixed) form
+  expected_match_form: string | null;  // to_match_form output (WX-2 acceptance)
+  expected_ascii_form: string | null;  // to_ascii_form output (WX-2 acceptance)
+  notes: string;              // why this entry exists
+}
+```
+
+The corpus is keyed by category — `greek`, `cyrillic`, `cjk`, `arabic`, `hebrew`, `emoji`, `latin_extended`, `bidi_marks`, `zwj`, `normalization`, `mojibake_known`, `quoting`. See `src/test-utils/charset-torture.ts` for the full type and the flattened `charsetTortureEntries` iterator.
+
+### TypeScript consumers
+
+```ts
+import { charsetTortureEntries, charsetTortureCorpus } from '@wxyc/shared/test-utils';
+
+it.each(charsetTortureEntries)(
+  '$category: $input round-trips through storage',
+  async ({ input }) => {
+    const id = await db.write({ name: input });
+    const row = await db.read(id);
+    expect(row.name).toBe(input);
+  },
+);
+```
+
+### Non-TypeScript consumers (Python, Rust, Java)
+
+Every non-TS consumer extracts `charset-torture.json` from the published `@wxyc/shared` tarball and pins its SHA-256 in-repo. The path inside the tarball is stable: `package/src/test-utils/charset-torture.json`.
+
+**Drift defense is content-hash equality, not semver matching.** Each consumer pins the expected SHA-256 in `tests/fixtures/charset-torture.json.sha256`. The M3 drift-guard workflow fails CI if the extracted JSON's hash differs from the pin, prompting an explicit corpus-bump PR. To intentionally bump: edit the JSON in this repo, update `PINNED_SHA256` in `tests/charset-torture.test.ts`, then ship a coordinated PR to every consumer's pin file.
+
+#### Python recipe
+
+```bash
+# In CI, before running pytest:
+npm pack @wxyc/shared@<pinned-version> --silent
+tar -xzf wxyc-shared-*.tgz package/src/test-utils/charset-torture.json
+mv package/src/test-utils/charset-torture.json tests/fixtures/charset-torture.json
+sha256sum -c tests/fixtures/charset-torture.json.sha256
+```
+
+```python
+# tests/charset_torture.py
+import json
+from pathlib import Path
+
+_CORPUS_PATH = Path(__file__).parent / 'fixtures' / 'charset-torture.json'
+
+def load_corpus() -> dict:
+    return json.loads(_CORPUS_PATH.read_text(encoding='utf-8'))
+
+def iter_entries():
+    corpus = load_corpus()
+    for category, entries in corpus['categories'].items():
+        for entry in entries:
+            yield {**entry, 'category': category}
+```
+
+```python
+# tests/test_charset_torture.py
+import pytest
+from .charset_torture import iter_entries
+
+@pytest.mark.parametrize('entry', list(iter_entries()), ids=lambda e: f"{e['category']}:{e['input'][:20]}")
+def test_roundtrip(entry, db):
+    row_id = db.write(name=entry['input'])
+    row = db.read(row_id)
+    assert row.name == entry['input'], f"{entry['category']}: {entry['notes']}"
+```
+
+#### Rust recipe
+
+Vendor the JSON at the crate root via a Makefile target that re-runs the npm-pack extract:
+
+```makefile
+# Makefile
+fixtures/charset-torture.json:
+	npm pack @wxyc/shared@$(WXYC_SHARED_VERSION) --silent
+	tar -xzf wxyc-shared-*.tgz package/src/test-utils/charset-torture.json
+	mv package/src/test-utils/charset-torture.json $@
+	rm -f wxyc-shared-*.tgz
+	sha256sum -c fixtures/charset-torture.json.sha256
+```
+
+```rust
+// tests/charset_torture.rs
+use serde_json::Value;
+
+const CORPUS: &str = include_str!("../fixtures/charset-torture.json");
+
+fn load() -> Value {
+    serde_json::from_str(CORPUS).expect("charset-torture.json is valid")
+}
+
+#[test]
+fn roundtrip_through_storage() {
+    let corpus = load();
+    for (category, entries) in corpus["categories"].as_object().unwrap() {
+        for entry in entries.as_array().unwrap() {
+            let input = entry["input"].as_str().unwrap();
+            let written = my_storage::write(input).unwrap();
+            let read_back = my_storage::read(written).unwrap();
+            assert_eq!(read_back, input, "{}: {}", category, entry["notes"]);
+        }
+    }
+}
+```
+
+#### Java recipe
+
+```xml
+<!-- pom.xml: copy the JSON from a CI artifact into src/test/resources/ -->
+<plugin>
+  <artifactId>maven-resources-plugin</artifactId>
+  <executions>
+    <execution>
+      <id>copy-charset-torture</id>
+      <phase>process-test-resources</phase>
+      <goals><goal>copy-resources</goal></goals>
+      <configuration>
+        <outputDirectory>${project.build.testOutputDirectory}/fixtures</outputDirectory>
+        <resources><resource>
+          <directory>${charset.torture.tarball.dir}/package/src/test-utils</directory>
+          <includes><include>charset-torture.json</include></includes>
+        </resource></resources>
+      </configuration>
+    </execution>
+  </executions>
+</plugin>
+```
+
+```java
+// src/test/java/.../CharsetTortureTest.java
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+JsonNode corpus = new ObjectMapper()
+    .readTree(getClass().getResourceAsStream("/fixtures/charset-torture.json"));
+corpus.get("categories").fields().forEachRemaining(category -> {
+    category.getValue().forEach(entry -> {
+        String input = entry.get("input").asText();
+        String roundTripped = storage.writeAndRead(input);
+        assertEquals(input, roundTripped, category.getKey() + ": " + entry.get("notes").asText());
+    });
+});
+```
+
+#### CI fallback (no npm available)
+
+Where a repo's CI image lacks `npm`, fetch the JSON from a tagged GitHub Release of `wxyc-shared` instead:
+
+```bash
+curl -fsSL https://github.com/WXYC/wxyc-shared/releases/download/v<VERSION>/charset-torture.json \
+  -o tests/fixtures/charset-torture.json
+sha256sum -c tests/fixtures/charset-torture.json.sha256
+```
+
+This is the documented fallback only — the npm-pack recipe is the v1 happy path.
+
+### Adding a category or entry
+
+1. Edit `src/test-utils/charset-torture.json`.
+2. Run `shasum -a 256 src/test-utils/charset-torture.json` and paste the new hash into `PINNED_SHA256` in `tests/charset-torture.test.ts`.
+3. `npm test` — confirm the byte-stability test passes.
+4. Open a single PR that bumps the pin in **every** consuming repo's `tests/fixtures/charset-torture.json.sha256`. Without the coordinated bump, downstream CI fails until each consumer's pin is updated.
+
 ## Development
 
 ```bash
