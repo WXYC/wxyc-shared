@@ -19,7 +19,7 @@
 set -euo pipefail
 
 usage() {
-    cat <<'EOF'
+    cat >&2 <<'EOF'
 Usage: check-corpus-drift.sh <path-to-charset-torture.json> <expected-sha256>
 
 Verifies that the file at <path> has the given SHA-256 hash. Use this from CI
