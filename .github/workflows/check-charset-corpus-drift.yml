@@ -1,0 +1,78 @@
+name: Charset Torture Corpus Drift Guard
+
+# Reusable workflow that fails CI when the published @wxyc/shared
+# charset-torture.json no longer matches the SHA-256 the consumer pinned.
+# Each consuming repo's per-repo round-trip tests are pinned to a specific
+# corpus version; this guard surfaces upstream changes as an actionable diff
+# rather than letting them present as opaque test failures later.
+#
+# Invoked from sister WXYC repos as:
+#
+#   jobs:
+#     charset-corpus-drift:
+#       uses: WXYC/wxyc-shared/.github/workflows/check-charset-corpus-drift.yml@main
+#       with:
+#         pinned-sha256: 75a3395bb10894480dba95bf5b7f379f5056645098d6a1bf9e94416709e5214a
+#         # package-version: 'latest'  # optional; pins which @wxyc/shared release to fetch
+#       secrets:
+#         npm-token: ${{ secrets.GITHUB_TOKEN }}  # needs read:packages on WXYC org
+#
+# When the pin and the published hash diverge, the job fails with the
+# bump procedure inline in the log so the consumer's response is mechanical.
+
+on:
+  workflow_call:
+    inputs:
+      pinned-sha256:
+        description: "SHA-256 the consumer expects for charset-torture.json"
+        required: true
+        type: string
+      package-version:
+        description: "Version of @wxyc/shared to fetch (e.g. '1.2.3', 'latest')"
+        required: false
+        type: string
+        default: "latest"
+      wxyc-shared-ref:
+        description: "Git ref of WXYC/wxyc-shared whose script to run"
+        required: false
+        type: string
+        default: "main"
+    secrets:
+      npm-token:
+        description: "GitHub token with read:packages on the WXYC org"
+        required: true
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout wxyc-shared (for the drift script)
+        uses: actions/checkout@v6
+        with:
+          repository: WXYC/wxyc-shared
+          ref: ${{ inputs.wxyc-shared-ref }}
+          path: wxyc-shared
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@wxyc"
+
+      - name: Pack @wxyc/shared and extract the corpus
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
+        run: |
+          set -euo pipefail
+          mkdir -p extract
+          cd extract
+          npm pack "@wxyc/shared@${{ inputs.package-version }}" --silent
+          tar -xzf wxyc-shared-*.tgz package/src/test-utils/charset-torture.json
+          ls -la package/src/test-utils/
+
+      - name: Compare SHA-256 against the pinned hash
+        run: |
+          bash wxyc-shared/scripts/check-corpus-drift.sh \
+            extract/package/src/test-utils/charset-torture.json \
+            "${{ inputs.pinned-sha256 }}"

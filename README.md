@@ -497,6 +497,40 @@ sha256sum -c tests/fixtures/charset-torture.json.sha256
 
 This is the documented fallback only — the npm-pack recipe is the v1 happy path.
 
+#### Drift guard CI
+
+Every consuming repo should add a one-job CI workflow that calls the reusable drift-guard at `WXYC/wxyc-shared/.github/workflows/check-charset-corpus-drift.yml`. The job extracts `charset-torture.json` from the published `@wxyc/shared` tarball, hashes it, and compares against the consumer's pinned SHA-256 — failing CI loudly if the upstream corpus has moved.
+
+```yaml
+# .github/workflows/charset-corpus-drift.yml in the consuming repo
+name: Charset Corpus Drift
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 8 * * 1"  # Monday morning catches upstream bumps merged over the weekend
+
+jobs:
+  drift:
+    uses: WXYC/wxyc-shared/.github/workflows/check-charset-corpus-drift.yml@main
+    with:
+      pinned-sha256: 75a3395bb10894480dba95bf5b7f379f5056645098d6a1bf9e94416709e5214a
+      # package-version: 'latest'  # optional; pin to a specific @wxyc/shared release if needed
+    secrets:
+      npm-token: ${{ secrets.GITHUB_TOKEN }}  # needs read:packages on the WXYC org
+```
+
+When the guard fails, the consumer's response is one of:
+
+1. **Bump the pin.** Read the diff in `WXYC/wxyc-shared`, copy the new SHA into `tests/fixtures/charset-torture.json.sha256`, re-run the local round-trip suite to confirm the new fixture still passes, and open a PR.
+2. **Freeze the pin for one release.** Add a comment in `tests/fixtures/charset-torture.json.sha256`:
+   ```
+   # corpus-pin-frozen reason: <why this consumer can't bump yet>
+   ```
+   The freeze is enforced by reviewers, not the workflow — keep the reason specific and link the follow-up issue.
+
 ### Adding a category or entry
 
 1. Edit `src/test-utils/charset-torture.json`.
