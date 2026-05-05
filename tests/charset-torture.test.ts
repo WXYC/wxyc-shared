@@ -68,7 +68,7 @@ describe('charset-torture corpus shape', () => {
 describe('charset-torture corpus byte stability', () => {
   // Pinned so any edit to the JSON forces a coordinated downstream consumer
   // bump; see README "Charset Torture Corpus" for the bump procedure.
-  const PINNED_SHA256 = '75a3395bb10894480dba95bf5b7f379f5056645098d6a1bf9e94416709e5214a';
+  const PINNED_SHA256 = '41a18c5c0a92d129ec4b575827b6874196bfb7591e4bdf237a918a5da2de7b66';
 
   it('SHA-256 of the JSON file matches the pinned hash', () => {
     const actual = createHash('sha256').update(readFileSync(corpusJsonPath)).digest('hex');
@@ -113,17 +113,31 @@ describe('charset-torture corpus content invariants', () => {
     }
   });
 
-  it('non-mojibake categories: expected_storage equals input (storage layer is passive)', () => {
-    const nonMojibake: CharsetTortureCategory[] = CHARSET_TORTURE_CATEGORIES.filter(
-      (c) => c !== 'mojibake_known',
+  it('storage form is a passthrough except for mojibake repair and NFD-to-NFC', () => {
+    // to_storage_form per WX-2 charter: ftfy-style mojibake repair + NFC + trim.
+    // The mojibake_known category exercises the repair leg; the normalization
+    // category exercises the NFC leg (NFD inputs canonicalize to NFC). All
+    // other categories are pure passthrough.
+    const passthrough: CharsetTortureCategory[] = CHARSET_TORTURE_CATEGORIES.filter(
+      (c) => c !== 'mojibake_known' && c !== 'normalization',
     );
-    for (const category of nonMojibake) {
+    for (const category of passthrough) {
       for (const entry of charsetTortureCorpus.categories[category]) {
         expect(
           entry.expected_storage,
           `${category}: ${JSON.stringify(entry.input)} input/storage divergence`,
         ).toBe(entry.input);
       }
+    }
+  });
+
+  it('normalization category: NFC inputs are passthrough; NFD inputs canonicalize to NFC', () => {
+    for (const entry of charsetTortureCorpus.categories.normalization) {
+      const nfc = entry.input.normalize('NFC');
+      expect(
+        entry.expected_storage,
+        `normalization: ${JSON.stringify(entry.input)} expected_storage must equal NFC(input)`,
+      ).toBe(nfc);
     }
   });
 
