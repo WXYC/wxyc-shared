@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.0.0
+  version: 1.1.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1963,6 +1963,18 @@ components:
           description: >
             Original request message (used for ambiguous format detection).
             Optional when structured fields (artist, album, song) are provided.
+        include_identity:
+          type: boolean
+          default: false
+          description: >
+            Per cross-cache-identity plan §3.2.2 (E2-LML write contract). When
+            true, the response carries an additional `identity` block (the
+            §3.2.5 cascade's per-source resolution detail), and `api_version`
+            is set to 2. When false (the default), the response is
+            byte-identical to v0.5.0 — `identity` is absent and `api_version`
+            is omitted. Backend's `library-identity-writer.ts` (E2-BS) sets
+            this to true on every call; other consumers (catalog search,
+            dj-site proxy, iOS apps) leave it false.
 
     LibraryCatalogItem:
       type: object
@@ -2135,8 +2147,22 @@ components:
 
     LookupResponse:
       type: object
-      description: Response from the lookup service containing library search results and metadata
+      description: >
+        Response from the lookup service containing library search results
+        and metadata. When the request set `include_identity: true`, the
+        response additionally carries `api_version: 2` and the `identity`
+        block (per cross-cache-identity plan §3.2.2). When false or absent,
+        the response is byte-identical to v0.5.0 — both `api_version` and
+        `identity` are omitted.
       properties:
+        api_version:
+          type: integer
+          enum:
+            - 2
+          description: >
+            Present and equal to 2 only when the request set
+            `include_identity: true`. Absent for the v1-compatible shape so
+            existing consumers see byte-identical responses.
         results:
           type: array
           items:
@@ -2171,6 +2197,145 @@ components:
           description: Fuzzy-corrected artist name if different from the original
         cache_stats:
           $ref: '#/components/schemas/CacheStats'
+        identity:
+          $ref: '#/components/schemas/LookupIdentityBlock'
+
+    # ====================================
+    # Identity Block (§3.2.2 / §3.2.5 cascade)
+    # ====================================
+    #
+    # Returned only when LookupRequest.include_identity is true. Carries the
+    # per-source resolution detail from the §3.2.5 cascade so Backend's
+    # `library-identity-writer.ts` (E2-BS) can populate
+    # `library_identity_source` per-row without a second round-trip.
+
+    IdentitySource:
+      type: string
+      description: >
+        The metadata source whose external ID is being recorded. The set of
+        sources matches the columns on `library_identity_source` per plan
+        §3.2.0. Add new sources by appending to this enum and to the
+        `library_identity_source` schema in lockstep.
+      enum:
+        - discogs
+        - musicbrainz
+        - wikidata
+        - spotify
+        - apple_music
+        - bandcamp
+
+    IdentityMethod:
+      type: string
+      description: >
+        The matcher method that produced this resolution, drawn from plan
+        §3.4.1's locked confidence-method enum. The order in this list also
+        reflects descending confidence ceilings (manual = 1.00,
+        cross_source_agreement up to 1.00, exact_match = 1.00,
+        name_variation 0.90-0.99, member_group 0.80-0.89, alias_match
+        0.75-0.84, trigram 0.70+, llm 0.60-0.79). Backend's writer rejects
+        rows where confidence falls outside the method's locked range
+        (§3.2.2 sanity check).
+      enum:
+        - manual
+        - cross_source_agreement
+        - exact_match
+        - name_variation
+        - member_group
+        - alias_match
+        - trigram
+        - llm
+
+    IdentitySkipReason:
+      type: string
+      description: >
+        Why a source's leg of the cascade did not run. Set on
+        `IdentityResolution.reason` when `attempted: false`. Order is
+        irrelevant; values are mutually exclusive per leg.
+      enum:
+        - error
+        - manual_override_protected
+        - disabled
+        - prerequisite_failed
+
+    IdentityResolution:
+      type: object
+      description: >
+        One source's leg of the §3.2.5 cascade for a single library row.
+        Either resolved (`attempted: true` and `external_id` populated when
+        a match was found, NULL when the source ran but found no match) or
+        skipped (`attempted: false` with `reason` populated and the rest
+        nullable). The full `LookupIdentityBlock.resolved` array is
+        complete (one entry per known source), not sparse — consumers can
+        tell apart "leg ran, no match" from "leg didn't run" without
+        guessing.
+      required:
+        - source
+        - attempted
+      properties:
+        source:
+          $ref: '#/components/schemas/IdentitySource'
+        attempted:
+          type: boolean
+          description: >
+            True when this source's leg actually ran (whether or not it
+            found a match). False when it was skipped — `reason` is
+            populated, `external_id`/`method`/`confidence` are NULL.
+        external_id:
+          type: string
+          nullable: true
+          description: >
+            The external identifier this leg resolved to (Discogs release
+            ID, MusicBrainz MBID, Wikidata QID, Spotify URI suffix, Apple
+            Music ID, Bandcamp slug). Stored as a string regardless of the
+            source's native type so the API surface is uniform; Backend
+            casts to the per-source column type when writing
+            `library_identity_source`. NULL when `attempted: false`, or
+            when the leg ran but found no match.
+        method:
+          allOf:
+            - $ref: '#/components/schemas/IdentityMethod'
+          nullable: true
+          description: >
+            The matcher method that produced the resolution. NULL when
+            `attempted: false` or when the leg ran but found no match.
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: >
+            Confidence in [0, 1]. Must fall within the method's locked
+            range from plan §3.4.1 — Backend's writer rejects rows where
+            confidence is out of range. NULL when `attempted: false` or
+            when the leg ran but found no match.
+        reason:
+          allOf:
+            - $ref: '#/components/schemas/IdentitySkipReason'
+          nullable: true
+          description: >
+            Required when `attempted: false`; absent or NULL otherwise.
+
+    LookupIdentityBlock:
+      type: object
+      description: >
+        Per-source identity resolution detail for a single library row.
+        Returned on `LookupResponse.identity` when the request set
+        `include_identity: true`. Per §3.2.2, the `resolved` array is
+        complete (one entry per source LML knows about, including the
+        sources whose legs didn't run with `attempted: false`) — consumers
+        get a deterministic shape regardless of which legs were available.
+      required:
+        - resolved
+      properties:
+        resolved:
+          type: array
+          description: >
+            One entry per known source. Order is stable (matches the
+            `IdentitySource` enum order). Always populated even when no
+            source resolved — the array carries `attempted: false` entries
+            in that case.
+          items:
+            $ref: '#/components/schemas/IdentityResolution'
 
     # ====================================
     # LML Discogs & Metadata Service Types

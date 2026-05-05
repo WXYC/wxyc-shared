@@ -268,6 +268,111 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  describe('Lookup Identity Block (cross-cache-identity §3.2.2)', () => {
+    it('should define LookupRequest.include_identity as an optional boolean defaulting to false', () => {
+      const schema = spec.components.schemas.LookupRequest as {
+        properties: Record<string, { type?: string; default?: unknown }>;
+        required?: string[];
+      };
+      expect(schema.properties.include_identity).toBeDefined();
+      expect(schema.properties.include_identity.type).toBe('boolean');
+      expect(schema.properties.include_identity.default).toBe(false);
+      // Not required — v1 consumers continue to omit it.
+      expect(schema.required ?? []).not.toContain('include_identity');
+    });
+
+    it('should add api_version to LookupResponse with enum [2] (absent for v1 shape)', () => {
+      const schema = spec.components.schemas.LookupResponse as {
+        properties: Record<string, { type?: string; enum?: number[] }>;
+        required?: string[];
+      };
+      expect(schema.properties.api_version).toBeDefined();
+      expect(schema.properties.api_version.type).toBe('integer');
+      expect(schema.properties.api_version.enum).toEqual([2]);
+      // Not required — v1 responses omit the field entirely so existing
+      // consumers see byte-identical responses.
+      expect(schema.required ?? []).not.toContain('api_version');
+    });
+
+    it('should attach optional identity block to LookupResponse', () => {
+      const schema = spec.components.schemas.LookupResponse as {
+        properties: Record<string, { $ref?: string }>;
+        required?: string[];
+      };
+      expect(schema.properties.identity).toBeDefined();
+      expect(schema.properties.identity.$ref).toBe(
+        '#/components/schemas/LookupIdentityBlock',
+      );
+      expect(schema.required ?? []).not.toContain('identity');
+    });
+
+    it('should define IdentitySource enum with the six §3.2.0 sources', () => {
+      const schema = spec.components.schemas.IdentitySource as { enum?: string[] };
+      expect(schema).toBeDefined();
+      expect(schema.enum).toEqual([
+        'discogs',
+        'musicbrainz',
+        'wikidata',
+        'spotify',
+        'apple_music',
+        'bandcamp',
+      ]);
+    });
+
+    it('should define IdentityMethod enum matching §3.4.1 methods', () => {
+      const schema = spec.components.schemas.IdentityMethod as { enum?: string[] };
+      expect(schema).toBeDefined();
+      expect(schema.enum).toEqual([
+        'manual',
+        'cross_source_agreement',
+        'exact_match',
+        'name_variation',
+        'member_group',
+        'alias_match',
+        'trigram',
+        'llm',
+      ]);
+    });
+
+    it('should define IdentitySkipReason enum', () => {
+      const schema = spec.components.schemas.IdentitySkipReason as { enum?: string[] };
+      expect(schema).toBeDefined();
+      expect(schema.enum).toEqual([
+        'error',
+        'manual_override_protected',
+        'disabled',
+        'prerequisite_failed',
+      ]);
+    });
+
+    it('should define IdentityResolution requiring source + attempted', () => {
+      const schema = spec.components.schemas.IdentityResolution as {
+        required: string[];
+        properties: Record<string, { nullable?: boolean; $ref?: string; allOf?: unknown[] }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(['source', 'attempted']);
+      expect(schema.properties.source.$ref).toBe('#/components/schemas/IdentitySource');
+      // external_id, method, confidence, reason all nullable so a skipped
+      // leg can NULL them.
+      expect(schema.properties.external_id.nullable).toBe(true);
+      expect(schema.properties.confidence.nullable).toBe(true);
+    });
+
+    it('should define LookupIdentityBlock with required `resolved` array', () => {
+      const schema = spec.components.schemas.LookupIdentityBlock as {
+        required: string[];
+        properties: { resolved: { type: string; items: { $ref?: string } } };
+      };
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(['resolved']);
+      expect(schema.properties.resolved.type).toBe('array');
+      expect(schema.properties.resolved.items.$ref).toBe(
+        '#/components/schemas/IdentityResolution',
+      );
+    });
+  });
+
   describe('Proxy Response Schemas', () => {
     it('should define AlbumMetadataResponse with enriched fields', () => {
       const schema = spec.components.schemas.AlbumMetadataResponse as {
