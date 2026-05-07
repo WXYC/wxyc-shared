@@ -348,6 +348,14 @@ interface CharsetTortureEntry {
 
 The corpus is keyed by category — `greek`, `cyrillic`, `cjk`, `arabic`, `hebrew`, `emoji`, `latin_extended`, `bidi_marks`, `zwj`, `normalization`, `mojibake_known`, `quoting`. See `src/test-utils/charset-torture.ts` for the full type and the flattened `charsetTortureEntries` iterator.
 
+### Detector authoring rule
+
+A WX-1 detector iterates the corpus, writes each `entry.input` through the storage path under test, reads it back, and asserts byte-equality. The rule for what the detector is allowed to skip is narrow: **filter only what breaks the test's transport, never what tests the detector's job.**
+
+Some entries genuinely can't pass through some transports — a literal U+0009 tab inside a TSV builder breaks the TSV format itself, not the detector. For those cases it's correct to filter the input out of that test and record the case as an EXPECTED_FAILURE with a stable tag like `[<repo>:tsv-tab-byte]`. The tag pins the skip to a known transport limitation rather than a charset bug.
+
+It is **not** correct to filter inputs that are precisely what the detector exists to surface. A PG TEXT write-boundary detector must not pre-filter NUL-containing inputs: those are the cases the boundary needs to handle. If the import path mishandles them, the detector is supposed to fail — tag the xfail with the same `[<repo>:pg-null-byte]` shape and let the failure stand until the boundary is fixed. Once the fix lands, the assertion compares the read-back to whatever the policy says the stored form should be (e.g. `input.replace('\0', '')` for strip-at-boundary), and the xfail entry retires in the same commit. If you find yourself writing `if input.contains('\0') { continue; }` before the storage call, the detector has stopped testing its boundary.
+
 ### TypeScript consumers
 
 ```ts
