@@ -9,6 +9,7 @@
  * Canonical JSON: src/test-utils/charset-torture.json. Non-TS consumers
  * extract that file from the published @wxyc/shared tarball and pin its
  * SHA-256; see the README "Charset Torture Corpus" section for recipes.
+ * Detector authoring rule: see README "Detector authoring rule".
  */
 
 import data from './charset-torture.json' with { type: 'json' };
