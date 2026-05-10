@@ -2391,6 +2391,14 @@ components:
             $ref: '#/components/schemas/BulkResolveInput'
           description: >
             Inputs to resolve. Order preserved in `BulkResolveLibrariesResponse.results`.
+      example:
+        inputs:
+          - library_id: 1234
+            artist_name: "Juana Molina"
+            album_title: "DOGA"
+          - library_id: 5678
+            artist_name: "Various Artists"
+            album_title: "Edits"
 
     BulkResolveInput:
       type: object
@@ -2450,11 +2458,14 @@ components:
           type: number
           minimum: 0
           maximum: 1
+          nullable: true
           description: >
             Per-source confidence in [0, 1], within the source's locked
-            method range from §3.4.1. Equal to or greater than the
-            top-level `confidence` (composition rules either MIN or boost,
-            never lower a per-source row).
+            method range from §3.4.1. NULL when `external_id` is NULL —
+            the source ran but produced no candidate, so confidence is
+            undefined (not zero). When non-null, equal to or greater than
+            the top-level `confidence` (composition rules either MIN or
+            boost, never lower a per-source row).
         external_id:
           type: string
           nullable: true
@@ -2462,7 +2473,8 @@ components:
             The external identifier this source resolved to (Discogs
             release ID, MusicBrainz MBID, Wikidata QID, Spotify URI
             suffix, etc.). NULL when the source ran but found no match
-            (the row is still surfaced so consumers see the leg ran).
+            (the row is still surfaced so consumers see the leg ran);
+            `confidence` is also NULL in that case.
 
     BulkResolveTrackIdentity:
       type: object
@@ -2544,11 +2556,10 @@ components:
             $ref: '#/components/schemas/BulkResolveProvenanceEntry'
         tracks:
           type: array
-          nullable: true
           description: >
-            Set only for `kind: compilation`. Per-track identity for the
-            V/A row; empty array when LML has no per-track data for the
-            row yet. NULL for every other `kind`.
+            Set only for `kind: compilation`; absent for every other `kind`.
+            Empty array when LML has no per-track data for the V/A row yet.
+            Two states (present-array or absent), not three.
           items:
             $ref: '#/components/schemas/BulkResolveTrackIdentity'
 
@@ -2559,6 +2570,42 @@ components:
         of `results` matches the order of the request's `inputs`.
       required:
         - results
+      example:
+        results:
+          - kind: single_artist
+            library_id: 1234
+            main:
+              discogs_artist_id: 12345
+              musicbrainz_artist_id: "abc-def-12345"
+              wikidata_qid: "Q12345"
+            method: cross_source_agreement
+            confidence: 0.95
+            provenance:
+              - source: discogs
+                method: exact_match
+                confidence: 0.98
+                external_id: "12345"
+              - source: musicbrainz
+                method: alias_match
+                confidence: 0.95
+                external_id: "abc-def-12345"
+          - kind: compilation
+            library_id: 5678
+            provenance: []
+            tracks:
+              - track_position: "A1"
+                sources:
+                  - source: discogs
+                    method: exact_match
+                    confidence: 0.90
+                    external_id: "release/789"
+          - kind: unresolved
+            library_id: 9999
+            provenance:
+              - source: discogs
+                method: exact_match
+                confidence: null
+                external_id: null
       properties:
         results:
           type: array
