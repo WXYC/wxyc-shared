@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.1.0
+  version: 1.2.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -27,6 +27,14 @@ components:
       type: http
       scheme: bearer
       description: JWT token from Better Auth
+    LMLBearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Static bearer token for the library-metadata-lookup (LML) service.
+        Configured via the `LML_API_KEY` env var on each consumer (Backend,
+        request-o-matic, tubafrenzy). Distinct from `BearerAuth` (Better Auth
+        JWTs); LML routes verify only this static key.
 
   schemas:
     # ===================
@@ -2337,6 +2345,228 @@ components:
           items:
             $ref: '#/components/schemas/IdentityResolution'
 
+    # ====================================================================
+    # Bulk-Resolve-Libraries (cross-cache-identity pivot)
+    # ====================================================================
+    #
+    # The HTTP-only seam between Backend and LML after the 2026-05-09
+    # architecture pivot (WXYC/Backend-Service#800): Backend stops
+    # composing cross-cache identity from multiple PG schemas; LML becomes
+    # the sole composer. Backend POSTs a batch of library rows and receives
+    # a verdict per input — composed external IDs, the chosen method,
+    # confidence, and per-source provenance.
+    #
+    # Request shape is uniform: `{library_id, artist_name, album_title}`.
+    # LML auto-detects V/A from the row (per `library.code_volume_letters
+    # LIKE 'Z%'` or `EXISTS compilation_track_artist`) and discriminates
+    # the response on `kind`:
+    #
+    #     - `kind: "single_artist"` — resolved single-artist library row;
+    #                                  `main` carries the composed identity.
+    #     - `kind: "compilation"`   — V/A row; `tracks` carries per-track
+    #                                  identity (empty array if LML has no
+    #                                  track data for it yet). `main` is
+    #                                  null (no album-level artist anchor).
+    #     - `kind: "unresolved"`    — LML attempted resolution and found
+    #                                  nothing actionable; first-class
+    #                                  outcome so Backend can cache and
+    #                                  not re-ask. `main` and `tracks`
+    #                                  are both null. Audit detail lives
+    #                                  in `provenance` (empty means LML
+    #                                  tried and nothing resolved).
+
+    BulkResolveLibrariesRequest:
+      type: object
+      description: >
+        Bulk identity-resolution request. Order is preserved in the
+        response. Up to 1,000 inputs per call (see endpoint cap).
+      required:
+        - inputs
+      properties:
+        inputs:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/BulkResolveInput'
+          description: >
+            Inputs to resolve. Order preserved in `BulkResolveLibrariesResponse.results`.
+
+    BulkResolveInput:
+      type: object
+      description: >
+        One library row to resolve. Uniform shape — LML auto-detects V/A
+        from the row and discriminates the response on `kind`. The
+        denormalized hint fields (`artist_name`, `album_title`) are not
+        required to be canonical; LML may use them as matcher hints or
+        ignore them in favour of its own mirror of Backend's library data.
+        They are present so LML doesn't need a Backend DB read to resolve.
+      required:
+        - library_id
+        - artist_name
+        - album_title
+      properties:
+        library_id:
+          type: integer
+          description: Backend `wxyc_schema.library.id` (FK target).
+        artist_name:
+          type: string
+          description: Hint — Backend's denormalized artist name for the row.
+        album_title:
+          type: string
+          description: Hint — Backend's denormalized album title for the row.
+
+    BulkResolveResultKind:
+      type: string
+      description: >
+        Discriminator for `BulkResolveResult`. `single_artist` carries a
+        composed `main` identity. `compilation` carries `tracks` (empty
+        array if LML has no per-track data for the V/A row yet).
+        `unresolved` is a first-class outcome — caching it (with TTL)
+        prevents repeated re-asking for unresolvable rows.
+      enum:
+        - single_artist
+        - compilation
+        - unresolved
+
+    BulkResolveProvenanceEntry:
+      type: object
+      description: >
+        One per-source row in LML's reconciliation log for a single
+        result. Surfaces the (source, method, confidence, external_id)
+        tuple that fed §3.4.1.1 composition. Always returned (empty
+        provenance array on `BulkResolveResult` means LML attempted the
+        cascade and no source produced a row).
+      required:
+        - source
+        - method
+        - confidence
+      properties:
+        source:
+          $ref: '#/components/schemas/IdentitySource'
+        method:
+          $ref: '#/components/schemas/IdentityMethod'
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: >
+            Per-source confidence in [0, 1], within the source's locked
+            method range from §3.4.1. Equal to or greater than the
+            top-level `confidence` (composition rules either MIN or boost,
+            never lower a per-source row).
+        external_id:
+          type: string
+          nullable: true
+          description: >
+            The external identifier this source resolved to (Discogs
+            release ID, MusicBrainz MBID, Wikidata QID, Spotify URI
+            suffix, etc.). NULL when the source ran but found no match
+            (the row is still surfaced so consumers see the leg ran).
+
+    BulkResolveTrackIdentity:
+      type: object
+      description: >
+        Per-track resolution for a V/A library row. One entry per
+        (library_id, track_position) the request resolved. Sources
+        reflect the per-source rows LML composed the track identity
+        from; the chosen identifiers are not lifted into a per-track
+        `external_ids` block at this contract version — Backend writes
+        the per-source rows verbatim into `library_track_identity_source`
+        per WXYC/library-metadata-lookup#271's design.
+      required:
+        - track_position
+        - sources
+      properties:
+        track_position:
+          type: string
+          description: Track position; matches the request input.
+        sources:
+          type: array
+          description: >
+            One per-source row per source LML composed the track from.
+            Empty array means LML attempted resolution at track grain
+            and found no matches.
+          items:
+            $ref: '#/components/schemas/BulkResolveProvenanceEntry'
+
+    BulkResolveResult:
+      type: object
+      description: >
+        One verdict per request input, in the same order as the request.
+        `kind` discriminates the body shape. `library_id` echoes the
+        request input so consumers can re-key the response without
+        relying on positional ordering.
+      required:
+        - kind
+        - library_id
+        - provenance
+      properties:
+        kind:
+          $ref: '#/components/schemas/BulkResolveResultKind'
+        library_id:
+          type: integer
+          description: Backend `library.id` for this result.
+        main:
+          allOf:
+            - $ref: '#/components/schemas/ReconciledIdentity'
+          nullable: true
+          description: >
+            Composed external IDs for `kind: single_artist`. NULL for
+            every other `kind`. URL construction is the consumer's job
+            (see existing ReconciledIdentity contract).
+        method:
+          allOf:
+            - $ref: '#/components/schemas/IdentityMethod'
+          nullable: true
+          description: >
+            The composed top-level method LML's bulk-resolve handler
+            picked per §3.4.1.1 (typically the strongest leg's method,
+            or `cross_source_agreement` when Rule 2 boosted). NULL for
+            `kind: unresolved`.
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: >
+            Composed top-level confidence in [0, 1] — the MIN of resolved
+            sources' confidences after composition (§3.4.1.1 Rule 4),
+            unless boosted by cross-source agreement (Rule 2). NULL for
+            `kind: unresolved`.
+        provenance:
+          type: array
+          description: >
+            Per-source rows feeding LML's composition. Always present;
+            empty array means LML attempted the cascade and no source
+            produced a row above the §3.4.1.1 Rule 6 floor.
+          items:
+            $ref: '#/components/schemas/BulkResolveProvenanceEntry'
+        tracks:
+          type: array
+          nullable: true
+          description: >
+            Set only for `kind: compilation`. Per-track identity for the
+            V/A row; empty array when LML has no per-track data for the
+            row yet. NULL for every other `kind`.
+          items:
+            $ref: '#/components/schemas/BulkResolveTrackIdentity'
+
+    BulkResolveLibrariesResponse:
+      type: object
+      description: >
+        Response to `POST /api/v1/identity/bulk-resolve-libraries`. Order
+        of `results` matches the order of the request's `inputs`.
+      required:
+        - results
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkResolveResult'
+        cache_stats:
+          $ref: '#/components/schemas/CacheStats'
+
     # ====================================
     # LML Discogs & Metadata Service Types
     # ====================================
@@ -3956,6 +4186,66 @@ paths:
                 $ref: '#/components/schemas/LookupResponse'
         '422':
           description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /api/v1/identity/bulk-resolve-libraries:
+    post:
+      summary: Bulk-resolve cross-cache identity for library rows
+      description: >
+        Per the cross-cache-identity architecture pivot
+        (WXYC/Backend-Service#800, 2026-05-09), this is the HTTP-only
+        seam between Backend and library-metadata-lookup (LML). LML is
+        the sole composer of cross-cache identity. Backend POSTs a batch
+        of library rows and receives one composed verdict per input —
+        chosen external IDs, the method and confidence that produced it,
+        and per-source provenance for audit. LML auto-detects V/A from
+        the row and discriminates the response on `kind`. The §3.4.1.1
+        composition rules (cross-source agreement boost, MIN-of-confidences,
+        sub-floor demotion) execute inside LML's handler; Backend writes
+        the response verbatim into `library_identity` and
+        `library_identity_source`. `kind: unresolved` is a first-class
+        outcome — Backend caches it (with TTL) so the same input is not
+        re-asked.
+      security:
+        - LMLBearerAuth: []
+      tags:
+        - lookup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkResolveLibrariesRequest'
+      responses:
+        '200':
+          description: Verdicts for every request input, in input order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkResolveLibrariesResponse'
+        '400':
+          description: Malformed request body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid `LML_API_KEY` bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '413':
+          description: Batch exceeded the 1,000-input cap.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Validation error (per-input field validation failed).
           content:
             application/json:
               schema:
