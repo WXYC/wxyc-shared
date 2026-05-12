@@ -3007,15 +3007,32 @@ components:
     # Library Search Types
     # ============================
 
+    TrackMatchSource:
+      type: string
+      enum:
+        - cta
+        - discogs_release
+        - discogs_master
+        - library_identity
+      description: >
+        Provenance of a TrackMatchHint. `cta` indicates Backend's local
+        `compilation_track_artist` lookup (Track 1, BS-local). `discogs_release` indicates
+        LML matched via a Discogs release_id (Track 2; pre-cross-cache-identity, this is a
+        direct CEI release-format hit; post-cross-cache-identity, it's a
+        `library_identity.discogs_release_id` hit). `discogs_master` indicates LML matched
+        via a Discogs master_id (Track 2; the more common pre-cross-cache-identity path,
+        since ~90% of CEI rows are master-format). `library_identity` indicates an
+        explicit substrate match — emitted post-cross-cache-identity when LML's pipeline
+        exposes the distinction in its response.
+
     TrackMatchHint:
       type: object
       description: >
         Populated on library search / lookup result items when a track-title match drove
-        the inclusion of this release. Per the catalog-track-search plan §5.2
-        (`https://github.com/WXYC/wiki/blob/main/plans/catalog-track-search.md#52-trackmatchhint-schema`),
-        the `source` field distinguishes the underlying match pathway so consumers can
-        render appropriate UX (e.g., qualitative "matched via Discogs (verified)" tooltips)
-        and downstream audits can break coverage down by source.
+        the inclusion of this release into the results. The `source` field distinguishes
+        the underlying match pathway so consumers can render appropriate UX (e.g.,
+        qualitative "matched via Discogs (verified)" tooltips) and downstream audits can
+        break coverage down by source.
       required:
         - title
         - source
@@ -3037,33 +3054,22 @@ components:
             Track position on the release as stored in the source (e.g., "A1", "B2", "5").
             String-typed to match Discogs's `release_track.position` shape, which uses
             vinyl-side notation for LP releases. Null when position is unknown or
-            inapplicable (e.g., CTA-derived matches that don't track position).
+            inapplicable (e.g., CTA-derived matches, since `compilation_track_artist` has
+            no position column).
         confidence:
           type: number
           minimum: 0
           maximum: 1
           nullable: true
           description: >
-            Confidence score for the underlying identity match (sourced from
-            `library_identity.confidence` post-`#25`, from `canonical_entity_confidence`
-            pre-`#25`, or 1.0 for curated CTA matches). Used by the UI to render
-            qualitative tooltips on the matched-via chip per plan §13 Q7.
+            Confidence score for the underlying identity match. Sourced from
+            `library_identity.confidence` post-cross-cache-identity, from
+            `canonical_entity_confidence` pre-cross-cache-identity, or fixed at 1.0 for
+            `cta`-source hits (the curated VA-disambiguation data is treated as
+            authoritative). Used by the UI to render qualitative tooltips on the chip;
+            consumers should not assume null for `cta` source.
         source:
-          type: string
-          enum:
-            - cta
-            - discogs_release
-            - discogs_master
-            - library_identity
-          description: >
-            Provenance of the match.
-            - `cta`: BS `compilation_track_artist` lookup (Track 1; BS-local).
-            - `discogs_release`: LML matched via Discogs release_id (Track 2; pre-`#25`
-              direct CEI release hit OR post-`#25` `library_identity.discogs_release_id`).
-            - `discogs_master`: LML matched via Discogs master_id (Track 2; the more
-              common pre-`#25` path, since 90% of CEI rows are master-format).
-            - `library_identity`: explicit substrate match (Track 2 post-`#25` when LML's
-              pipeline exposes this distinction in its response).
+          $ref: '#/components/schemas/TrackMatchSource'
 
     LibrarySearchItem:
       type: object

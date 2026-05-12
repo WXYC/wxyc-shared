@@ -8,7 +8,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   type FlowsheetEntryResponse,
+  type FlowsheetSongEntry,
   type Album,
+  type AlbumSearchResult,
   type Label,
   type DJ,
   type ScheduleShift,
@@ -19,12 +21,16 @@ import {
   type ReconciledIdentity,
   type HealthCheckResponse,
   type ReadinessResponse,
+  type LibrarySearchItem,
+  type LookupResultItem,
+  type TrackMatchHint,
   RotationBin,
   DayOfWeek,
   Genre,
   Format,
   RequestStatus,
   MetadataSource,
+  TrackMatchSource,
 } from '../src/generated/models/index.js';
 
 describe('Generated TypeScript Types', () => {
@@ -405,6 +411,174 @@ describe('Generated TypeScript Types', () => {
       expect(MetadataSource.spotify).toBe('spotify');
       expect(MetadataSource.cache).toBe('cache');
       expect(MetadataSource.none).toBe('none');
+    });
+
+    it('should define TrackMatchSource values', () => {
+      expect(TrackMatchSource.cta).toBe('cta');
+      expect(TrackMatchSource.discogs_release).toBe('discogs_release');
+      expect(TrackMatchSource.discogs_master).toBe('discogs_master');
+      expect(TrackMatchSource.library_identity).toBe('library_identity');
+    });
+  });
+
+  describe('TrackMatchHint (catalog-track-search §5.2)', () => {
+    it('should accept a minimal object with only required fields', () => {
+      const hint: TrackMatchHint = {
+        title: 'VI Scose Poise',
+        source: TrackMatchSource.discogs_master,
+      };
+
+      expect(hint.title).toBe('VI Scose Poise');
+      expect(hint.source).toBe('discogs_master');
+    });
+
+    it('should accept all optional fields', () => {
+      const hint: TrackMatchHint = {
+        title: 'In a Sentimental Mood',
+        artist_credit: 'Duke Ellington & John Coltrane',
+        position: 'A1',
+        confidence: 0.95,
+        source: TrackMatchSource.cta,
+      };
+
+      expect(hint.position).toBe('A1');
+      expect(hint.confidence).toBe(0.95);
+      expect(hint.artist_credit).toBe('Duke Ellington & John Coltrane');
+    });
+
+    it('should accept null for nullable optional fields', () => {
+      const hint: TrackMatchHint = {
+        title: 'la paradoja',
+        artist_credit: null,
+        position: null,
+        confidence: null,
+        source: TrackMatchSource.discogs_release,
+      };
+
+      expect(hint.artist_credit).toBeNull();
+      expect(hint.position).toBeNull();
+      expect(hint.confidence).toBeNull();
+    });
+  });
+
+  describe('matched_via on result schemas (catalog-track-search §5.1)', () => {
+    it('AlbumSearchResult.matched_via is optional and typed as TrackMatchHint[]', () => {
+      const withoutHint: AlbumSearchResult = {
+        id: 60359,
+        add_date: '2026-05-12T00:00:00Z',
+        album_title: 'Confield',
+        artist_name: 'Autechre',
+        code_letters: 'AU',
+        code_number: 8,
+        code_artist_number: 3,
+        format_name: 'CD',
+        genre_name: 'Electronic',
+        label: 'Warp Records',
+      };
+
+      const withHint: AlbumSearchResult = {
+        ...withoutHint,
+        matched_via: [
+          { title: 'VI Scose Poise', source: TrackMatchSource.discogs_master },
+        ],
+      };
+
+      expect(withoutHint.matched_via).toBeUndefined();
+      expect(withHint.matched_via?.[0].title).toBe('VI Scose Poise');
+    });
+
+    it('LibrarySearchItem.matched_via is optional and typed as TrackMatchHint[]', () => {
+      const item: LibrarySearchItem = {
+        id: 65880,
+        title: 'Confield',
+        artist: 'Autechre',
+        matched_via: [
+          { title: 'VI Scose Poise', source: TrackMatchSource.discogs_master, confidence: 0.85 },
+        ],
+      };
+
+      expect(item.matched_via?.[0].source).toBe('discogs_master');
+    });
+
+    it('LookupResultItem.matched_via is optional and typed as TrackMatchHint[]', () => {
+      const result: LookupResultItem = {
+        library_item: {
+          id: 60359,
+          title: 'Confield',
+          artist: 'Autechre',
+        },
+        matched_via: [
+          { title: 'VI Scose Poise', source: TrackMatchSource.library_identity, confidence: 0.92 },
+        ],
+      };
+
+      expect(result.matched_via?.[0].source).toBe('library_identity');
+    });
+
+    it('matched_via supports multiple hints per release (e.g., comps with two matching tracks)', () => {
+      const item: LibrarySearchItem = {
+        id: 6468,
+        title: "Jazz: The 50's, Volume I",
+        artist: 'Various Artists',
+        matched_via: [
+          { title: 'In a Sentimental Mood', artist_credit: 'Duke Ellington', source: TrackMatchSource.cta, confidence: 1.0 },
+          { title: 'Whistling Away The Dark', artist_credit: 'Abbey Lincoln', source: TrackMatchSource.cta, confidence: 1.0 },
+        ],
+      };
+
+      expect(item.matched_via?.length).toBe(2);
+    });
+  });
+
+  describe('track_position on flowsheet schemas (catalog-track-search §5.3)', () => {
+    it('FlowsheetSongEntry accepts optional track_position', () => {
+      const withoutPosition: FlowsheetSongEntry = {
+        id: 12345,
+        play_order: 100,
+        show_id: 42,
+        track_title: 'VI Scose Poise',
+        artist_name: 'Autechre',
+        album_title: 'Confield',
+        record_label: 'Warp Records',
+        request_flag: false,
+      };
+
+      const withPosition: FlowsheetSongEntry = {
+        ...withoutPosition,
+        track_position: '2',
+      };
+
+      expect(withoutPosition.track_position).toBeUndefined();
+      expect(withPosition.track_position).toBe('2');
+    });
+
+    it('FlowsheetSongEntry accepts null track_position', () => {
+      const entry: FlowsheetSongEntry = {
+        id: 12345,
+        play_order: 100,
+        show_id: 42,
+        track_title: 'VI Scose Poise',
+        artist_name: 'Autechre',
+        album_title: 'Confield',
+        record_label: 'Warp Records',
+        request_flag: false,
+        track_position: null,
+      };
+
+      expect(entry.track_position).toBeNull();
+    });
+
+    it('FlowsheetEntryResponse accepts vinyl-style track_position strings', () => {
+      const entry: FlowsheetEntryResponse = {
+        id: 12345,
+        play_order: 100,
+        show_id: 42,
+        request_flag: false,
+        track_title: 'In a Sentimental Mood',
+        track_position: 'A1',
+      };
+
+      expect(entry.track_position).toBe('A1');
     });
   });
 });
