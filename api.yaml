@@ -268,6 +268,14 @@ components:
             artist_wikipedia_url:
               type: string
               nullable: true
+            track_position:
+              type: string
+              nullable: true
+              description: >
+                Track position on the release (e.g., "A1", "B2", "5"). Populated when the
+                flowsheet entry was created via the dj-site picker after release selection
+                (catalog-track-search plan §5.3 / Track 3). String-typed to match Discogs's
+                `release_track.position`. Null for free-text entries and legacy rows.
 
     FlowsheetSongEntry:
       description: Song entry in the flowsheet
@@ -301,6 +309,15 @@ components:
               type: integer
             rotation_bin:
               $ref: '#/components/schemas/RotationBin'
+            track_position:
+              type: string
+              nullable: true
+              description: >
+                Track position on the release (e.g., "A1", "B2", "5"). Optional;
+                populated by the dj-site picker when a release with a resolvable
+                tracklist is chosen (catalog-track-search plan §5.3 / Track 3).
+                Free-text `track_title` remains the source of truth; this field is
+                additive metadata for future enrichment + analytics.
 
     FlowsheetShowBlockEntry:
       description: Show block entry (start or end of a DJ's show)
@@ -1006,6 +1023,15 @@ components:
           type: string
           nullable: true
           description: Album cover artwork URL from Discogs. Null if artwork has not been fetched yet or is unavailable.
+        matched_via:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackMatchHint'
+          description: >
+            Populated by Backend's catalog `/library/` search when a track-title match
+            (CTA or LML proxy fallback) drove this release into the results, per
+            catalog-track-search plan §5.1. Empty or absent on normal artist/album hits.
+            Backward-compatible — existing consumers ignore the field.
 
     AddAlbumRequest:
       type: object
@@ -2165,6 +2191,15 @@ components:
           $ref: '#/components/schemas/DiscogsMatchResult'
         reconciled_identity:
           $ref: '#/components/schemas/ReconciledIdentity'
+        matched_via:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackMatchHint'
+          description: >
+            Populated when a track-title match (LML's new SONG_AS_TRACK strategy)
+            drove this release into the results, per catalog-track-search plan §5.1.
+            Empty or absent when the release matched via artist/album strategies.
+            Backward-compatible — existing consumers ignore the field.
 
     CacheStats:
       type: object
@@ -2972,6 +3007,64 @@ components:
     # Library Search Types
     # ============================
 
+    TrackMatchHint:
+      type: object
+      description: >
+        Populated on library search / lookup result items when a track-title match drove
+        the inclusion of this release. Per the catalog-track-search plan §5.2
+        (`https://github.com/WXYC/wiki/blob/main/plans/catalog-track-search.md#52-trackmatchhint-schema`),
+        the `source` field distinguishes the underlying match pathway so consumers can
+        render appropriate UX (e.g., qualitative "matched via Discogs (verified)" tooltips)
+        and downstream audits can break coverage down by source.
+      required:
+        - title
+        - source
+      properties:
+        title:
+          type: string
+          description: The track title as stored in the source.
+        artist_credit:
+          type: string
+          nullable: true
+          description: >
+            Per-track artist credit (for compilations, where each track may credit a
+            distinct artist). Null for non-comp tracks where the release-level artist
+            applies.
+        position:
+          type: string
+          nullable: true
+          description: >
+            Track position on the release as stored in the source (e.g., "A1", "B2", "5").
+            String-typed to match Discogs's `release_track.position` shape, which uses
+            vinyl-side notation for LP releases. Null when position is unknown or
+            inapplicable (e.g., CTA-derived matches that don't track position).
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: >
+            Confidence score for the underlying identity match (sourced from
+            `library_identity.confidence` post-`#25`, from `canonical_entity_confidence`
+            pre-`#25`, or 1.0 for curated CTA matches). Used by the UI to render
+            qualitative tooltips on the matched-via chip per plan §13 Q7.
+        source:
+          type: string
+          enum:
+            - cta
+            - discogs_release
+            - discogs_master
+            - library_identity
+          description: >
+            Provenance of the match.
+            - `cta`: BS `compilation_track_artist` lookup (Track 1; BS-local).
+            - `discogs_release`: LML matched via Discogs release_id (Track 2; pre-`#25`
+              direct CEI release hit OR post-`#25` `library_identity.discogs_release_id`).
+            - `discogs_master`: LML matched via Discogs master_id (Track 2; the more
+              common pre-`#25` path, since 90% of CEI rows are master-format).
+            - `library_identity`: explicit substrate match (Track 2 post-`#25` when LML's
+              pipeline exposes this distinction in its response).
+
     LibrarySearchItem:
       type: object
       description: A single item from LML's library catalog search.
@@ -3016,6 +3109,15 @@ components:
         library_url:
           type: string
           description: URL to the release on wxyc.info
+        matched_via:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackMatchHint'
+          description: >
+            Populated when a track-title match drove this release into the results
+            (catalog-track-search plan §5.1). Empty or absent when the release matched
+            on artist / title normally. Backward-compatible — existing consumers ignore
+            the field.
 
     LibrarySearchResponse:
       type: object
