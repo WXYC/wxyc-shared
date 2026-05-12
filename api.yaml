@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.2.0
+  version: 1.3.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -92,6 +92,59 @@ components:
         time:
           type: string
           description: Time string (e.g., "14:00")
+
+    HealthCheckResponse:
+      type: object
+      description: |
+        Liveness response shape for `GET /health` (and equivalent) endpoints.
+        Cross-language contract owned by `wxyc-fastapi` (Python) and adopted
+        by Backend-Service (Node) via generated TS types.
+
+        `additionalProperties: true` lets services attach extra fields without
+        breaking consumers; semantic-index, for example, returns `artist_count`
+        alongside `status`.
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - unhealthy
+          description: |
+            Service-reported health. `healthy` = fully operational; `degraded`
+            = serving but with reduced capability; `unhealthy` = should not
+            receive traffic.
+      additionalProperties: true
+
+    ReadinessResponse:
+      description: |
+        Readiness response shape for `GET /ready` (and equivalent) endpoints.
+        Extends `HealthCheckResponse` with a per-dependency status map.
+        Each entry in `services` reports the live state of one external
+        dependency (database, upstream HTTP service, queue, etc.).
+
+        Status values:
+          - `ok`          — dependency reachable and responsive
+          - `unavailable` — dependency reachable but reporting an error,
+                            or the connection itself failed
+          - `timeout`     — dependency exceeded the readiness probe deadline
+      allOf:
+        - $ref: '#/components/schemas/HealthCheckResponse'
+        - type: object
+          required:
+            - services
+          properties:
+            services:
+              type: object
+              description: Per-dependency readiness map keyed by dependency name.
+              additionalProperties:
+                type: string
+                enum:
+                  - ok
+                  - unavailable
+                  - timeout
 
     Genre:
       type: string

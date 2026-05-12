@@ -17,6 +17,8 @@ import {
   type ArtistMetadataResponse,
   type TrackListItem,
   type ReconciledIdentity,
+  type HealthCheckResponse,
+  type ReadinessResponse,
   RotationBin,
   DayOfWeek,
   Genre,
@@ -312,6 +314,58 @@ describe('Generated TypeScript Types', () => {
 
       expect(identity.discogs_artist_id).toBe(7894);
       expect(identity.musicbrainz_artist_id).toBeNull();
+    });
+  });
+
+  describe('HealthCheckResponse', () => {
+    it('should accept the three documented status values', () => {
+      const healthy: HealthCheckResponse = { status: 'healthy' };
+      const degraded: HealthCheckResponse = { status: 'degraded' };
+      const unhealthy: HealthCheckResponse = { status: 'unhealthy' };
+
+      expect(healthy.status).toBe('healthy');
+      expect(degraded.status).toBe('degraded');
+      expect(unhealthy.status).toBe('unhealthy');
+    });
+
+    it('should accept arbitrary extension properties (additionalProperties: true)', () => {
+      // semantic-index extends the base shape with `artist_count`; the type
+      // must accept that without type errors.
+      const extended: HealthCheckResponse = {
+        status: 'healthy',
+        artist_count: 12345,
+        version: 'abc123',
+      };
+
+      expect(extended.status).toBe('healthy');
+      expect(extended.artist_count).toBe(12345);
+    });
+  });
+
+  describe('ReadinessResponse', () => {
+    it('should require status and a services map', () => {
+      const ready: ReadinessResponse = {
+        status: 'healthy',
+        services: {
+          postgres: 'ok',
+          discogs: 'unavailable',
+          spotify: 'timeout',
+        },
+      };
+
+      expect(ready.status).toBe('healthy');
+      expect(ready.services.postgres).toBe('ok');
+      expect(ready.services.discogs).toBe('unavailable');
+      expect(ready.services.spotify).toBe('timeout');
+    });
+
+    it('should allow an empty services map', () => {
+      const ready: ReadinessResponse = {
+        status: 'degraded',
+        services: {},
+      };
+
+      expect(ready.services).toEqual({});
     });
   });
 

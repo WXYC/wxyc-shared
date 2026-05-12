@@ -433,4 +433,52 @@ describe('OpenAPI Specification', () => {
       expect(spec.components.securitySchemes?.BearerAuth).toBeDefined();
     });
   });
+
+  describe('Healthcheck Schemas (wxyc-fastapi Phase C)', () => {
+    it('should define HealthCheckResponse with required status enum and additionalProperties', () => {
+      const schema = spec.components.schemas.HealthCheckResponse as {
+        type: string;
+        required: string[];
+        properties: Record<string, { type?: string; enum?: string[] }>;
+        additionalProperties?: boolean;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.type).toBe('object');
+      expect(schema.required).toEqual(['status']);
+      expect(schema.properties.status.type).toBe('string');
+      expect(schema.properties.status.enum).toEqual(['healthy', 'degraded', 'unhealthy']);
+      // Consumers may extend (e.g., semantic-index includes artist_count)
+      expect(schema.additionalProperties).toBe(true);
+    });
+
+    it('should define ReadinessResponse extending HealthCheckResponse with required services map', () => {
+      const schema = spec.components.schemas.ReadinessResponse as {
+        allOf: Array<{
+          $ref?: string;
+          type?: string;
+          required?: string[];
+          properties?: Record<
+            string,
+            {
+              type?: string;
+              additionalProperties?: { type?: string; enum?: string[] };
+            }
+          >;
+        }>;
+      };
+      expect(schema).toBeDefined();
+      expect(Array.isArray(schema.allOf)).toBe(true);
+      expect(schema.allOf).toHaveLength(2);
+
+      const [base, extension] = schema.allOf;
+      expect(base.$ref).toBe('#/components/schemas/HealthCheckResponse');
+
+      expect(extension.type).toBe('object');
+      expect(extension.required).toEqual(['services']);
+      const services = extension.properties?.services;
+      expect(services?.type).toBe('object');
+      expect(services?.additionalProperties?.type).toBe('string');
+      expect(services?.additionalProperties?.enum).toEqual(['ok', 'unavailable', 'timeout']);
+    });
+  });
 });
