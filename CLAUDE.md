@@ -2,6 +2,49 @@
 
 This is the shared library for WXYC services, published to GitHub Packages as `@wxyc/shared`.
 
+## Tag Stability Policy (READ BEFORE EDITING `.github/workflows/`)
+
+This repo publishes a reusable GitHub Actions workflow that other WXYC repos consume by tag:
+
+- `check-charset-corpus-drift.yml` — consumed as `WXYC/wxyc-shared/.github/workflows/check-charset-corpus-drift.yml@gha/v1`
+
+`gha/v1` is a **moving major tag**. It points at the latest commit on `main` that is non-breaking for the v1 contract. Consumers pin to `@gha/v1` to opt into compatible improvements; they pin to a SHA only if they want frozen behavior.
+
+### Before changing any reusable workflow, decide: is this breaking?
+
+A change is **breaking** if it does any of the following to a `workflow_call`-enabled file:
+
+1. Adds a new required `inputs:` entry, or removes/renames an existing input.
+2. Adds a new required `secrets:` entry, or removes/renames an existing secret.
+3. Removes or renames an `outputs:` entry.
+4. Changes the default value of an existing input in a way a consumer could depend on.
+5. Changes observable behavior consumers rely on — e.g. the job no longer fails on a condition it previously failed on, the runner OS major version bumps, a step that produced an artifact stops producing it.
+
+Anything else is **non-breaking**: bugfixes, perf work, internal refactors, *additive* optional inputs/outputs/secrets, dependency bumps that don't change observable behavior.
+
+### The bump procedure
+
+**Non-breaking change** — re-point `gha/v1` at the new commit after merge:
+
+```bash
+git fetch origin
+git tag -f gha/v1 origin/main
+git push --force origin gha/v1
+```
+
+**Breaking change** — *do not move `gha/v1`*. Cut `gha/v2` instead:
+
+```bash
+git tag -a gha/v2 -m "v2: <one-line summary of what broke>" origin/main
+git push origin gha/v2
+```
+
+Then file a migration ticket in every consumer repo that pins `@gha/v1` for this workflow. Search the org with `gh search code 'WXYC/wxyc-shared/.github/workflows/<file>.yml@gha/v1'` to find them.
+
+### Why this matters
+
+Force-pushing `gha/v1` past a breaking change silently breaks every consumer's CI the next time their workflow fires. Consumers have no signal — the `@gha/v1` ref is the same string they had yesterday. The cost of cutting `gha/v2` is one tag and one round of consumer PRs; the cost of breaking `gha/v1` is debugging in a dozen repos at once.
+
 ## Architecture
 
 This package provides:
