@@ -1868,6 +1868,39 @@ components:
             - master
             - artist
 
+    DiscogsResolveReleaseResponse:
+      type: object
+      description: >
+        Top-confidence Discogs release match for an `(artist, album)` pair.
+        Returned by `GET /api/v1/discogs/resolve-release`. Flat envelope —
+        the caller already has artist+album context and only needs the resolved
+        release_id (plus identifying fields for diagnostics/log lines).
+      required:
+        - release_id
+        - release_url
+      properties:
+        release_id:
+          type: integer
+          description: Discogs release ID of the best match.
+        title:
+          type: string
+          nullable: true
+          description: Release title as returned by Discogs (may differ from the query).
+        artist:
+          type: string
+          nullable: true
+          description: Primary artist name as returned by Discogs.
+        release_url:
+          type: string
+          description: Canonical Discogs URL, e.g. `https://www.discogs.com/release/12345`.
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          default: 0
+          description: Match confidence from LML's ranker (0.0 - 1.0).
+
     DiscogsArtistRef:
       type: object
       required:
@@ -4454,6 +4487,77 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '422':
           description: Validation error (per-input field validation failed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /api/v1/discogs/resolve-release:
+    get:
+      summary: Resolve a Discogs release ID from (artist, album)
+      description: >
+        Resolves an `(artist, album)` pair to the highest-confidence Discogs
+        release ID. Used by tubafrenzy's library release page to fetch a
+        tracklist (`/libraryReleaseTracks?id=…`). Replaces the legacy
+        `POST /api/v1/discogs/search` endpoint (removed 2026-04-25) for the
+        single-best-match use case; see WXYC/tubafrenzy#546 and
+        WXYC/library-metadata-lookup#315.
+        Returns 404 when no release matches. `artist` is optional — tubafrenzy
+        omits it for Various Artists / compilation releases to avoid polluting
+        fuzzy matching on LML's side.
+      security:
+        - LMLBearerAuth: []
+      tags:
+        - lookup
+      parameters:
+        - name: album
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Album / release title (required).
+        - name: artist
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Artist name. Optional.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 5
+          description: Maximum number of underlying search results to rank (only the top one is returned).
+      responses:
+        '200':
+          description: Top-confidence release match.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscogsResolveReleaseResponse'
+        '401':
+          description: Missing or invalid `LML_API_KEY` bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No matching release found for the given artist/album.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Missing required `album` parameter.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: Discogs service not configured on LML.
           content:
             application/json:
               schema:
