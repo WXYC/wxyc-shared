@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.3.0
+  version: 1.4.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -510,6 +510,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PlaylistSearchResult'
+        total:
+          type: integer
+        page:
+          type: integer
+        totalPages:
+          type: integer
+
+    LibraryQueryResponse:
+      type: object
+      required:
+        - results
+        - total
+        - page
+        - totalPages
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlbumSearchResult'
         total:
           type: integer
         page:
@@ -3906,6 +3925,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Album'
+
+  /library/query:
+    get:
+      summary: Query the card catalog with a parsed query string and filters
+      description: |
+        Search the library by a query-builder-style expression (the same grammar
+        as `/flowsheet/search`: `artist:foo AND album:"hello" NOT label:bar`,
+        with exact-match via double quotes). Combines parsed conditions with
+        optional catalog filters (`on_streaming`, `genre`, `format`) via `AND`.
+        Returns a paginated envelope.
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Search query (supports AND, OR, NOT, exact phrases). Empty/omitted returns recent additions.
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [artist, album, plays, date]
+            default: album
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+        - name: on_streaming
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: When set, restricts results to releases with this streaming-availability state.
+        - name: genre
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by genre name (matches `library_artist_view.genre_name`).
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by format name (matches `library_artist_view.format_name`).
+      responses:
+        '200':
+          description: Paginated catalog search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryQueryResponse'
 
   /library/rotation:
     get:
