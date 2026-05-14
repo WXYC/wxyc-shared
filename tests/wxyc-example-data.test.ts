@@ -73,6 +73,19 @@ describe('WXYC Example Data', () => {
     expect(Object.values(wxycExampleFlowsheetEntries)).toEqual(wxycExampleFlowsheetList);
   });
 
+  // Bind named exports to expected IDs so a future reorder of the JSON array
+  // can't silently rebind a name to the wrong row. Without this, e.g. swapping
+  // searchResults[2] and searchResults[3] would still satisfy the variant
+  // coverage tests above but break every downstream consumer that uses the
+  // named export.
+  it('named search results bind to the expected fixture IDs', () => {
+    expect(wxycExampleSearchResults.doga.id).toBe(9001);
+    expect(wxycExampleSearchResults.moonPix.id).toBe(9003);
+    expect(wxycExampleSearchResults.aluminumTunesExclusive.id).toBe(9002);
+    expect(wxycExampleSearchResults.painlessRotationS.id).toBe(9006);
+    expect(wxycExampleSearchResults.variousArtistsComp.id).toBe(9009);
+  });
+
   it('search results reference valid artist names (or the V/A sentinel)', () => {
     const artistNames = new Set(wxycExampleArtistList.map(a => a.artist_name));
     for (const result of Object.values(wxycExampleSearchResults)) {
@@ -99,7 +112,7 @@ describe('WXYC Example Data', () => {
     expect(wxycExampleFlowsheetList.some(e => e.request_flag === true)).toBe(true);
   });
 
-  it('segue rows reference the same album as the preceding entry', () => {
+  it('segue rows reference the same album and artist as the preceding entry', () => {
     for (let i = 0; i < wxycExampleFlowsheetList.length; i++) {
       const entry = wxycExampleFlowsheetList[i]!;
       if (entry.segue !== true) continue;
@@ -107,6 +120,7 @@ describe('WXYC Example Data', () => {
       const prev = wxycExampleFlowsheetList[i - 1]!;
       expect(entry.album_id).toBeDefined();
       expect(entry.album_id).toBe(prev.album_id);
+      expect(entry.artist_name).toBe(prev.artist_name);
     }
   });
 
