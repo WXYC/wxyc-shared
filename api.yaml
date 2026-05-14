@@ -2081,6 +2081,32 @@ components:
             is omitted. Backend's `library-identity-writer.ts` (E2-BS) sets
             this to true on every call; other consumers (catalog search,
             dj-site proxy, iOS apps) leave it false.
+        extended:
+          type: boolean
+          default: false
+          description: >
+            When true, the top-1 result's `artwork` block is populated with
+            additional fields LML already fetches during enrichment but
+            normally discards: `discogs_artist_id`, `tracklist`, `genres`,
+            `styles`, `label`, `full_release_date`, `artist_image_url`, and
+            `bio_tokens` (cache-only deep parse of the artist's profile
+            markup). Lets a caller obtain a full playcut metadata payload in
+            a single `/lookup` call instead of following up with separate
+            `/discogs/release/{id}` and `/discogs/artist/{id}` requests.
+            When false (the default), the response shape is unchanged.
+        warm_cache:
+          type: boolean
+          default: false
+          description: >
+            When true, LML schedules a fire-and-forget background task after
+            the response is built that runs a *deep* async parse of the
+            top-1 artist's bio. The task resolves all `[a…]`/`[r…]`/`[m…]`
+            references against the Discogs API where the local cache misses,
+            warming the PG cache so subsequent reads of the same artist
+            render richer bio tokens. Intended for write-path callers (e.g.
+            Backend-Service's flowsheet-linkage service committing a new DJ
+            entry); read-path callers should leave this false to avoid
+            doubling the Discogs-API load per request.
 
     LibraryCatalogItem:
       type: object
@@ -2197,6 +2223,72 @@ components:
           type: string
           nullable: true
           description: SoundCloud search URL
+        discogs_artist_id:
+          type: integer
+          nullable: true
+          description: >
+            Discogs artist ID for this release. Populated only when the
+            originating `LookupRequest.extended` is true. Lets a caller key
+            an artist-metadata cache without a follow-up release fetch.
+        tracklist:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/DiscogsTrackItem'
+          description: >
+            Release tracklist with per-track artist credits where available.
+            Populated only when `extended` is true.
+        genres:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: >
+            Discogs genre tags (e.g. "Rock", "Electronic"). Populated only
+            when `extended` is true.
+        styles:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: >
+            Discogs style tags (finer-grained than genres; e.g. "Indie Rock",
+            "Ambient"). Populated only when `extended` is true.
+        label:
+          type: string
+          nullable: true
+          description: >
+            Primary record-label name from the Discogs release. Distinct
+            from `LibraryCatalogItem.label` (which comes from the WXYC
+            catalog's rotation-release join). Populated only when `extended`
+            is true.
+        full_release_date:
+          type: string
+          nullable: true
+          description: >
+            Release date as an ISO string (e.g. "1997-09-22"). May be
+            year-only ("1997") or year-month ("1997-09") if Discogs lacks
+            the full date. Populated only when `extended` is true.
+        artist_image_url:
+          type: string
+          nullable: true
+          description: >
+            Primary artist image URL from Discogs (the artist's profile
+            photo, not the release artwork). Populated only when `extended`
+            is true.
+        bio_tokens:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/DiscogsResolvedToken'
+          description: >
+            Pre-parsed structured tokens from the artist's `profile` markup,
+            using a cache-only resolver — references to entities not in the
+            local PG cache fall through as plain-text tokens (no inline
+            Discogs API calls on the read path). Populated only when
+            `extended` is true. Pair with `LookupRequest.warm_cache=true`
+            on write-path calls to progressively populate the cache so
+            subsequent reads render richer.
 
     LookupResultItem:
       type: object
