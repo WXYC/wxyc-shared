@@ -3947,15 +3947,20 @@ paths:
           in: query
           schema:
             type: integer
+            minimum: 0
             default: 0
         - name: limit
           in: query
           schema:
             type: integer
-            default: 50
+            minimum: 1
             maximum: 100
+            default: 50
         - name: sort
           in: query
+          description: |
+            Sort field. `date` means the catalog-addition date — when the album was
+            added to the WXYC library — not flowsheet play date.
           schema:
             type: string
             enum: [artist, album, plays, date]
@@ -3971,19 +3976,26 @@ paths:
           required: false
           schema:
             type: boolean
-          description: When set, restricts results to releases with this streaming-availability state.
+          description: |
+            When omitted, all releases are returned regardless of streaming state.
+            `on_streaming=true` returns only releases known to be on at least one
+            streaming service (`AlbumSearchResult.on_streaming = true`); releases
+            whose streaming state is unknown (`null`) are excluded.
+            `on_streaming=false` returns the complement — releases known to be
+            absent from streaming (`AlbumSearchResult.on_streaming = false`),
+            again excluding unknowns.
         - name: genre
           in: query
           required: false
           schema:
             type: string
-          description: Filter by genre name (matches `library_artist_view.genre_name`).
+          description: Filter by genre name (matches `AlbumSearchResult.genre_name`).
         - name: format
           in: query
           required: false
           schema:
             type: string
-          description: Filter by format name (matches `library_artist_view.format_name`).
+          description: Filter by format name (matches `AlbumSearchResult.format_name`).
       responses:
         '200':
           description: Paginated catalog search results
