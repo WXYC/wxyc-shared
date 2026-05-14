@@ -45,6 +45,22 @@ Then file a migration ticket in every consumer repo that pins `@gha/v1` for this
 
 Force-pushing `gha/v1` past a breaking change silently breaks every consumer's CI the next time their workflow fires. Consumers have no signal — the `@gha/v1` ref is the same string they had yesterday. The cost of cutting `gha/v2` is one tag and one round of consumer PRs; the cost of breaking `gha/v1` is debugging in a dozen repos at once.
 
+### Caller permissions contract
+
+Callers of `check-charset-corpus-drift.yml` must grant at minimum:
+
+```yaml
+permissions:
+  contents: read
+  packages: read   # `npm pack @wxyc/shared` authenticates to npm.pkg.github.com via the caller's GITHUB_TOKEN, forwarded as the `npm-token` secret
+```
+
+Granting less makes the `npm pack` step fail with an opaque 401 — the workflow does fail (not startup_failure), but a reader of the caller's `permissions:` block won't see why. The reusable workflow itself declares `permissions: contents: read` at workflow level; `packages: read` rides on the secret the caller forwards, so it has to come from the caller's own permissions block.
+
+**Escalating the required caller permissions is itself a breaking change** (rule 5 above — observable behavior). If a revision of this workflow needs another scope from the caller (e.g., `id-token: write` for OIDC), cut `gha/v2` and migrate consumers. The asymmetry matters: dropping a required scope is non-breaking; adding one breaks every caller that hardened to the previous floor.
+
+Watch for the **caller-callee narrowing trap** when changing the workflow's own `permissions:` block: if a reusable workflow declares `contents: write` at the workflow level (e.g., to push tags) but its callers hardened to `contents: read`, the matrix run startup_failures with no jobs and no obvious error. See [WXYC/Backend-Service#857](https://github.com/WXYC/Backend-Service/issues/857) (silent for 10 commits across 2 days) and PR [#858](https://github.com/WXYC/Backend-Service/pull/858) for the recovery pattern. `check-charset-corpus-drift.yml` is read-only today, so it can't trip this — but the trap applies to any future revision that takes a write scope, and a `gha/v2` migration is the safest way to surface it.
+
 ## Architecture
 
 This package provides:
