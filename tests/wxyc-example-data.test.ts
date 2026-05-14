@@ -19,8 +19,8 @@ describe('WXYC Example Data', () => {
     expect(wxycExampleAlbumList).toHaveLength(8);
   });
 
-  it('provides exactly 7 example flowsheet entries', () => {
-    expect(wxycExampleFlowsheetList).toHaveLength(7);
+  it('provides exactly 8 example flowsheet entries', () => {
+    expect(wxycExampleFlowsheetList).toHaveLength(8);
   });
 
   it('includes diacritic-bearing structured fixtures (ü, ñ, multi-diacritic Turkish ş+ı)', () => {
@@ -73,11 +73,62 @@ describe('WXYC Example Data', () => {
     expect(Object.values(wxycExampleFlowsheetEntries)).toEqual(wxycExampleFlowsheetList);
   });
 
-  it('search results reference valid artist names', () => {
+  it('search results reference valid artist names (or the V/A sentinel)', () => {
     const artistNames = new Set(wxycExampleArtistList.map(a => a.artist_name));
     for (const result of Object.values(wxycExampleSearchResults)) {
-      expect(artistNames.has(result.artist_name)).toBe(true);
+      const isVariousArtists = result.artist_name === 'Various Artists';
+      expect(isVariousArtists || artistNames.has(result.artist_name)).toBe(true);
     }
+  });
+
+  // Variant coverage for Classic-mode capsule and segue rendering.
+  // Consumers (dj-site, tubafrenzy parity tests, BS API tests) need at least
+  // one fixture row per visible variant so they can exercise the rendering
+  // paths without inventing ad-hoc data.
+
+  it('covers each rotation_bin value (H/M/L/S) in at least one flowsheet entry', () => {
+    const bins = new Set(wxycExampleFlowsheetList.map(e => e.rotation_bin));
+    expect(bins.has('H')).toBe(true);
+    expect(bins.has('M')).toBe(true);
+    expect(bins.has('L')).toBe(true);
+    expect(bins.has('S')).toBe(true);
+  });
+
+  it('covers segue=true and request_flag=true in flowsheet entries', () => {
+    expect(wxycExampleFlowsheetList.some(e => e.segue === true)).toBe(true);
+    expect(wxycExampleFlowsheetList.some(e => e.request_flag === true)).toBe(true);
+  });
+
+  it('segue rows reference the same album as the preceding entry', () => {
+    for (let i = 0; i < wxycExampleFlowsheetList.length; i++) {
+      const entry = wxycExampleFlowsheetList[i]!;
+      if (entry.segue !== true) continue;
+      expect(i).toBeGreaterThan(0); // segue can't be on the first row
+      const prev = wxycExampleFlowsheetList[i - 1]!;
+      expect(entry.album_id).toBeDefined();
+      expect(entry.album_id).toBe(prev.album_id);
+    }
+  });
+
+  it('covers on_streaming=false in at least one search result (EXCLUSIVE capsule fixture)', () => {
+    const exclusives = Object.values(wxycExampleSearchResults).filter(
+      r => r.on_streaming === false
+    );
+    expect(exclusives.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('covers rotation_bin in at least one search result (ROTATION capsule fixture)', () => {
+    const rotated = Object.values(wxycExampleSearchResults).filter(
+      r => r.rotation_bin !== undefined
+    );
+    expect(rotated.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('covers album_artist (Various Artists credit) in at least one search result', () => {
+    const compilations = Object.values(wxycExampleSearchResults).filter(
+      r => r.album_artist !== undefined
+    );
+    expect(compilations.length).toBeGreaterThanOrEqual(1);
   });
 });
 

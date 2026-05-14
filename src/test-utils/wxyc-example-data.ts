@@ -62,6 +62,14 @@ export const wxycExampleAlbums = {
 // Flowsheet Entries (FlowsheetSongEntry -- narrower type, all required fields)
 // ============================================================================
 
+// Flowsheet entries carry rotation_bin/segue/request_flag variants to exercise
+// Classic-mode capsule and segue rendering:
+//   - juanaMolinaLaParadoja        → rotation_bin: 'H'  (heavy)
+//   - jessicaPrattBackBaby         → rotation_bin: 'M'  (medium)
+//   - chuquimamaniCondoriCallYourName → rotation_bin: 'L'  (light)
+//   - dukeEllingtonSentimentalMood → request_flag: true
+//   - niluferYanyaMidnightSun      → rotation_bin: 'S'  (singles)
+//   - asiqAltayBayatiShiraz        → segue: true (follows asiqAltayHuseyni, same album)
 export const wxycExampleFlowsheetEntries = {
   juanaMolinaLaParadoja: flowsheetEntries[0]!,
   jessicaPrattBackBaby: flowsheetEntries[1]!,
@@ -70,15 +78,25 @@ export const wxycExampleFlowsheetEntries = {
   niluferYanyaMidnightSun: flowsheetEntries[4]!,
   sonidoDuenezMentirosoBoquisabroso: flowsheetEntries[5]!,
   asiqAltayHuseyni: flowsheetEntries[6]!,
+  asiqAltayBayatiShiraz: flowsheetEntries[7]!,
 } as const;
 
 // ============================================================================
 // Album Search Results
 // ============================================================================
 
+// Search results cover the visible variants exercised by Classic catalog rows:
+//   - doga                  → plain (no rotation, no on_streaming flag)
+//   - moonPix               → plain
+//   - aluminumTunesExclusive → on_streaming: false (EXCLUSIVE capsule)
+//   - painlessRotationS     → rotation_bin: 'S', on_streaming: true (ROTATION capsule)
+//   - variousArtistsComp    → album_artist: 'Various Artists' (V/A credited)
 export const wxycExampleSearchResults = {
   doga: searchResults[0]!,
   moonPix: searchResults[1]!,
+  aluminumTunesExclusive: searchResults[2]!,
+  painlessRotationS: searchResults[3]!,
+  variousArtistsComp: searchResults[4]!,
 } as const;
 
 // ============================================================================
