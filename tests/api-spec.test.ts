@@ -373,6 +373,87 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  describe('Lookup Extended Metadata (subsecond iOS metadata path)', () => {
+    type SchemaProp = {
+      type?: string;
+      default?: unknown;
+      nullable?: boolean;
+      items?: { $ref?: string; type?: string };
+      $ref?: string;
+    };
+
+    it('should define LookupRequest.extended as optional boolean defaulting to false', () => {
+      const schema = spec.components.schemas.LookupRequest as {
+        properties: Record<string, SchemaProp>;
+        required?: string[];
+      };
+      expect(schema.properties.extended).toBeDefined();
+      expect(schema.properties.extended.type).toBe('boolean');
+      expect(schema.properties.extended.default).toBe(false);
+      // Not required — non-iOS consumers continue to omit it.
+      expect(schema.required ?? []).not.toContain('extended');
+    });
+
+    it('should define LookupRequest.warm_cache as optional boolean defaulting to false', () => {
+      const schema = spec.components.schemas.LookupRequest as {
+        properties: Record<string, SchemaProp>;
+        required?: string[];
+      };
+      expect(schema.properties.warm_cache).toBeDefined();
+      expect(schema.properties.warm_cache.type).toBe('boolean');
+      expect(schema.properties.warm_cache.default).toBe(false);
+      // Read-path callers leave this false to avoid doubling Discogs-API load.
+      expect(schema.required ?? []).not.toContain('warm_cache');
+    });
+
+    it('should attach the extended-metadata fields to DiscogsMatchResult', () => {
+      const schema = spec.components.schemas.DiscogsMatchResult as {
+        properties: Record<string, SchemaProp>;
+        required?: string[];
+      };
+
+      // Each new field is optional + nullable so the additive contract
+      // doesn't break the LML/BS/iOS consumers that omit `extended`.
+      const optional = (name: string) => {
+        expect(schema.properties[name]).toBeDefined();
+        expect(schema.required ?? []).not.toContain(name);
+        expect(schema.properties[name].nullable).toBe(true);
+      };
+
+      optional('discogs_artist_id');
+      expect(schema.properties.discogs_artist_id.type).toBe('integer');
+
+      optional('tracklist');
+      expect(schema.properties.tracklist.type).toBe('array');
+      expect(schema.properties.tracklist.items?.$ref).toBe(
+        '#/components/schemas/DiscogsTrackItem',
+      );
+
+      optional('genres');
+      expect(schema.properties.genres.type).toBe('array');
+      expect(schema.properties.genres.items?.type).toBe('string');
+
+      optional('styles');
+      expect(schema.properties.styles.type).toBe('array');
+      expect(schema.properties.styles.items?.type).toBe('string');
+
+      optional('label');
+      expect(schema.properties.label.type).toBe('string');
+
+      optional('full_release_date');
+      expect(schema.properties.full_release_date.type).toBe('string');
+
+      optional('artist_image_url');
+      expect(schema.properties.artist_image_url.type).toBe('string');
+
+      optional('bio_tokens');
+      expect(schema.properties.bio_tokens.type).toBe('array');
+      expect(schema.properties.bio_tokens.items?.$ref).toBe(
+        '#/components/schemas/DiscogsResolvedToken',
+      );
+    });
+  });
+
   describe('Proxy Response Schemas', () => {
     it('should define AlbumMetadataResponse with enriched fields', () => {
       const schema = spec.components.schemas.AlbumMetadataResponse as {
