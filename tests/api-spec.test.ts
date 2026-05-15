@@ -107,6 +107,50 @@ describe('OpenAPI Specification', () => {
     it('should define OnAirStatusResponse', () => {
       expect(spec.components.schemas.OnAirStatusResponse).toBeDefined();
     });
+
+    describe('track_position field (catalog-track-search Track 3 / E6)', () => {
+      function getProperty(schemaName: string, prop: string): Record<string, unknown> | undefined {
+        const schema = spec.components.schemas[schemaName] as
+          | { properties?: Record<string, Record<string, unknown>>; allOf?: Array<{ properties?: Record<string, Record<string, unknown>> }> }
+          | undefined;
+        if (!schema) return undefined;
+        if (schema.properties?.[prop]) return schema.properties[prop];
+        for (const branch of schema.allOf ?? []) {
+          if (branch.properties?.[prop]) return branch.properties[prop];
+        }
+        return undefined;
+      }
+
+      // String-typed to match Discogs's `release_track.position` (vinyl "A1",
+      // CD "5", multi-disc "1-12"). FlowsheetEntryBase + FlowsheetSongEntry
+      // already use this convention on the read side; E6-1 fills the write-side
+      // gap (FlowsheetCreateSongFromCatalog, FlowsheetUpdateRequest) and the V2
+      // response shape (FlowsheetV2TrackEntry).
+
+      it('FlowsheetCreateSongFromCatalog should accept optional string track_position', () => {
+        const trackPosition = getProperty('FlowsheetCreateSongFromCatalog', 'track_position');
+        expect(trackPosition).toBeDefined();
+        expect(trackPosition?.type).toBe('string');
+      });
+
+      it('FlowsheetCreateSongFromCatalog should not require track_position', () => {
+        const schema = spec.components.schemas.FlowsheetCreateSongFromCatalog as { required?: string[] };
+        expect(schema.required ?? []).not.toContain('track_position');
+      });
+
+      it('FlowsheetUpdateRequest should accept optional string track_position', () => {
+        const trackPosition = getProperty('FlowsheetUpdateRequest', 'track_position');
+        expect(trackPosition).toBeDefined();
+        expect(trackPosition?.type).toBe('string');
+      });
+
+      it('FlowsheetV2TrackEntry should carry nullable string track_position in read responses', () => {
+        const trackPosition = getProperty('FlowsheetV2TrackEntry', 'track_position');
+        expect(trackPosition).toBeDefined();
+        expect(trackPosition?.type).toBe('string');
+        expect(trackPosition?.nullable).toBe(true);
+      });
+    });
   });
 
   describe('Catalog Schemas', () => {
