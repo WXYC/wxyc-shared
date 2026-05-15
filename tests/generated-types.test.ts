@@ -23,6 +23,8 @@ import {
   type ReadinessResponse,
   type LibrarySearchItem,
   type LookupResultItem,
+  type LookupRequest,
+  type DiscogsMatchResult,
   type TrackMatchHint,
   RotationBin,
   DayOfWeek,
@@ -579,6 +581,95 @@ describe('Generated TypeScript Types', () => {
       };
 
       expect(entry.track_position).toBe('A1');
+    });
+  });
+
+  describe('LookupRequest extended-metadata flags (PR #133)', () => {
+    // These tests pin the *generated TypeScript* contract for `extended` and
+    // `warm_cache`. If a future api.yaml edit accidentally adds `default: false`
+    // back to either field, openapi-typescript will promote them to required
+    // (`extended: boolean` instead of `extended?: boolean`) and every existing
+    // LML/BS/iOS/dj-site caller stops typechecking — these tests fail-fast
+    // before that lands.
+    it('treats `extended` and `warm_cache` as optional (callers can omit both)', () => {
+      const minimal: LookupRequest = {
+        artist: 'Stereolab',
+        album: 'Aluminum Tunes',
+      };
+
+      expect(minimal.artist).toBe('Stereolab');
+      // Compile-time assertion: omitting `extended`/`warm_cache` must be legal.
+      expect(minimal.extended).toBeUndefined();
+      expect(minimal.warm_cache).toBeUndefined();
+    });
+
+    it('accepts `extended` and `warm_cache` when callers opt in', () => {
+      const opted: LookupRequest = {
+        artist: 'Jessica Pratt',
+        album: 'On Your Own Love Again',
+        extended: true,
+        warm_cache: true,
+      };
+
+      expect(opted.extended).toBe(true);
+      expect(opted.warm_cache).toBe(true);
+    });
+  });
+
+  describe('DiscogsMatchResult extended-metadata fields (PR #133)', () => {
+    // Same pattern as above: pin the consumer-facing contract that the
+    // new extended-metadata fields are optional + nullable.
+    it('accepts a result with none of the extended fields set', () => {
+      const baseline: DiscogsMatchResult = {
+        release_id: 12345,
+        release_url: 'https://www.discogs.com/release/12345',
+      };
+
+      expect(baseline.discogs_artist_id).toBeUndefined();
+      expect(baseline.tracklist).toBeUndefined();
+      expect(baseline.genres).toBeUndefined();
+      expect(baseline.styles).toBeUndefined();
+      expect(baseline.label).toBeUndefined();
+      expect(baseline.full_release_date).toBeUndefined();
+      expect(baseline.artist_image_url).toBeUndefined();
+      expect(baseline.profile_tokens).toBeUndefined();
+    });
+
+    it('accepts a result with all extended fields populated', () => {
+      const full: DiscogsMatchResult = {
+        release_id: 12345,
+        release_url: 'https://www.discogs.com/release/12345',
+        discogs_artist_id: 999,
+        tracklist: [{ position: 'A1', title: 'In a Sentimental Mood' }],
+        genres: ['Jazz'],
+        styles: ['Modal'],
+        label: 'Impulse Records',
+        full_release_date: '1963-02-07',
+        artist_image_url: 'https://img.discogs.com/foo.jpg',
+        profile_tokens: [{ type: 'plainText', text: 'American jazz pianist.' }],
+      };
+
+      expect(full.discogs_artist_id).toBe(999);
+      expect(full.label).toBe('Impulse Records');
+      expect(full.profile_tokens?.[0].type).toBe('plainText');
+    });
+
+    it('accepts null for every nullable extended field', () => {
+      const nulled: DiscogsMatchResult = {
+        release_id: 12345,
+        release_url: 'https://www.discogs.com/release/12345',
+        discogs_artist_id: null,
+        tracklist: null,
+        genres: null,
+        styles: null,
+        label: null,
+        full_release_date: null,
+        artist_image_url: null,
+        profile_tokens: null,
+      };
+
+      expect(nulled.label).toBeNull();
+      expect(nulled.profile_tokens).toBeNull();
     });
   });
 });
