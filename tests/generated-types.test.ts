@@ -9,6 +9,9 @@ import { describe, it, expect } from 'vitest';
 import {
   type FlowsheetEntryResponse,
   type FlowsheetSongEntry,
+  type FlowsheetCreateSongFromCatalog,
+  type FlowsheetUpdateRequest,
+  type FlowsheetV2TrackEntry,
   type Album,
   type AlbumSearchResult,
   type Label,
@@ -581,6 +584,63 @@ describe('Generated TypeScript Types', () => {
       };
 
       expect(entry.track_position).toBe('A1');
+    });
+
+    // Write-side schemas (PR #134 / E6-1). These pin the *generated TypeScript*
+    // contract that BS/dj-site/iOS callers actually import. If a future
+    // api.yaml edit accidentally promotes `track_position` to required (e.g.,
+    // adds it to the schema's `required:` list), openapi-typescript will emit
+    // `track_position: string` instead of `track_position?: string` and these
+    // tests fail-fast before that lands.
+    it('FlowsheetCreateSongFromCatalog accepts optional track_position', () => {
+      const withoutPosition: FlowsheetCreateSongFromCatalog = {
+        album_id: 1001,
+        track_title: 'la paradoja',
+        request_flag: false,
+      };
+
+      const withPosition: FlowsheetCreateSongFromCatalog = {
+        ...withoutPosition,
+        track_position: 'A1',
+      };
+
+      expect(withoutPosition.track_position).toBeUndefined();
+      expect(withPosition.track_position).toBe('A1');
+    });
+
+    it('FlowsheetUpdateRequest accepts optional track_position', () => {
+      const empty: FlowsheetUpdateRequest = {};
+      const withPosition: FlowsheetUpdateRequest = {
+        track_position: '1-12',
+      };
+
+      expect(empty.track_position).toBeUndefined();
+      expect(withPosition.track_position).toBe('1-12');
+    });
+
+    it('FlowsheetV2TrackEntry accepts optional + nullable track_position', () => {
+      const baseEntry: FlowsheetV2TrackEntry = {
+        id: 1,
+        show_id: 42,
+        play_order: 100,
+        add_time: '2024-06-15T14:30:00.000Z',
+        entry_type: 'track',
+        request_flag: false,
+      };
+
+      const withPosition: FlowsheetV2TrackEntry = {
+        ...baseEntry,
+        track_position: 'B3',
+      };
+
+      const nullPosition: FlowsheetV2TrackEntry = {
+        ...baseEntry,
+        track_position: null,
+      };
+
+      expect(baseEntry.track_position).toBeUndefined();
+      expect(withPosition.track_position).toBe('B3');
+      expect(nullPosition.track_position).toBeNull();
     });
   });
 

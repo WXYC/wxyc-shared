@@ -180,6 +180,27 @@ describe('V2 Generated Types', () => {
 
       expect(entry.segue).toBe(true);
     });
+
+    // PR #134 / E6-1: track_position carries the Discogs `release_track.position`
+    // shape (vinyl "A1", CD "5", multi-disc "1-12") and is `nullable: true` on
+    // the read side. Pin both the string and null paths.
+    it('should accept a string track_position on a track entry', () => {
+      const entry: FlowsheetV2TrackEntry = {
+        ...sampleTrack,
+        track_position: 'A1',
+      };
+
+      expect(entry.track_position).toBe('A1');
+    });
+
+    it('should accept a null track_position on a track entry', () => {
+      const entry: FlowsheetV2TrackEntry = {
+        ...sampleTrack,
+        track_position: null,
+      };
+
+      expect(entry.track_position).toBeNull();
+    });
   });
 
   describe('FlowsheetV2ShowStartEntry', () => {
