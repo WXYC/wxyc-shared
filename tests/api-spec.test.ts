@@ -382,27 +382,31 @@ describe('OpenAPI Specification', () => {
       $ref?: string;
     };
 
-    it('should define LookupRequest.extended as optional boolean defaulting to false', () => {
+    it('should define LookupRequest.extended as an optional boolean with no default', () => {
       const schema = spec.components.schemas.LookupRequest as {
         properties: Record<string, SchemaProp>;
         required?: string[];
       };
       expect(schema.properties.extended).toBeDefined();
       expect(schema.properties.extended.type).toBe('boolean');
-      expect(schema.properties.extended.default).toBe(false);
+      // Intentionally omit `default:` so openapi-typescript emits the field
+      // as optional (`extended?: boolean`) rather than required. Existing
+      // consumers (LML/BS/iOS/dj-site) keep compiling without passing it.
+      expect(schema.properties.extended.default).toBeUndefined();
       // Not required — non-iOS consumers continue to omit it.
       expect(schema.required ?? []).not.toContain('extended');
     });
 
-    it('should define LookupRequest.warm_cache as optional boolean defaulting to false', () => {
+    it('should define LookupRequest.warm_cache as an optional boolean with no default', () => {
       const schema = spec.components.schemas.LookupRequest as {
         properties: Record<string, SchemaProp>;
         required?: string[];
       };
       expect(schema.properties.warm_cache).toBeDefined();
       expect(schema.properties.warm_cache.type).toBe('boolean');
-      expect(schema.properties.warm_cache.default).toBe(false);
-      // Read-path callers leave this false to avoid doubling Discogs-API load.
+      // Same rationale as `extended` — see comment above.
+      expect(schema.properties.warm_cache.default).toBeUndefined();
+      // Read-path callers leave this absent to avoid doubling Discogs-API load.
       expect(schema.required ?? []).not.toContain('warm_cache');
     });
 
@@ -446,9 +450,11 @@ describe('OpenAPI Specification', () => {
       optional('artist_image_url');
       expect(schema.properties.artist_image_url.type).toBe('string');
 
-      optional('bio_tokens');
-      expect(schema.properties.bio_tokens.type).toBe('array');
-      expect(schema.properties.bio_tokens.items?.$ref).toBe(
+      // Field name matches DiscogsArtistDetails.profile_tokens so iOS / dj-site
+      // can share rendering code across the two payloads.
+      optional('profile_tokens');
+      expect(schema.properties.profile_tokens.type).toBe('array');
+      expect(schema.properties.profile_tokens.items?.$ref).toBe(
         '#/components/schemas/DiscogsResolvedToken',
       );
     });
