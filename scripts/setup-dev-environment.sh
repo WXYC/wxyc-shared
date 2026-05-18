@@ -90,13 +90,22 @@ is_port_available() {
     ! lsof -iTCP:"$1" -sTCP:LISTEN -P -n >/dev/null 2>&1
 }
 
-RESOLVED_PORTS=()
-
+# Find an available port starting at $1, walking up to 20 ports forward.
+# Additional arguments are ports the caller has already picked in earlier
+# sequential calls; they're treated as occupied even if nothing is listening
+# yet. The taken-list is passed explicitly rather than stored in a global
+# because every call site uses command substitution -- a shared array would
+# mutate the subshell's copy and never propagate back.
 find_available_port() {
     local port=$1
+    local -a taken=("${@:2}")
+    local i t in_taken
     for (( i=0; i<20; i++ )); do
-        if is_port_available "$port" && [[ ! " ${RESOLVED_PORTS[*]:-} " =~ " $port " ]]; then
-            RESOLVED_PORTS+=("$port")
+        in_taken=0
+        for t in "${taken[@]}"; do
+            if [[ "$t" == "$port" ]]; then in_taken=1; break; fi
+        done
+        if (( in_taken == 0 )) && is_port_available "$port"; then
             echo "$port"
             return 0
         fi
@@ -360,16 +369,16 @@ resolve_ports() {
         AUTH_PORT=${AUTH_PORT:-$DEFAULT_AUTH_PORT}
         log_info "Using backend ports from .env: backend=$BACKEND_PORT, auth=$AUTH_PORT"
     else
-        DB_PORT=$(find_available_port $DEFAULT_DB_PORT) || exit 1
-        BACKEND_PORT=$(find_available_port $DEFAULT_BACKEND_PORT) || exit 1
-        AUTH_PORT=$(find_available_port $DEFAULT_AUTH_PORT) || exit 1
+        DB_PORT=$(find_available_port "$DEFAULT_DB_PORT") || exit 1
+        BACKEND_PORT=$(find_available_port "$DEFAULT_BACKEND_PORT" "$DB_PORT") || exit 1
+        AUTH_PORT=$(find_available_port "$DEFAULT_AUTH_PORT" "$DB_PORT" "$BACKEND_PORT") || exit 1
         log_success "Database port: $DB_PORT"
         log_success "Backend port: $BACKEND_PORT"
         log_success "Auth port: $AUTH_PORT"
     fi
 
     if [[ "$BACKEND_ONLY" != true ]]; then
-        FRONTEND_PORT=$(find_available_port $DEFAULT_FRONTEND_PORT) || exit 1
+        FRONTEND_PORT=$(find_available_port "$DEFAULT_FRONTEND_PORT" "$BACKEND_PORT" "$AUTH_PORT") || exit 1
         log_success "Frontend port: $FRONTEND_PORT"
     fi
 
@@ -665,5 +674,8 @@ main() {
     wait
 }
 
-# Run main function
-main "$@"
+# Run main function when executed directly. The guard lets tests source this
+# file to exercise individual functions without triggering the orchestrator.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

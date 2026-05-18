@@ -256,8 +256,48 @@ teardown() {
     grep -A5 "is_port_available()" "$SCRIPT_PATH" | grep -q "lsof"
 }
 
-@test "find_available_port skips already-resolved ports" {
-    grep -A20 "find_available_port()" "$SCRIPT_PATH" | grep -q "RESOLVED_PORTS"
+@test "find_available_port returns default port when free" {
+    source "$SCRIPT_PATH"
+    is_port_available() { return 0; }
+    [ "$(find_available_port 8080)" = "8080" ]
+}
+
+@test "find_available_port walks past occupied ports" {
+    source "$SCRIPT_PATH"
+    is_port_available() {
+        case "$1" in 8080|8081) return 1 ;; *) return 0 ;; esac
+    }
+    [ "$(find_available_port 8080)" = "8082" ]
+}
+
+@test "find_available_port skips ports passed as already-taken" {
+    source "$SCRIPT_PATH"
+    is_port_available() { return 0; }
+    # 8080 is free per the stub, but caller marks it taken from a prior pick.
+    [ "$(find_available_port 8080 8080)" = "8081" ]
+}
+
+# Regression test for the subshell-collision bug: when consecutive defaults
+# are all occupied, sequential command-substitution calls used to return the
+# same port because RESOLVED_PORTS+= died in the subshell. The fix is for
+# callers to pass already-picked ports forward as extra args.
+@test "find_available_port avoids collision across command-substitution calls" {
+    source "$SCRIPT_PATH"
+    is_port_available() {
+        case "$1" in 8080|8081|8082|8083) return 1 ;; *) return 0 ;; esac
+    }
+    BACKEND_PORT=$(find_available_port 8080)
+    AUTH_PORT=$(find_available_port 8082 "$BACKEND_PORT")
+    [ "$BACKEND_PORT" = "8084" ]
+    [ "$AUTH_PORT" = "8085" ]
+    [ "$BACKEND_PORT" != "$AUTH_PORT" ]
+}
+
+@test "find_available_port fails after exhausting the 20-port window" {
+    source "$SCRIPT_PATH"
+    is_port_available() { return 1; }
+    run find_available_port 8080
+    [ "$status" -ne 0 ]
 }
 
 @test "resolve_ports reads backend .env in frontend-only mode" {
