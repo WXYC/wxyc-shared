@@ -55,7 +55,9 @@ permissions:
   packages: read   # `npm pack @wxyc/shared` authenticates to npm.pkg.github.com via the caller's GITHUB_TOKEN, forwarded as the `npm-token` secret
 ```
 
-Granting less makes the `npm pack` step fail with an opaque 401 — the workflow does fail (not startup_failure), but a reader of the caller's `permissions:` block won't see why. The reusable workflow itself declares `permissions: contents: read` at workflow level; `packages: read` rides on the secret the caller forwards, so it has to come from the caller's own permissions block.
+Granting less makes the `npm pack` step fail with an opaque 401 — the workflow does fail (not startup_failure), but `--silent` suppresses the error message and a reader of the caller's `permissions:` block won't see why.
+
+**Both sides must declare every forwarded scope.** Reusable-workflow permissions intersect (caller ∩ callee) at job dispatch, and the intersection also governs the GITHUB_TOKEN the caller forwards into `secrets.npm-token`. Concretely: if the callee declares only `contents: read`, the forwarded token gets narrowed to `contents: read` regardless of what the caller granted — `npm pack` will 401. This file therefore declares `permissions: contents: read + packages: read` at workflow level even though no step in this file uses `packages: read` directly; it's there so the caller's grant can survive the intersection. The 2026-05-12 → 2026-05-14 org-wide drift outage (commit `a90dc3a` first added the narrow `permissions: contents: read` block; PR fixing it added `packages: read` back) is the receipt.
 
 **Escalating the required caller permissions is itself a breaking change** (rule 5 above — observable behavior). If a revision of this workflow needs another scope from the caller (e.g., `id-token: write` for OIDC), cut `gha/v2` and migrate consumers. The asymmetry matters: dropping a required scope is non-breaking; adding one breaks every caller that hardened to the previous floor.
 

@@ -46,11 +46,17 @@ concurrency:
   group: charset-corpus-drift-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Workflow-level GITHUB_TOKEN scope. No job in this file pushes code,
-# comments on PRs, or creates releases; all writes to external services
-# use their own non-GITHUB_TOKEN secrets. contents:read is the safe floor.
+# Workflow-level GITHUB_TOKEN scope. For reusable workflows, the effective
+# permissions in the called workflow's jobs — including the GITHUB_TOKEN the
+# caller forwards via `secrets.npm-token` — are the INTERSECTION of caller
+# and callee permission blocks. We must therefore declare every scope any
+# consumer could need to forward, even scopes no step in this file uses
+# directly, or the caller's grant gets silently narrowed away. `packages: read`
+# rides on the forwarded npm-token; without declaring it here, `npm pack` 401s
+# even when the caller declared `permissions: packages: read`.
 permissions:
   contents: read
+  packages: read
 
 jobs:
   drift-check:
