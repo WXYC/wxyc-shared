@@ -504,6 +504,22 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  describe('Lookup Hard Cap (LML#370)', () => {
+    it('should add LookupResponse.timeout as an optional boolean defaulting to false', () => {
+      const schema = spec.components.schemas.LookupResponse as {
+        properties: Record<string, { type?: string; default?: unknown; description?: string }>;
+        required?: string[];
+      };
+      expect(schema.properties.timeout).toBeDefined();
+      expect(schema.properties.timeout.type).toBe('boolean');
+      expect(schema.properties.timeout.default).toBe(false);
+      // Not required — existing consumers continue to ignore the field; new
+      // consumers that read it can distinguish "no match" from "ran out of
+      // time" on the LML hard-cap path.
+      expect(schema.required ?? []).not.toContain('timeout');
+    });
+  });
+
   describe('Proxy Response Schemas', () => {
     it('should define AlbumMetadataResponse with enriched fields', () => {
       const schema = spec.components.schemas.AlbumMetadataResponse as {
