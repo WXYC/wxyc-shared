@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.6.1
+  version: 1.7.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3523,6 +3523,73 @@ components:
           nullable: true
           description: Album artwork URL from Spotify
 
+    LiveFsUpdateEvent:
+      description: >
+        SSE event emitted on the `live-fs-topic` when an enrichment-worker (BS#892)
+        finalizes the metadata for a flowsheet row. Payload carries the full
+        flowsheet row so a newly-mounted client (e.g. a /live viewer that just
+        opened the page) can surface the post-enrichment fields (`artwork_url`,
+        `release_year`, ...) without a follow-up GET. Provider:
+        Backend-Service/apps/backend/services/metadata-broadcast/metadata-broadcast.ts
+        (`filterMetadataUpdate`). Consumer: dj-site `live-updates-listener.ts`.
+        Contract: `CONTRACTS.LIVE_FS_UPDATE_INCLUDES_FULL_ROW`.
+      type: object
+      required:
+        - type
+        - payload
+        - timestamp
+      properties:
+        type:
+          type: string
+          enum: [update]
+        payload:
+          $ref: '#/components/schemas/FlowsheetEntryResponse'
+        timestamp:
+          type: string
+          format: date-time
+
+    LiveFsRefetchEvent:
+      description: >
+        SSE event emitted on the `live-fs-topic` when bulk state changes (ETL
+        runs, schema migrations) make targeted patches impractical. Consumers
+        respond with a coarse cache invalidation. `payload.source` is a free-text
+        label for telemetry only (`etl`, `migration`, etc.) — clients must not
+        branch on it.
+      type: object
+      required:
+        - type
+        - payload
+        - timestamp
+      properties:
+        type:
+          type: string
+          enum: [refetch]
+        payload:
+          type: object
+          required:
+            - source
+          properties:
+            source:
+              type: string
+              description: Free-text label naming the upstream cause (telemetry only).
+        timestamp:
+          type: string
+          format: date-time
+
+    LiveFsEvent:
+      description: >
+        Discriminated union of events emitted on the `live-fs-topic`. Every
+        event has the same `{ type, payload, timestamp }` envelope — pinned by
+        `CONTRACTS.LIVE_FS_EVENT_ENVELOPE_SHAPE`.
+      oneOf:
+        - $ref: '#/components/schemas/LiveFsUpdateEvent'
+        - $ref: '#/components/schemas/LiveFsRefetchEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          update: '#/components/schemas/LiveFsUpdateEvent'
+          refetch: '#/components/schemas/LiveFsRefetchEvent'
+
 security:
   - BearerAuth: []
 
@@ -4907,3 +4974,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+
+  /events/stream:
+    get:
+      summary: Subscribe to server-sent events (EventSource-friendly)
+      description: >
+        EventSource-friendly counterpart to `POST /events/register`. Native
+        browser EventSource is GET-only and can't attach an `Authorization`
+        header — this route accepts topics as a comma-separated query string
+        and applies authorization per-topic via `TopicAuthz`. Public topics
+        (e.g. `live-fs-topic`) succeed anonymously; DJ-tier topics filter out
+        unless the caller carries a JWT with a matching role.
+
+        The response body is a `text/event-stream` of newline-delimited
+        `data: {...}\n\n` frames. The first frame is always a
+        `connection-established` event carrying the server-assigned `client_id`.
+        Subsequent frames depend on the subscribed topics — for `live-fs-topic`
+        the frames are `LiveFsEvent` instances.
+
+        Contract: `CONTRACTS.LIVE_FS_PUBLIC_TOPIC_NO_AUTH`.
+      security: []
+      parameters:
+        - name: topics
+          in: query
+          required: false
+          schema:
+            type: string
+            description: >
+              Comma-separated topic strings (`live-fs-topic`, `test-topic`).
+              Unknown topics are silently dropped. Repeated `?topics=&topics=`
+              (which Express parses as an array) is ignored.
+          example: live-fs-topic
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                description: >
+                  Newline-delimited `data: <JSON>\n\n` frames. The frames
+                  themselves carry shapes from `LiveFsEvent` (for
+                  `live-fs-topic`) plus the implicit `connection-established`
+                  and `subscription` envelope events.
+                oneOf:
+                  - $ref: '#/components/schemas/LiveFsEvent'

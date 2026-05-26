@@ -222,6 +222,153 @@ describe('Cross-service contracts (E2E)', () => {
     }
   );
 
+  // ── LIVE_FS_PUBLIC_TOPIC_NO_AUTH ─────────────────────────────────────
+  //
+  // SKIPPED: Backend-Service BS-1 (#1168) has not landed. dj-site's
+  // listener middleware opens an EventSource without an Authorization
+  // header; if the GET endpoint requires auth, anonymous subscription
+  // fails. Flip `it.skip` to `it` once #1168 is merged and deployed.
+  it.skip(
+    `upholds CONTRACTS.LIVE_FS_PUBLIC_TOPIC_NO_AUTH: ${CONTRACTS.LIVE_FS_PUBLIC_TOPIC_NO_AUTH}`,
+    async () => {
+      // Anonymous fetch — no Authorization header.
+      const resp = await fetch(`${config.baseUrl}/events/stream?topics=live-fs-topic`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(2000),
+      }).catch((err: Error) => {
+        // AbortError is the expected exit once we've read the first frame.
+        if (err.name === 'AbortError') return null;
+        throw err;
+      });
+
+      if (resp === null) {
+        // The fetch was aborted before headers came back — should not happen
+        // for an unauthenticated GET on a public topic.
+        throw new Error('GET /events/stream timed out before sending headers');
+      }
+      expect(resp.status, 'public GET /events/stream must accept anonymous callers').toBe(200);
+      expect(resp.headers.get('content-type')).toMatch(/text\/event-stream/);
+      // We don't need to consume the stream — accepting the connection is the
+      // contract under test. Cancel the body so the connection closes cleanly.
+      await resp.body?.cancel();
+    }
+  );
+
+  // ── LIVE_FS_UPDATE_INCLUDES_FULL_ROW ─────────────────────────────────
+  //
+  // SKIPPED: Backend-Service BS-2 (#1170) has not landed. Pre-BS-2 the
+  // payload was `{id, metadata_status}` — a freshly-mounted /live viewer
+  // wouldn't see the post-enrichment fields. Flip `it.skip` to `it` once
+  // #1170 is merged and deployed.
+  it.skip(
+    `upholds CONTRACTS.LIVE_FS_UPDATE_INCLUDES_FULL_ROW: ${CONTRACTS.LIVE_FS_UPDATE_INCLUDES_FULL_ROW}`,
+    async ({ skip }) => {
+      if (!hasCredentials) skip();
+
+      // Open the SSE stream first so we don't race against the post.
+      const controller = new AbortController();
+      const streamResp = await fetch(
+        `${config.baseUrl}/events/stream?topics=live-fs-topic`,
+        { method: 'GET', signal: controller.signal }
+      );
+      expect(streamResp.status).toBe(200);
+
+      // Insert a row that the enrichment-worker will (eventually) terminally
+      // mark with `metadata_status=enriched_no_match` (freeform entries that
+      // don't match any catalog row land there).
+      const post = await client.post<FlowsheetEntryResponse>('/flowsheet', {
+        artist_name: `LiveFs Update ${uniqueSuffix}`,
+        album_title: `Update Album ${uniqueSuffix}`,
+        track_title: `Update Track ${uniqueSuffix}`,
+        request_flag: false,
+      } satisfies FlowsheetCreateSongFreeform);
+      expect(post.ok).toBe(true);
+      const newId = post.body.id;
+
+      // Read SSE frames until we see an `update` event for the row we just
+      // inserted, or hit the 30s ceiling for the enrichment chain.
+      const reader = streamResp.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      const deadline = Date.now() + 30_000;
+      let matched: {
+        type: string;
+        payload: { id: number; metadata_status?: string; artist_name?: string };
+      } | null = null;
+
+      while (Date.now() < deadline) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split('\n\n');
+        buf = frames.pop() ?? '';
+        for (const raw of frames) {
+          if (!raw.startsWith('data: ')) continue;
+          const parsed = JSON.parse(raw.slice(6));
+          if (parsed.type === 'update' && parsed.payload?.id === newId) {
+            matched = parsed;
+            break;
+          }
+        }
+        if (matched) break;
+      }
+      controller.abort();
+      expect(matched, 'expected an update frame for the just-inserted row').not.toBeNull();
+
+      // VIOLATION SYMPTOM: payload is `{id, metadata_status}` only. After
+      // BS-2 lands the payload IS the full row, so non-required fields like
+      // `artist_name` round-trip.
+      expect(matched!.payload.artist_name, 'payload should carry full row data, including artist_name').toBe(
+        `LiveFs Update ${uniqueSuffix}`
+      );
+    }
+  );
+
+  // ── LIVE_FS_EVENT_ENVELOPE_SHAPE ─────────────────────────────────────
+  //
+  // ENFORCED today (the `EventData<T>` shape on Backend-Service is
+  // already in place). The envelope is also pinned by the api.yaml
+  // schemas so a regression here breaks two checks at once.
+  it.skip(
+    `upholds CONTRACTS.LIVE_FS_EVENT_ENVELOPE_SHAPE: ${CONTRACTS.LIVE_FS_EVENT_ENVELOPE_SHAPE}`,
+    async () => {
+      // Skipped until BS-1 (#1168) lands and the public GET endpoint is
+      // reachable for an anonymous subscriber. Once available the body
+      // below asserts the envelope shape across the first non-handshake
+      // frame.
+      const controller = new AbortController();
+      const streamResp = await fetch(
+        `${config.baseUrl}/events/stream?topics=live-fs-topic`,
+        { method: 'GET', signal: controller.signal }
+      );
+      expect(streamResp.status).toBe(200);
+
+      const reader = streamResp.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      const deadline = Date.now() + 5_000;
+      let firstFrame: { type?: unknown; payload?: unknown; timestamp?: unknown } | null = null;
+      while (Date.now() < deadline) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split('\n\n');
+        buf = frames.pop() ?? '';
+        for (const raw of frames) {
+          if (!raw.startsWith('data: ')) continue;
+          firstFrame = JSON.parse(raw.slice(6));
+          break;
+        }
+        if (firstFrame) break;
+      }
+      controller.abort();
+      expect(firstFrame, 'expected at least one SSE frame').not.toBeNull();
+      expect(typeof firstFrame!.type, 'frame.type must be a string').toBe('string');
+      expect(firstFrame!.payload, 'frame.payload must be present').toBeDefined();
+      expect(firstFrame!.timestamp, 'frame.timestamp must be present').toBeDefined();
+    }
+  );
+
   // ── FLOWSHEET_DJ_NAME_NON_NULL ───────────────────────────────────────
   //
   // ENFORCED. Migration 0053 backfilled historical NULLs and the insert
