@@ -92,4 +92,12 @@ When adding a new contract:
 
 ## Toggling skipped contracts
 
-The `PLAY_ORDER_PER_SHOW_MONOTONIC` and `ROTATION_DEDUP_PER_ALBUM_BIN` tests are `it.skip`-ed in CI today because the provider-side fixes have not landed. When BS#693 ships, change `it.skip(...)` to `it(...)` for the play_order test. When BS#694 ships, do the same for rotation dedup. Both are guarded with a single TODO comment naming the BS issue, so a quick grep finds them.
+Skipped contracts as of 2026-05-26, each guarded by a comment naming the blocking BS PR/issue (grep `it.skip` in `tests/e2e-contracts.test.ts`):
+
+- `PLAY_ORDER_PER_SHOW_MONOTONIC` — blocked on [BS#693](https://github.com/WXYC/Backend-Service/issues/693).
+- `ROTATION_DEDUP_PER_ALBUM_BIN` — blocked on [BS#694](https://github.com/WXYC/Backend-Service/issues/694).
+- `LIVE_FS_PUBLIC_TOPIC_NO_AUTH` — blocked on [BS#1168](https://github.com/WXYC/Backend-Service/pull/1168) (BS-1).
+- `LIVE_FS_UPDATE_INCLUDES_FULL_ROW` — blocked on [BS#1170](https://github.com/WXYC/Backend-Service/pull/1170) (BS-2).
+- `LIVE_FS_EVENT_ENVELOPE_SHAPE` — blocked on BS#1168 (needs the public GET endpoint reachable to exercise the assertion). The shape is already enforced server-side; this is just the E2E.
+
+When the blocking change ships, flip `it.skip(...)` to `it(...)` for the corresponding test.
