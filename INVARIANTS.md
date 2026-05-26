@@ -42,6 +42,33 @@ If an entry here is wrong, two things break: someone wastes a half-day diagnosin
 - **What breaks if violated:** the UI shows "undefined" or empty rows in show headers; the tubafrenzy webhook payload validation fails; archive search drops the entry from DJ-grouped views. Migration 0053 fixed the historical backfill -- the test guards against a regression on the insert side.
 - **Status:** **ENFORCED.** Asserted by adding an entry as the test DJ and reading it back via `/v2/flowsheet`.
 
+### `CONTRACTS.LIVE_FS_UPDATE_INCLUDES_FULL_ROW`
+
+> The `liveFs:update` SSE event payload carries the full flowsheet row, not just `{id, metadata_status}`.
+
+- **Provider:** `Backend-Service/apps/backend/services/metadata-broadcast/metadata-broadcast.ts:filterMetadataUpdate` after [WXYC/Backend-Service#1170](https://github.com/WXYC/Backend-Service/pull/1170) (BS-2 of the live-updates SSE plan).
+- **Consumer:** `dj-site/lib/features/flowsheet/live-updates-listener.ts` patches the RTK Query cache row with whatever payload arrives.
+- **What breaks if violated:** a /live viewer that just mounted the page has no cached copy to merge into and the post-enrichment fields (`artwork_url`, `release_year`, ...) won't show until the next full GET fires. The dashboards survive because they already have the row cached, but cross-tab visibility for a freshly-mounted viewer breaks.
+- **Status (2026-05-26):** **PENDING.** Test is `it.skip`-ed until BS-2 ([WXYC/Backend-Service#1170](https://github.com/WXYC/Backend-Service/pull/1170)) merges and deploys to the E2E target stack.
+
+### `CONTRACTS.LIVE_FS_PUBLIC_TOPIC_NO_AUTH`
+
+> `GET /events/stream?topics=live-fs-topic` accepts anonymous subscription.
+
+- **Provider:** `Backend-Service/apps/backend/routes/events.route.ts` (no `requirePermissions` guard on the `GET /stream` route) + `events.controller.ts:streamEventClient` with `TopicAuthz[Topics.liveFs] = []` after [WXYC/Backend-Service#1168](https://github.com/WXYC/Backend-Service/pull/1168) (BS-1 of the live-updates SSE plan).
+- **Consumer:** dj-site's listener middleware opens `EventSource(${BACKEND_URL}/events/stream?topics=live-fs-topic)` from the browser. Native EventSource is GET-only and can't attach an `Authorization` header — anonymous subscription is the whole point of the route.
+- **What breaks if violated:** every browser EventSource fires `onerror` with no useful diagnostic. The live-updates feature stops working in dashboards and on `/live` — clients fall back to the 60s safety poll. Authenticated topics (`showDj`, `primaryDj`, `mirror`) remain role-gated via `filterAuthorizedTopics`; this contract is specifically about `live-fs-topic`.
+- **Status (2026-05-26):** **PENDING.** Test is `it.skip`-ed until BS-1 ([WXYC/Backend-Service#1168](https://github.com/WXYC/Backend-Service/pull/1168)) merges and deploys to the E2E target stack.
+
+### `CONTRACTS.LIVE_FS_EVENT_ENVELOPE_SHAPE`
+
+> Every event on the SSE stream carries the shape `{ type, payload, timestamp }`.
+
+- **Provider:** `Backend-Service/apps/backend/utils/serverEvents.ts` (`EventData<T> = { type, payload, timestamp? }`); `metadata-broadcast.ts` sets `type: FsEvents.update`.
+- **Consumer:** `dj-site/lib/features/flowsheet/live-updates-listener.ts` parses each frame by destructuring `{ type, payload }` and routing on `type`.
+- **What breaks if violated:** the listener middleware can't tell `update` from `refetch`. Either the surgical-patch path runs against a refetch payload (typeError) or the debounced invalidate runs against an update payload (extra refetch latency). The envelope is also pinned in `api.yaml` via the `LiveFsUpdateEvent` / `LiveFsRefetchEvent` schemas so a future BS change that ships a bare payload (`{id: 42}`) breaks two checks at once.
+- **Status:** **ENFORCED.** Today's `serverEventsMgr.broadcast` already sends the envelope; pinning catches a regression where someone bypasses it.
+
 ## Future invariants to add
 
 The starter set above is deliberately small (4 items). Candidates for follow-ups, ordered roughly by cost-of-violation:

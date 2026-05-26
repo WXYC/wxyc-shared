@@ -573,6 +573,61 @@ describe('OpenAPI Specification', () => {
     it('should define /metadata/album endpoint', () => {
       expect(spec.paths['/metadata/album']).toBeDefined();
     });
+
+    it('should define /events/stream as a public GET (no security)', () => {
+      const path = spec.paths['/events/stream'] as {
+        get?: { security?: unknown[]; parameters?: Array<{ name: string }> };
+      };
+      expect(path).toBeDefined();
+      expect(path.get).toBeDefined();
+      // security: [] explicitly opts out of the inherited BearerAuth.
+      // Browser EventSource can't attach an Authorization header — the
+      // public-topic path is the contract.
+      expect(path.get!.security).toEqual([]);
+      // `?topics=<csv>` is the wire shape — comma-separated topic strings.
+      const topics = path.get!.parameters?.find((p) => p.name === 'topics');
+      expect(topics).toBeDefined();
+    });
+  });
+
+  describe('Live-Updates SSE Schemas (live-updates-sse plan)', () => {
+    it('should define LiveFsUpdateEvent with the {type, payload, timestamp} envelope', () => {
+      const schema = spec.components.schemas.LiveFsUpdateEvent as {
+        type: string;
+        required: string[];
+        properties: Record<string, { enum?: string[]; $ref?: string }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.type).toBe('object');
+      expect(schema.required).toEqual(['type', 'payload', 'timestamp']);
+      expect(schema.properties.type.enum).toEqual(['update']);
+      // Payload is the full flowsheet row — pinned by
+      // CONTRACTS.LIVE_FS_UPDATE_INCLUDES_FULL_ROW.
+      expect(schema.properties.payload.$ref).toBe('#/components/schemas/FlowsheetEntryResponse');
+    });
+
+    it('should define LiveFsRefetchEvent with the {type, payload, timestamp} envelope', () => {
+      const schema = spec.components.schemas.LiveFsRefetchEvent as {
+        type: string;
+        required: string[];
+        properties: Record<string, { enum?: string[] }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(['type', 'payload', 'timestamp']);
+      expect(schema.properties.type.enum).toEqual(['refetch']);
+    });
+
+    it('should define LiveFsEvent as a discriminated union over `type`', () => {
+      const schema = spec.components.schemas.LiveFsEvent as {
+        oneOf: Array<{ $ref: string }>;
+        discriminator: { propertyName: string; mapping: Record<string, string> };
+      };
+      expect(schema).toBeDefined();
+      expect(schema.oneOf).toHaveLength(2);
+      expect(schema.discriminator.propertyName).toBe('type');
+      expect(schema.discriminator.mapping.update).toContain('LiveFsUpdateEvent');
+      expect(schema.discriminator.mapping.refetch).toContain('LiveFsRefetchEvent');
+    });
   });
 
   describe('Security', () => {

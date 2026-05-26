@@ -77,6 +77,54 @@ export const CONTRACTS = {
    */
   FLOWSHEET_DJ_NAME_NON_NULL:
     'flowsheet.dj_name is non-NULL on entries inserted after migration 0053',
+
+  /**
+   * The `liveFs:update` SSE event payload carries the full flowsheet row,
+   * not just `{id, metadata_status}`.
+   *
+   * Provider: `Backend-Service/apps/backend/services/metadata-broadcast/metadata-broadcast.ts:filterMetadataUpdate`
+   * Consumer: `dj-site/lib/features/flowsheet/live-updates-listener.ts`
+   *
+   * Status: ENFORCED once Backend-Service BS-2 lands. Before BS-2 the payload
+   * was `{id, metadata_status}` and a freshly-mounted /live viewer wouldn't see
+   * the post-enrichment fields until the next full GET fired. The full-row
+   * payload is what makes cross-tab cache patching actually work.
+   */
+  LIVE_FS_UPDATE_INCLUDES_FULL_ROW:
+    'liveFs:update payload includes the full flowsheet row, not just {id, metadata_status}',
+
+  /**
+   * `GET /events/stream?topics=live-fs-topic` accepts anonymous subscription.
+   *
+   * Provider: `Backend-Service/apps/backend/routes/events.route.ts` (no
+   *           `requirePermissions` guard) + `events.controller.ts:streamEventClient`
+   *           with `TopicAuthz[Topics.liveFs] = []`.
+   * Consumer: dj-site's listener middleware opens `EventSource(...)` from the
+   *           browser, which can't attach an Authorization header.
+   *
+   * Status: ENFORCED once Backend-Service BS-1 lands. Authenticated topics
+   * (`showDj`, `primaryDj`, `mirror`) remain role-gated via
+   * `filterAuthorizedTopics`; this contract is specifically about the
+   * `live-fs-topic` public path.
+   */
+  LIVE_FS_PUBLIC_TOPIC_NO_AUTH:
+    'GET /events/stream?topics=live-fs-topic accepts anonymous subscription',
+
+  /**
+   * Every event on the SSE stream carries the shape `{ type, payload, timestamp }`.
+   *
+   * Provider: `Backend-Service/apps/backend/utils/serverEvents.ts` (`EventData<T>`)
+   *           and `metadata-broadcast.ts` (sets `type: FsEvents.update`).
+   * Consumer: `dj-site/lib/features/flowsheet/live-updates-listener.ts` parses
+   *           by destructuring `{ type, payload }` and routing on `type`.
+   *
+   * Status: ENFORCED today. The envelope is also part of `LiveFsUpdateEvent` /
+   * `LiveFsRefetchEvent` in `api.yaml` so it's machine-checkable across repos.
+   * Pinning it here catches a regression where Backend-Service sends a bare
+   * payload (`{id: 42}`) instead of `{type, payload, timestamp}`.
+   */
+  LIVE_FS_EVENT_ENVELOPE_SHAPE:
+    'every liveFs event carries the shape { type, payload, timestamp }',
 } as const;
 
 /** A reference to one of the named cross-service contracts. */
