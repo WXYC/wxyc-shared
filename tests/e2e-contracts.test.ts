@@ -231,19 +231,19 @@ describe('Cross-service contracts (E2E)', () => {
   it.skip(
     `upholds CONTRACTS.LIVE_FS_PUBLIC_TOPIC_NO_AUTH: ${CONTRACTS.LIVE_FS_PUBLIC_TOPIC_NO_AUTH}`,
     async () => {
-      // Anonymous fetch — no Authorization header.
+      // Anonymous fetch — no Authorization header. The 2s timeout is a
+      // safety net so the test fails fast if the server hangs without
+      // sending headers; on a healthy stack the response arrives well
+      // before it fires.
       const resp = await fetch(`${config.baseUrl}/events/stream?topics=live-fs-topic`, {
         method: 'GET',
         signal: AbortSignal.timeout(2000),
       }).catch((err: Error) => {
-        // AbortError is the expected exit once we've read the first frame.
         if (err.name === 'AbortError') return null;
         throw err;
       });
 
       if (resp === null) {
-        // The fetch was aborted before headers came back — should not happen
-        // for an unauthenticated GET on a public topic.
         throw new Error('GET /events/stream timed out before sending headers');
       }
       expect(resp.status, 'public GET /events/stream must accept anonymous callers').toBe(200);
