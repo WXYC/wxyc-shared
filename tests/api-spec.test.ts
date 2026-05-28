@@ -151,6 +151,63 @@ describe('OpenAPI Specification', () => {
         expect(trackPosition?.nullable).toBe(true);
       });
     });
+
+    describe('metadata_status field (BS#891 / Epic C)', () => {
+      function getProperty(schemaName: string, prop: string): Record<string, unknown> | undefined {
+        const schema = spec.components.schemas[schemaName] as
+          | { properties?: Record<string, Record<string, unknown>>; allOf?: Array<{ properties?: Record<string, Record<string, unknown>> }> }
+          | undefined;
+        if (!schema) return undefined;
+        if (schema.properties?.[prop]) return schema.properties[prop];
+        for (const branch of schema.allOf ?? []) {
+          if (branch.properties?.[prop]) return branch.properties[prop];
+        }
+        return undefined;
+      }
+
+      it('should define MetadataStatus enum with all 5 BS-side values', () => {
+        const metadataStatus = spec.components.schemas.MetadataStatus as { type?: string; enum?: string[] };
+        expect(metadataStatus).toBeDefined();
+        expect(metadataStatus.type).toBe('string');
+        expect(metadataStatus.enum).toEqual([
+          'pending',
+          'enriching',
+          'enriched_match',
+          'enriched_no_match',
+          'failed_no_retry',
+        ]);
+      });
+
+      it('FlowsheetEntryResponse should $ref MetadataStatus on metadata_status', () => {
+        const ms = getProperty('FlowsheetEntryResponse', 'metadata_status');
+        expect(ms).toBeDefined();
+        expect(ms?.$ref).toBe('#/components/schemas/MetadataStatus');
+      });
+
+      it('FlowsheetEntryResponse should not require metadata_status (absent on non-track / pre-Epic-C rows)', () => {
+        const schema = spec.components.schemas.FlowsheetEntryResponse as {
+          allOf?: Array<{ required?: string[] }>;
+          required?: string[];
+        };
+        const required = [...(schema.required ?? []), ...(schema.allOf ?? []).flatMap((b) => b.required ?? [])];
+        expect(required).not.toContain('metadata_status');
+      });
+
+      it('FlowsheetV2TrackEntry should $ref MetadataStatus on metadata_status', () => {
+        const ms = getProperty('FlowsheetV2TrackEntry', 'metadata_status');
+        expect(ms).toBeDefined();
+        expect(ms?.$ref).toBe('#/components/schemas/MetadataStatus');
+      });
+
+      it('FlowsheetV2TrackEntry should not require metadata_status', () => {
+        const schema = spec.components.schemas.FlowsheetV2TrackEntry as {
+          allOf?: Array<{ required?: string[] }>;
+          required?: string[];
+        };
+        const required = [...(schema.required ?? []), ...(schema.allOf ?? []).flatMap((b) => b.required ?? [])];
+        expect(required).not.toContain('metadata_status');
+      });
+    });
   });
 
   describe('Catalog Schemas', () => {
