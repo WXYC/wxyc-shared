@@ -49,7 +49,7 @@ If an entry here is wrong, two things break: someone wastes a half-day diagnosin
 - **Provider:** `Backend-Service/apps/backend/services/metadata-broadcast/metadata-broadcast.ts:filterMetadataUpdate` after [WXYC/Backend-Service#1170](https://github.com/WXYC/Backend-Service/pull/1170) (BS-2 of the live-updates SSE plan).
 - **Consumer:** `dj-site/lib/features/flowsheet/live-updates-listener.ts` patches the RTK Query cache row with whatever payload arrives.
 - **What breaks if violated:** a /live viewer that just mounted the page has no cached copy to merge into and the post-enrichment fields (`artwork_url`, `release_year`, ...) won't show until the next full GET fires. The dashboards survive because they already have the row cached, but cross-tab visibility for a freshly-mounted viewer breaks.
-- **Status (2026-05-26):** **PENDING.** Test is `it.skip`-ed until BS-2 ([WXYC/Backend-Service#1170](https://github.com/WXYC/Backend-Service/pull/1170)) merges and deploys to the E2E target stack.
+- **Status (2026-05-28):** **ENFORCED.** BS-2 ([WXYC/Backend-Service#1170](https://github.com/WXYC/Backend-Service/pull/1170)) merged and deployed; the contract test runs against the E2E target.
 
 ### `CONTRACTS.LIVE_FS_PUBLIC_TOPIC_NO_AUTH`
 
@@ -58,7 +58,7 @@ If an entry here is wrong, two things break: someone wastes a half-day diagnosin
 - **Provider:** `Backend-Service/apps/backend/routes/events.route.ts` (no `requirePermissions` guard on the `GET /stream` route) + `events.controller.ts:streamEventClient` with `TopicAuthz[Topics.liveFs] = []` after [WXYC/Backend-Service#1168](https://github.com/WXYC/Backend-Service/pull/1168) (BS-1 of the live-updates SSE plan).
 - **Consumer:** dj-site's listener middleware opens `EventSource(${BACKEND_URL}/events/stream?topics=live-fs-topic)` from the browser. Native EventSource is GET-only and can't attach an `Authorization` header — anonymous subscription is the whole point of the route.
 - **What breaks if violated:** every browser EventSource fires `onerror` with no useful diagnostic. The live-updates feature stops working in dashboards and on `/live` — clients fall back to the 60s safety poll. Authenticated topics (`showDj`, `primaryDj`, `mirror`) remain role-gated via `filterAuthorizedTopics`; this contract is specifically about `live-fs-topic`.
-- **Status (2026-05-26):** **PENDING.** Test is `it.skip`-ed until BS-1 ([WXYC/Backend-Service#1168](https://github.com/WXYC/Backend-Service/pull/1168)) merges and deploys to the E2E target stack.
+- **Status (2026-05-28):** **ENFORCED.** BS-1 ([WXYC/Backend-Service#1168](https://github.com/WXYC/Backend-Service/pull/1168)) merged and deployed; the contract test runs against the E2E target.
 
 ### `CONTRACTS.LIVE_FS_EVENT_ENVELOPE_SHAPE`
 
@@ -92,12 +92,9 @@ When adding a new contract:
 
 ## Toggling skipped contracts
 
-Skipped contracts as of 2026-05-26, each guarded by a comment naming the blocking BS PR/issue (grep `it.skip` in `tests/e2e-contracts.test.ts`):
+Skipped contracts as of 2026-05-28, each guarded by a comment naming the blocking BS PR/issue (grep `it.skip` in `tests/e2e-contracts.test.ts`):
 
 - `PLAY_ORDER_PER_SHOW_MONOTONIC` — blocked on [BS#693](https://github.com/WXYC/Backend-Service/issues/693).
 - `ROTATION_DEDUP_PER_ALBUM_BIN` — blocked on [BS#694](https://github.com/WXYC/Backend-Service/issues/694).
-- `LIVE_FS_PUBLIC_TOPIC_NO_AUTH` — blocked on [BS#1168](https://github.com/WXYC/Backend-Service/pull/1168) (BS-1).
-- `LIVE_FS_UPDATE_INCLUDES_FULL_ROW` — blocked on [BS#1170](https://github.com/WXYC/Backend-Service/pull/1170) (BS-2).
-- `LIVE_FS_EVENT_ENVELOPE_SHAPE` — blocked on BS#1168 (needs the public GET endpoint reachable to exercise the assertion). The shape is already enforced server-side; this is just the E2E.
 
 When the blocking change ships, flip `it.skip(...)` to `it(...)` for the corresponding test.
