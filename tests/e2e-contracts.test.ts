@@ -35,6 +35,14 @@ import type {
 } from '../src/generated/models/index.js';
 
 /**
+ * Wire-format topic name for the liveFs SSE topic. Backend-Service's
+ * `Topics.liveFs` resolves to this string; dj-site's listener middleware
+ * subscribes to it via `?topics=live-fs-topic`. Pinned by the three
+ * LIVE_FS_* contracts below.
+ */
+const LIVE_FS_TOPIC = 'live-fs-topic';
+
+/**
  * Set of role values recognized by the backend's `requirePermissions`
  * middleware after `normalizeRole()` runs. A JWT carrying any of these
  * is sufficient to authorize an authenticated request.
@@ -232,7 +240,7 @@ describe('Cross-service contracts (E2E)', () => {
       // safety net so the test fails fast if the server hangs without
       // sending headers; on a healthy stack the response arrives well
       // before it fires.
-      const resp = await fetch(`${config.baseUrl}/events/stream?topics=live-fs-topic`, {
+      const resp = await fetch(`${config.baseUrl}/events/stream?topics=${LIVE_FS_TOPIC}`, {
         method: 'GET',
         signal: AbortSignal.timeout(2000),
       }).catch((err: Error) => {
@@ -260,7 +268,7 @@ describe('Cross-service contracts (E2E)', () => {
       // Open the SSE stream first so we don't race against the post.
       const controller = new AbortController();
       const streamResp = await fetch(
-        `${config.baseUrl}/events/stream?topics=live-fs-topic`,
+        `${config.baseUrl}/events/stream?topics=${LIVE_FS_TOPIC}`,
         { method: 'GET', signal: controller.signal }
       );
       expect(streamResp.status).toBe(200);
@@ -307,9 +315,8 @@ describe('Cross-service contracts (E2E)', () => {
       controller.abort();
       expect(matched, 'expected an update frame for the just-inserted row').not.toBeNull();
 
-      // VIOLATION SYMPTOM: payload is `{id, metadata_status}` only. After
-      // BS-2 lands the payload IS the full row, so non-required fields like
-      // `artist_name` round-trip.
+      // VIOLATION SYMPTOM: payload is `{id, metadata_status}` only — non-
+      // required fields like `artist_name` are missing from the broadcast.
       expect(matched!.payload.artist_name, 'payload should carry full row data, including artist_name').toBe(
         `LiveFs Update ${uniqueSuffix}`
       );
@@ -332,7 +339,7 @@ describe('Cross-service contracts (E2E)', () => {
     async () => {
       const controller = new AbortController();
       const streamResp = await fetch(
-        `${config.baseUrl}/events/stream?topics=live-fs-topic`,
+        `${config.baseUrl}/events/stream?topics=${LIVE_FS_TOPIC}`,
         { method: 'GET', signal: controller.signal }
       );
       expect(streamResp.status).toBe(200);
