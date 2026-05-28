@@ -5,11 +5,10 @@
  * documents the named invariant in its description so a failure in CI
  * names the contract that broke.
  *
- * Two of the four contracts (PLAY_ORDER_PER_SHOW_MONOTONIC,
- * ROTATION_DEDUP_PER_ALBUM_BIN) are NOT yet enforced on the server side
- * as of 2026-05-01. Those tests are `it.skip`-ed; the assertion bodies
- * still describe target state. To enable them, replace `it.skip` with
- * `it` once the BS-side fix lands (see comments inline).
+ * Two contracts (PLAY_ORDER_PER_SHOW_MONOTONIC, ROTATION_DEDUP_PER_ALBUM_BIN)
+ * are NOT yet enforced on the server side. Those tests are `it.skip`-ed; the
+ * assertion bodies still describe target state. To enable them, replace
+ * `it.skip` with `it` once the BS-side fix lands (see comments inline).
  *
  * Prerequisites:
  *   - Backend service at $E2E_BASE_URL (default http://localhost:8080)
@@ -224,11 +223,9 @@ describe('Cross-service contracts (E2E)', () => {
 
   // ── LIVE_FS_PUBLIC_TOPIC_NO_AUTH ─────────────────────────────────────
   //
-  // SKIPPED: Backend-Service BS-1 (#1168) has not landed. dj-site's
-  // listener middleware opens an EventSource without an Authorization
-  // header; if the GET endpoint requires auth, anonymous subscription
-  // fails. Flip `it.skip` to `it` once #1168 is merged and deployed.
-  it.skip(
+  // Pure anonymous connection check — no creds required, so the test runs
+  // unconditionally on every CI invocation.
+  it(
     `upholds CONTRACTS.LIVE_FS_PUBLIC_TOPIC_NO_AUTH: ${CONTRACTS.LIVE_FS_PUBLIC_TOPIC_NO_AUTH}`,
     async () => {
       // Anonymous fetch — no Authorization header. The 2s timeout is a
@@ -256,15 +253,10 @@ describe('Cross-service contracts (E2E)', () => {
 
   // ── LIVE_FS_UPDATE_INCLUDES_FULL_ROW ─────────────────────────────────
   //
-  // SKIPPED: Backend-Service BS-2 (#1170) has not landed. Pre-BS-2 the
-  // payload was `{id, metadata_status}` — a freshly-mounted /live viewer
-  // wouldn't see the post-enrichment fields. Flip `it.skip` to `it` once
-  // #1170 is merged and deployed.
-  it.skip(
+  // Posts a flowsheet row via the authed client, so this test needs creds.
+  it.skipIf(!hasCredentials)(
     `upholds CONTRACTS.LIVE_FS_UPDATE_INCLUDES_FULL_ROW: ${CONTRACTS.LIVE_FS_UPDATE_INCLUDES_FULL_ROW}`,
-    async ({ skip }) => {
-      if (!hasCredentials) skip();
-
+    async () => {
       // Open the SSE stream first so we don't race against the post.
       const controller = new AbortController();
       const streamResp = await fetch(
@@ -326,16 +318,18 @@ describe('Cross-service contracts (E2E)', () => {
 
   // ── LIVE_FS_EVENT_ENVELOPE_SHAPE ─────────────────────────────────────
   //
-  // ENFORCED today (the `EventData<T>` shape on Backend-Service is
-  // already in place). The envelope is also pinned by the api.yaml
-  // schemas so a regression here breaks two checks at once.
-  it.skip(
+  // The envelope (`{ type, payload, timestamp }`) is already enforced
+  // server-side via `EventData<T>` and pinned at the schema layer in
+  // `api.yaml`. This test exercises the wire format end-to-end against
+  // a live stack.
+  //
+  // Self-triggers via an authed flowsheet insert so a quiet stack
+  // doesn't leave the test waiting on an event that never arrives. The
+  // anonymous code path (no creds, plain GET) is already exercised by
+  // LIVE_FS_PUBLIC_TOPIC_NO_AUTH above.
+  it.skipIf(!hasCredentials)(
     `upholds CONTRACTS.LIVE_FS_EVENT_ENVELOPE_SHAPE: ${CONTRACTS.LIVE_FS_EVENT_ENVELOPE_SHAPE}`,
     async () => {
-      // Skipped until BS-1 (#1168) lands and the public GET endpoint is
-      // reachable for an anonymous subscriber. Once available the body
-      // below asserts the envelope shape across the first non-handshake
-      // frame.
       const controller = new AbortController();
       const streamResp = await fetch(
         `${config.baseUrl}/events/stream?topics=live-fs-topic`,
@@ -343,10 +337,21 @@ describe('Cross-service contracts (E2E)', () => {
       );
       expect(streamResp.status).toBe(200);
 
+      // Trigger an enrichment event by inserting a freeform row. The
+      // metadata pipeline reliably emits a terminal-status liveFs:update
+      // within the 30s ceiling on any healthy stack.
+      const post = await client.post<FlowsheetEntryResponse>('/flowsheet', {
+        artist_name: `LiveFs Envelope ${uniqueSuffix}`,
+        album_title: `Envelope Album ${uniqueSuffix}`,
+        track_title: `Envelope Track ${uniqueSuffix}`,
+        request_flag: false,
+      } satisfies FlowsheetCreateSongFreeform);
+      expect(post.ok).toBe(true);
+
       const reader = streamResp.body!.getReader();
       const decoder = new TextDecoder();
       let buf = '';
-      const deadline = Date.now() + 5_000;
+      const deadline = Date.now() + 30_000;
       let firstFrame: { type?: unknown; payload?: unknown; timestamp?: unknown } | null = null;
       while (Date.now() < deadline) {
         const { value, done } = await reader.read();
