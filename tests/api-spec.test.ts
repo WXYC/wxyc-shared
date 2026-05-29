@@ -479,6 +479,7 @@ describe('OpenAPI Specification', () => {
       type?: string;
       default?: unknown;
       nullable?: boolean;
+      format?: string;
       items?: { $ref?: string; type?: string };
       $ref?: string;
     };
@@ -509,6 +510,26 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties.warm_cache.default).toBeUndefined();
       // Read-path callers leave this absent to avoid doubling Discogs-API load.
       expect(schema.required ?? []).not.toContain('warm_cache');
+    });
+
+    it('should attach artwork_checked_at to DiscogsReleaseMetadata as optional date-time', () => {
+      // Additive nullable signal for LML's cache-hit predicate (WXYC/library-metadata-lookup#423).
+      // Distinguishes "never asked" (NULL) from "asked, no cover" (timestamp set) so
+      // LML stops re-fetching genuinely-imageless releases. Backed by the schema column in
+      // WXYC/discogs-etl#239.
+      const schema = spec.components.schemas.DiscogsReleaseMetadata as {
+        properties: Record<string, SchemaProp>;
+        required?: string[];
+      };
+
+      const prop = schema.properties.artwork_checked_at;
+      expect(prop).toBeDefined();
+      expect(prop.type).toBe('string');
+      expect(prop.format).toBe('date-time');
+      expect(prop.nullable).toBe(true);
+      // Must stay optional — required-list addition would break every existing
+      // consumer of DiscogsReleaseMetadata (BS, dj-site, iOS, Android).
+      expect(schema.required ?? []).not.toContain('artwork_checked_at');
     });
 
     it('should attach the extended-metadata fields to DiscogsMatchResult', () => {
