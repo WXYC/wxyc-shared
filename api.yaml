@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.7.0
+  version: 1.7.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2994,6 +2994,19 @@ components:
         artwork_url:
           type: string
           nullable: true
+        artwork_checked_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Timestamp of the most recent live Discogs API call that resolved
+            this release's artwork. `null` means LML's bulk loader populated
+            the row but the live API has not been queried yet (the "never
+            asked" state); a value means LML hit the live API and either
+            populated `artwork_url` or confirmed Discogs has no cover. LML
+            uses this to distinguish bulk-loader gaps (which it back-fills)
+            from genuinely-imageless releases (which it does not refetch).
+            See WXYC/discogs-etl#239 + WXYC/library-metadata-lookup#423.
         release_url:
           type: string
         cached:
