@@ -708,6 +708,22 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  describe('Streaming Check (LML#376 partial-error semantics)', () => {
+    it('should define StreamingCheckResponse.errored_sources as an optional string[]', () => {
+      const schema = spec.components.schemas.StreamingCheckResponse as {
+        properties: Record<string, { type?: string; items?: { type?: string } }>;
+        required?: string[];
+      };
+      expect(schema.properties.errored_sources).toBeDefined();
+      expect(schema.properties.errored_sources.type).toBe('array');
+      expect(schema.properties.errored_sources.items?.type).toBe('string');
+      // Not required — preserves backward compat for clients pinned to the
+      // pre-1.8.0 schema. LML always emits it (defaulting to []); strict-
+      // validating consumers should treat absence as [].
+      expect(schema.required ?? []).not.toContain('errored_sources');
+    });
+  });
+
   describe('Security', () => {
     it('should define BearerAuth security scheme', () => {
       expect(spec.components.securitySchemes?.BearerAuth).toBeDefined();

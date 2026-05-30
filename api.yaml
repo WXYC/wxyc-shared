@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.7.1
+  version: 1.8.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3382,9 +3382,22 @@ components:
         on_streaming:
           type: boolean
           nullable: true
-          description: True if found on any service, false if absent on all, null if inconclusive.
+          description: |
+            True if found on any service, false if all services confirmed absent (no errors),
+            null if inconclusive — either no services checked OR at least one service raised
+            an error (see `errored_sources`). Treat null as "do not persist" / "retry later".
         sources:
           $ref: '#/components/schemas/StreamingCheckSources'
+        errored_sources:
+          type: array
+          items:
+            type: string
+          description: |
+            Names of services whose check raised an exception (transient network/rate-limit/
+            scraping failure). Empty when every dispatched check completed without raising.
+            When non-empty, callers should consider the listed services unchecked and may
+            schedule a selective retry. Independent of `on_streaming`: a service can both
+            match (populating `sources.<service>`) and other services can error.
 
     # ===================
     # Proxy / Config Types
