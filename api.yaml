@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.8.0
+  version: 1.9.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1082,6 +1082,17 @@ components:
             (CTA or LML proxy fallback) drove this release into the results, per
             catalog-track-search plan §5.1. Empty or absent on normal artist/album hits.
             Backward-compatible — existing consumers ignore the field.
+        matched_via_alias:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistMatchHint'
+          description: >
+            Populated by Backend's catalog search when an artist-alias match
+            (from `artist_search_alias`) drove this release into the results,
+            per artist-search-alias plan PR 5. Sibling field to `matched_via`
+            (which is track-title provenance). Empty or absent on normal
+            artist/album hits. Backward-compatible — existing consumers
+            ignore the field.
 
     AddAlbumRequest:
       type: object
@@ -2358,6 +2369,15 @@ components:
             drove this release into the results, per catalog-track-search plan §5.1.
             Empty or absent when the release matched via artist/album strategies.
             Backward-compatible — existing consumers ignore the field.
+        matched_via_alias:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistMatchHint'
+          description: >
+            Sibling to `matched_via`. Reserved for the day LML composes
+            artist-alias hits itself; not produced in v1 of the
+            artist-search-alias plan (BS-local cache only). Optional and
+            backward-compatible.
 
     CacheStats:
       type: object
@@ -2873,6 +2893,150 @@ components:
           $ref: '#/components/schemas/CacheStats'
 
     # ====================================
+    # Artist Search Alias (artist-search-alias plan)
+    # ====================================
+
+    ArtistSearchAliasSource:
+      type: string
+      description: >
+        Origin of an artist search alias variant. Opaque to BS storage (just a
+        tag); used by future read-path ranking and audit. Open enum — new
+        sources can be added by LML without a wire-format break.
+      enum:
+        - discogs_name_variation
+        - discogs_alias
+        - discogs_member
+        - wxyc_library_alt
+
+    ArtistSearchAliasMethod:
+      type: string
+      description: >
+        Semantic classification of how this variant relates to the subject
+        artist. Distinct from source — multiple sources can emit the same
+        method.
+      enum:
+        - name_variation
+        - alias
+        - member
+        - alt_curated
+
+    ArtistSearchAliasVariant:
+      type: object
+      description: >
+        One alias variant for an artist. The `variant` string is what gets
+        matched against search queries via trigram similarity. The `source`
+        tag identifies where the row came from; `method` classifies the
+        semantic relationship.
+      required:
+        - source
+        - variant
+        - method
+        - confidence
+      properties:
+        source:
+          $ref: '#/components/schemas/ArtistSearchAliasSource'
+        variant:
+          type: string
+          description: The searchable string (e.g. "Thee Oh Sees").
+        related_external_id:
+          type: string
+          nullable: true
+          description: >
+            For alias / member kinds, the namespaced source-side id of the
+            related artist (e.g. "discogs:artist:67890",
+            "musicbrainz:artist:<mbid>"). NULL for name_variation and
+            alt_curated.
+        related_name:
+          type: string
+          nullable: true
+          description: >
+            For alias / member kinds, the canonical name of the related
+            artist as the source records it. NULL otherwise.
+        active:
+          type: boolean
+          nullable: true
+          description: >
+            For member kind only — Discogs records active/inactive band
+            membership. NULL for other kinds.
+        method:
+          $ref: '#/components/schemas/ArtistSearchAliasMethod'
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: >
+            Per-source default confidence (e.g. 0.95 for
+            discogs_name_variation, 0.85 for discogs_alias / wxyc_library_alt,
+            0.70 for discogs_member). v1 search ignores this; stored for v2
+            ranking calibration.
+
+    ArtistSearchAliasesResult:
+      type: object
+      required:
+        - name
+        - variants
+        - sources_present
+      properties:
+        name:
+          type: string
+          description: The WXYC canonical artist name from the request.
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistSearchAliasVariant'
+        sources_present:
+          type: array
+          description: >
+            Sources the composer actually queried for this artist. A source
+            appears here iff the composer reached its fetch code path —
+            independent of whether that path produced any variants. Consumers
+            use this to scope reconciliation: only delete cached rows whose
+            `source` is listed here. Sources skipped because of missing
+            prerequisites (e.g., no `discogs_artist_id` in
+            `entity.identity`) are ABSENT from this list, and the consumer
+            must leave their cached rows alone — that source did not run, so
+            its absence is not evidence of upstream deletion. Modeled on the
+            empty-provenance semantic of `BulkResolveProvenanceEntry`.
+          items:
+            $ref: '#/components/schemas/ArtistSearchAliasSource'
+
+    ArtistSearchAliasesBulkRequest:
+      type: object
+      required:
+        - names
+      properties:
+        names:
+          type: array
+          description: WXYC canonical artist names.
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: string
+
+    ArtistSearchAliasesBulkResponse:
+      type: object
+      required:
+        - artists
+        - missing
+      properties:
+        artists:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistSearchAliasesResult'
+        missing:
+          type: array
+          description: >
+            Input names with no `entity.identity` row in LML — i.e., LML
+            doesn't know any external IDs for these. BS can choose to retry
+            later (after a discogs-cache rebuild and entity-resolution
+            campaign) or leave them.
+          items:
+            type: string
+        cache_stats:
+          $ref: '#/components/schemas/CacheStats'
+
+    # ====================================
     # LML Discogs & Metadata Service Types
     # ====================================
 
@@ -3254,6 +3418,26 @@ components:
         source:
           $ref: '#/components/schemas/TrackMatchSource'
 
+    ArtistMatchHint:
+      type: object
+      description: >
+        Populated on library search result items when an artist-alias match
+        from the BS-local `artist_search_alias` cache drove the inclusion of
+        this release into the results (artist-search-alias plan PR 5).
+        Sibling to TrackMatchHint — track hints carry title + position +
+        artist_credit which have no meaning for alias matches; alias hints
+        carry the variant string that scored and its source tag for UX
+        rendering and audit.
+      required:
+        - matched_variant
+        - source
+      properties:
+        matched_variant:
+          type: string
+          description: The cached alias string that trigram-matched the query.
+        source:
+          $ref: '#/components/schemas/ArtistSearchAliasSource'
+
     LibrarySearchItem:
       type: object
       description: A single item from LML's library catalog search.
@@ -3307,6 +3491,15 @@ components:
             (catalog-track-search plan §5.1). Empty or absent when the release matched
             on artist / title normally. Backward-compatible — existing consumers ignore
             the field.
+        matched_via_alias:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistMatchHint'
+          description: >
+            Sibling to `matched_via`. Reserved for the day LML composes
+            artist-alias hits itself; not produced in v1 of the
+            artist-search-alias plan (BS-local cache only). Optional and
+            backward-compatible.
 
     LibrarySearchResponse:
       type: object
@@ -4789,6 +4982,68 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '413':
           description: Batch exceeded the 1,000-input cap.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Validation error (per-input field validation failed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /api/v1/artists/search-aliases/bulk:
+    post:
+      summary: Bulk-fetch artist search aliases from all known sources.
+      description: >
+        Returns the union of alias variants LML can compose for each input
+        artist name — Discogs name variations, aliases, and members from
+        discogs-cache; future sources (MusicBrainz aliases, Wikidata labels,
+        etc.) appended additively per artist-search-alias plan §Architecture.
+        Source-of-truth for resolution is `entity.identity.library_name`
+        (seeded from BS's `library.artist_name`), reached via the three-leg
+        bulk fall-through (exact → LOWER → canonical). Cache-only on the
+        Discogs leg — no Discogs API hits; names whose discogs_artist_id is
+        unknown come back as `missing` (BS retries after the monthly cache
+        rebuild + entity-resolution campaign warms `entity.identity`). The
+        `sources_present` field on each result names the legs the composer
+        actually ran for that artist; consumers scope their reconcile
+        DELETE to that list so a leg that didn't run does not wipe its
+        cached rows. Mirrors `bulk-resolve-libraries` for auth + 413
+        semantics.
+      operationId: artistSearchAliasesBulk
+      security:
+        - LMLBearerAuth: []
+      tags:
+        - lookup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArtistSearchAliasesBulkRequest'
+      responses:
+        '200':
+          description: Per-input variants, plus names LML doesn't know.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistSearchAliasesBulkResponse'
+        '400':
+          description: Malformed request body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid `LML_API_KEY` bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '413':
+          description: Batch exceeded the 1,000-name cap.
           content:
             application/json:
               schema:
