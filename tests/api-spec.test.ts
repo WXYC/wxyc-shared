@@ -724,6 +724,154 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  describe('Artist Search Alias Schemas (artist-search-alias plan)', () => {
+    it('should define ArtistSearchAliasSource as an open enum with the v1 sources', () => {
+      const schema = spec.components.schemas.ArtistSearchAliasSource as { enum?: string[] };
+      expect(schema).toBeDefined();
+      expect(schema.enum).toEqual([
+        'discogs_name_variation',
+        'discogs_alias',
+        'discogs_member',
+        'wxyc_library_alt',
+      ]);
+    });
+
+    it('should define ArtistSearchAliasMethod enum', () => {
+      const schema = spec.components.schemas.ArtistSearchAliasMethod as { enum?: string[] };
+      expect(schema).toBeDefined();
+      expect(schema.enum).toEqual(['name_variation', 'alias', 'member', 'alt_curated']);
+    });
+
+    it('should define ArtistSearchAliasVariant requiring source + variant + method + confidence', () => {
+      const schema = spec.components.schemas.ArtistSearchAliasVariant as {
+        type: string;
+        required: string[];
+        properties: Record<string, { $ref?: string; type?: string; nullable?: boolean; minimum?: number; maximum?: number }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.type).toBe('object');
+      expect(schema.required).toEqual(['source', 'variant', 'method', 'confidence']);
+      expect(schema.properties.source.$ref).toBe('#/components/schemas/ArtistSearchAliasSource');
+      expect(schema.properties.method.$ref).toBe('#/components/schemas/ArtistSearchAliasMethod');
+      expect(schema.properties.variant.type).toBe('string');
+      // related_external_id / related_name / active are nullable optionals — only set for some kinds.
+      expect(schema.properties.related_external_id.nullable).toBe(true);
+      expect(schema.properties.related_name.nullable).toBe(true);
+      expect(schema.properties.active.nullable).toBe(true);
+      // Confidence in [0, 1].
+      expect(schema.properties.confidence.type).toBe('number');
+      expect(schema.properties.confidence.minimum).toBe(0);
+      expect(schema.properties.confidence.maximum).toBe(1);
+    });
+
+    it('should define ArtistSearchAliasesResult requiring name + variants + sources_present', () => {
+      const schema = spec.components.schemas.ArtistSearchAliasesResult as {
+        required: string[];
+        properties: Record<string, { type?: string; items?: { $ref?: string } }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(['name', 'variants', 'sources_present']);
+      expect(schema.properties.variants.type).toBe('array');
+      expect(schema.properties.variants.items?.$ref).toBe(
+        '#/components/schemas/ArtistSearchAliasVariant',
+      );
+      // sources_present is the reconcile-scope tag list. Empty array means
+      // "no leg ran" — BS leaves cached rows alone.
+      expect(schema.properties.sources_present.type).toBe('array');
+      expect(schema.properties.sources_present.items?.$ref).toBe(
+        '#/components/schemas/ArtistSearchAliasSource',
+      );
+    });
+
+    it('should define ArtistSearchAliasesBulkRequest requiring names with min/max bounds', () => {
+      const schema = spec.components.schemas.ArtistSearchAliasesBulkRequest as {
+        required: string[];
+        properties: Record<string, { type?: string; minItems?: number; maxItems?: number; items?: { type?: string } }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(['names']);
+      expect(schema.properties.names.type).toBe('array');
+      expect(schema.properties.names.minItems).toBe(1);
+      expect(schema.properties.names.maxItems).toBe(1000);
+      expect(schema.properties.names.items?.type).toBe('string');
+    });
+
+    it('should define ArtistSearchAliasesBulkResponse requiring artists + missing', () => {
+      const schema = spec.components.schemas.ArtistSearchAliasesBulkResponse as {
+        required: string[];
+        properties: Record<string, { type?: string; items?: { $ref?: string; type?: string }; $ref?: string }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(['artists', 'missing']);
+      expect(schema.properties.artists.type).toBe('array');
+      expect(schema.properties.artists.items?.$ref).toBe(
+        '#/components/schemas/ArtistSearchAliasesResult',
+      );
+      expect(schema.properties.missing.type).toBe('array');
+      expect(schema.properties.missing.items?.type).toBe('string');
+      // cache_stats is optional — mirrors the LML lookup family convention.
+      expect(schema.properties.cache_stats.$ref).toBe('#/components/schemas/CacheStats');
+      expect(schema.required).not.toContain('cache_stats');
+    });
+
+    it('should define ArtistMatchHint as a sibling to TrackMatchHint', () => {
+      const schema = spec.components.schemas.ArtistMatchHint as {
+        type: string;
+        required: string[];
+        properties: Record<string, { type?: string; $ref?: string }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.type).toBe('object');
+      expect(schema.required).toEqual(['matched_variant', 'source']);
+      expect(schema.properties.matched_variant.type).toBe('string');
+      expect(schema.properties.source.$ref).toBe('#/components/schemas/ArtistSearchAliasSource');
+    });
+
+    it('should attach optional matched_via_alias to AlbumSearchResult, LookupResultItem, and LibrarySearchItem', () => {
+      // Mirrors `matched_via?: TrackMatchHint[]` placement — every shape
+      // that surfaces track-match provenance gets the alias-match sibling.
+      // BS's catalog search composes alias hits (PR 5); LML's response
+      // shapes carry the field forward-compatibly for the day LML composes
+      // alias hits itself.
+      const carriers = ['AlbumSearchResult', 'LookupResultItem', 'LibrarySearchItem'] as const;
+      for (const name of carriers) {
+        const schema = spec.components.schemas[name] as {
+          properties: Record<string, { type?: string; items?: { $ref?: string } }>;
+          required?: string[];
+        };
+        expect(schema, `${name} should exist`).toBeDefined();
+        expect(schema.properties.matched_via_alias, `${name}.matched_via_alias`).toBeDefined();
+        expect(schema.properties.matched_via_alias.type).toBe('array');
+        expect(schema.properties.matched_via_alias.items?.$ref).toBe(
+          '#/components/schemas/ArtistMatchHint',
+        );
+        expect(schema.required ?? []).not.toContain('matched_via_alias');
+      }
+    });
+
+    it('should define POST /api/v1/artists/search-aliases/bulk under LMLBearerAuth', () => {
+      const path = spec.paths['/api/v1/artists/search-aliases/bulk'] as {
+        post?: {
+          security?: Array<Record<string, unknown[]>>;
+          requestBody?: { content?: Record<string, { schema?: { $ref?: string } }> };
+          responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+        };
+      };
+      expect(path).toBeDefined();
+      expect(path.post).toBeDefined();
+      expect(path.post!.security).toEqual([{ LMLBearerAuth: [] }]);
+      expect(path.post!.requestBody?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ArtistSearchAliasesBulkRequest',
+      );
+      expect(path.post!.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ArtistSearchAliasesBulkResponse',
+      );
+      // 401 / 413 contracts mirror bulk-resolve-libraries for consistency.
+      expect(path.post!.responses?.['401']).toBeDefined();
+      expect(path.post!.responses?.['413']).toBeDefined();
+    });
+  });
+
   describe('Security', () => {
     it('should define BearerAuth security scheme', () => {
       expect(spec.components.securitySchemes?.BearerAuth).toBeDefined();
