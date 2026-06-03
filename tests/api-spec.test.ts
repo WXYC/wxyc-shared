@@ -172,6 +172,46 @@ describe('OpenAPI Specification', () => {
       });
     });
 
+    describe('dj_name_override on POST /flowsheet/join (BS#1295)', () => {
+      function getJoinRequestSchema(): {
+        properties?: Record<string, Record<string, unknown>>;
+        required?: string[];
+      } {
+        const join = spec.paths['/flowsheet/join'] as {
+          post?: {
+            requestBody?: {
+              content?: {
+                'application/json'?: {
+                  schema?: {
+                    properties?: Record<string, Record<string, unknown>>;
+                    required?: string[];
+                  };
+                };
+              };
+            };
+          };
+        };
+        return join?.post?.requestBody?.content?.['application/json']?.schema ?? {};
+      }
+
+      it('POST /flowsheet/join should accept optional string dj_name_override', () => {
+        const schema = getJoinRequestSchema();
+        const override = schema.properties?.dj_name_override;
+        expect(override).toBeDefined();
+        expect(override?.type).toBe('string');
+      });
+
+      it('dj_name_override should cap maxLength at 255 to match auth_user.dj_name', () => {
+        const override = getJoinRequestSchema().properties?.dj_name_override;
+        expect(override?.maxLength).toBe(255);
+      });
+
+      it('dj_name_override should not be in the required list', () => {
+        const schema = getJoinRequestSchema();
+        expect(schema.required ?? []).not.toContain('dj_name_override');
+      });
+    });
+
     describe('metadata_status field (BS#891 / Epic C)', () => {
       function getProperty(schemaName: string, prop: string): Record<string, unknown> | undefined {
         const schema = spec.components.schemas[schemaName] as

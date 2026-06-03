@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { paths } from '../src/generated/openapi-types.js';
 import {
   type FlowsheetEntryResponse,
   type FlowsheetSongEntry,
@@ -607,6 +608,32 @@ describe('Generated TypeScript Types', () => {
 
       expect(withoutPosition.track_position).toBeUndefined();
       expect(withPosition.track_position).toBe('A1');
+    });
+
+    // BS#1295 — POST /flowsheet/join carries an optional `dj_name_override`
+    // that supersedes the caller's `auth_user.dj_name` on the `show_start`
+    // marker and `shows.legacy_dj_name` for the lifetime of the show. Scoped
+    // to the start-show path; the co-host /join branch intentionally ignores
+    // it (BS-side enforcement, not surfaced on the wire). The inline schema
+    // means we reach into the path operation directly rather than a named
+    // component — mirrors how BS's `JoinRequestBody` lives in
+    // apps/backend/controllers/flowsheet.controller.ts.
+    it('POST /flowsheet/join accepts optional dj_name_override', () => {
+      type JoinBody =
+        paths['/flowsheet/join']['post']['requestBody']['content']['application/json'];
+
+      const withoutOverride: JoinBody = {
+        dj_id: 42,
+        show_name: 'Aubrey Hearst',
+      };
+
+      const withOverride: JoinBody = {
+        ...withoutOverride,
+        dj_name_override: 'DJ Guest Host',
+      };
+
+      expect(withoutOverride.dj_name_override).toBeUndefined();
+      expect(withOverride.dj_name_override).toBe('DJ Guest Host');
     });
 
     // BS#1308 — POST /flowsheet/ for a track on a rotation album that isn't in
