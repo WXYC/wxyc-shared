@@ -10,6 +10,7 @@ import {
   type FlowsheetEntryResponse,
   type FlowsheetSongEntry,
   type FlowsheetCreateSongFromCatalog,
+  type FlowsheetCreateSongFreeform,
   type FlowsheetUpdateRequest,
   type FlowsheetV2TrackEntry,
   type Album,
@@ -606,6 +607,31 @@ describe('Generated TypeScript Types', () => {
 
       expect(withoutPosition.track_position).toBeUndefined();
       expect(withPosition.track_position).toBe('A1');
+    });
+
+    // BS#1308 — POST /flowsheet/ for a track on a rotation album that isn't in
+    // the WXYC library catalog. BS already persists `rotation_id` alongside
+    // `album_id IS NULL` in the snapshot/else branch
+    // (apps/backend/controllers/flowsheet.controller.ts), but the freeform
+    // wire schema didn't declare `rotation_id`, forcing dj-site to either
+    // synthesize a negative `album_id` (defect class: dj-site#564/#608/#698/#701)
+    // or drop the linkage on the wire (PR #699 shape). Declaring it here
+    // matches what BS already accepts.
+    it('FlowsheetCreateSongFreeform accepts optional rotation_id', () => {
+      const withoutRotation: FlowsheetCreateSongFreeform = {
+        artist_name: 'Noura Mint Seymali',
+        album_title: 'Tzenni',
+        track_title: 'Tzenni',
+        request_flag: false,
+      };
+
+      const withRotation: FlowsheetCreateSongFreeform = {
+        ...withoutRotation,
+        rotation_id: 5001,
+      };
+
+      expect(withoutRotation.rotation_id).toBeUndefined();
+      expect(withRotation.rotation_id).toBe(5001);
     });
 
     it('FlowsheetUpdateRequest accepts optional track_position', () => {
