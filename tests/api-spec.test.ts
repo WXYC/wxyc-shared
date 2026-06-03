@@ -152,6 +152,26 @@ describe('OpenAPI Specification', () => {
       });
     });
 
+    describe('rotation_id on FlowsheetCreateSongFreeform (BS#1308)', () => {
+      function getProperty(schemaName: string, prop: string): Record<string, unknown> | undefined {
+        const schema = spec.components.schemas[schemaName] as
+          | { properties?: Record<string, Record<string, unknown>> }
+          | undefined;
+        return schema?.properties?.[prop];
+      }
+
+      it('FlowsheetCreateSongFreeform should accept optional integer rotation_id', () => {
+        const rotationId = getProperty('FlowsheetCreateSongFreeform', 'rotation_id');
+        expect(rotationId).toBeDefined();
+        expect(rotationId?.type).toBe('integer');
+      });
+
+      it('FlowsheetCreateSongFreeform should not require rotation_id', () => {
+        const schema = spec.components.schemas.FlowsheetCreateSongFreeform as { required?: string[] };
+        expect(schema.required ?? []).not.toContain('rotation_id');
+      });
+    });
+
     describe('metadata_status field (BS#891 / Epic C)', () => {
       function getProperty(schemaName: string, prop: string): Record<string, unknown> | undefined {
         const schema = spec.components.schemas[schemaName] as

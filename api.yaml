@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.9.0
+  version: 1.10.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -405,6 +405,15 @@ components:
           type: string
         label_id:
           type: integer
+        rotation_id:
+          type: integer
+          description: >
+            Rotation linkage for a track on a rotation album that isn't in the
+            WXYC library catalog (BS#1308). The Backend snapshot/else branch
+            persists `rotation_id` alongside `album_id IS NULL` so the V2 read
+            path can JOIN back to `rotation` for `rotation_bin` and the iOS
+            rotation-artwork resolver can find the entry. `rotation_bin` is
+            derived on read and intentionally not declared here.
 
     FlowsheetCreateMessage:
       type: object
