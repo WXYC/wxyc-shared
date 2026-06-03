@@ -3974,12 +3974,15 @@ paths:
                   type: string
                   maxLength: 255
                   description: >
-                    Optional per-show override for the public DJ name; supersedes
-                    the caller's `auth_user.dj_name` on the `show_start` marker
-                    and `shows.legacy_dj_name`. Empty or whitespace-only values
-                    are treated as absent. Scoped to the new-show (start-show)
-                    path; the co-host /join branch intentionally ignores this
-                    field. Max length matches `auth_user.dj_name varchar(255)`.
+                    Optional per-show override for the public DJ name. When
+                    present and non-empty after trim, supersedes the caller's
+                    `auth_user.dj_name`-derived name on the `show_start` marker
+                    text, on the `flowsheet.dj_name` column of every entry in
+                    this show, and on `shows.legacy_dj_name`. Empty or
+                    whitespace-only values are treated as absent. Scoped to the
+                    new-show (start-show) path; the co-host /join branch
+                    intentionally ignores this field. Max length matches
+                    `auth_user.dj_name varchar(255)`.
       responses:
         '200':
           description: Successfully joined/started show

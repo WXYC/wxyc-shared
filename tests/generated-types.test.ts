@@ -611,13 +611,14 @@ describe('Generated TypeScript Types', () => {
     });
 
     // BS#1295 — POST /flowsheet/join carries an optional `dj_name_override`
-    // that supersedes the caller's `auth_user.dj_name` on the `show_start`
-    // marker and `shows.legacy_dj_name` for the lifetime of the show. Scoped
-    // to the start-show path; the co-host /join branch intentionally ignores
-    // it (BS-side enforcement, not surfaced on the wire). The inline schema
-    // means we reach into the path operation directly rather than a named
-    // component — mirrors how BS's `JoinRequestBody` lives in
-    // apps/backend/controllers/flowsheet.controller.ts.
+    // that supersedes the caller's `auth_user.dj_name`-derived name on the
+    // `show_start` marker text, the `flowsheet.dj_name` column of every
+    // entry in this show, and `shows.legacy_dj_name` for the lifetime of
+    // the show. Scoped to the start-show path; the co-host /join branch
+    // intentionally ignores it (BS-side enforcement, not surfaced on the
+    // wire). The inline schema means we reach into the path operation
+    // directly rather than a named component — mirrors how BS's
+    // `JoinRequestBody` lives in apps/backend/controllers/flowsheet.controller.ts.
     it('POST /flowsheet/join accepts optional dj_name_override', () => {
       type JoinBody =
         paths['/flowsheet/join']['post']['requestBody']['content']['application/json'];
