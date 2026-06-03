@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.10.0
+  version: 1.11.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3970,6 +3970,16 @@ paths:
                 specialty_id:
                   type: integer
                   description: ID of specialty show entry
+                dj_name_override:
+                  type: string
+                  maxLength: 255
+                  description: >
+                    Optional per-show override for the public DJ name; supersedes
+                    the caller's `auth_user.dj_name` on the `show_start` marker
+                    and `shows.legacy_dj_name`. Empty or whitespace-only values
+                    are treated as absent. Scoped to the new-show (start-show)
+                    path; the co-host /join branch intentionally ignores this
+                    field. Max length matches `auth_user.dj_name varchar(255)`.
       responses:
         '200':
           description: Successfully joined/started show
