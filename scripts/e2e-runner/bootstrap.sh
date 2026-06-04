@@ -101,13 +101,21 @@ fi
 log "npm: $(npm -v)"
 
 step "python-${PYTHON_VERSION}"
-# Ubuntu 24.04 ships python3.12 by default; verify and install venv tooling.
+# Ubuntu 24.04 ships python3.12 by default; install only if absent, then
+# ensure venv + pip tooling is present. We split the "interpreter present?"
+# check from the "venv/pip present?" check because Ubuntu's python3 image
+# can ship the interpreter without venv.
 if ! command -v "python${PYTHON_VERSION}" >/dev/null 2>&1; then
   add-apt-repository -y ppa:deadsnakes/ppa
   apt-get update -qq
   apt-get install -y -qq "python${PYTHON_VERSION}" "python${PYTHON_VERSION}-venv"
 fi
-apt-get install -y -qq "python${PYTHON_VERSION}-venv" python3-pip
+if ! dpkg -s "python${PYTHON_VERSION}-venv" >/dev/null 2>&1 \
+  || ! dpkg -s python3-pip >/dev/null 2>&1; then
+  apt-get install -y -qq "python${PYTHON_VERSION}-venv" python3-pip
+else
+  log "python venv/pip already installed"
+fi
 log "python: $(python"${PYTHON_VERSION}" --version)"
 
 step "playwright-deps"
@@ -155,13 +163,16 @@ fi
 
 step "runner-service"
 # `svc.sh install` writes /etc/systemd/system/actions.runner.*.service
-# and `svc.sh start` enables + starts it.
+# and `svc.sh start` enables + starts it. On re-run, restart the existing
+# unit so we pick up any config changes — let the ERR trap surface a
+# restart failure instead of swallowing it; a runner that won't restart
+# is exactly the case that should fail loudly.
 if ! systemctl list-units --type=service --all | grep -q '^actions\.runner\.'; then
   ./svc.sh install "${RUNNER_USER}"
   ./svc.sh start
 else
-  log "runner service already installed"
-  systemctl restart 'actions.runner.*.service' || true
+  log "runner service already installed; restarting to pick up config"
+  systemctl restart 'actions.runner.*.service'
 fi
 
 step "done"

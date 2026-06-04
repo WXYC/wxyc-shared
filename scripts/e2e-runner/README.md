@@ -15,7 +15,7 @@ Plan-of-record: [WXYC/wiki#80](https://github.com/WXYC/wiki/issues/80). This pha
 | Hostname | `wxyc-e2e-runner` |
 | GHA runner label | `e2e-runner` |
 | GHA runner scope | Organization (`WXYC`) |
-| Estimated cost | ~$15/mo on-demand, ~$5/mo reserved |
+| Estimated cost | ~$15/mo on-demand, ~$8/mo reserved (see [Cost](#cost) for the math) |
 
 The runner is intentionally separate from the Backend-Service EC2 box (account `203767826763`, instance `i-0685e373989cd5daa`) so that a wedge on either side does not take down the other. The runner box is stateless and disposable — if it dies, replace it from the AMI and re-run `bootstrap.sh`.
 
@@ -28,7 +28,7 @@ Console or `aws ec2 run-instances` from the `wxyc-canary` AWS account (`50397766
 - AMI: latest Ubuntu 24.04 LTS for `x86_64`
 - Instance type: `t3.small`
 - Subnet: any public subnet in `us-east-1`
-- Security group: outbound 443 only (runner polls GitHub over outbound HTTPS; no inbound required)
+- Security group: outbound 443 only at steady state (runner polls GitHub over outbound HTTPS; no inbound required). Note: `bootstrap.sh` itself needs egress to a wider set of hosts at provisioning time — `download.docker.com`, `deb.nodesource.com`, `ppa.launchpad.net` (deadsnakes), `archive.ubuntu.com`, and `github.com/actions/runner/releases`. Leave egress 443 open to all destinations during bootstrap; tighten only if your threat model demands it (and re-open before any re-bootstrap)
 - Key pair: existing personal key
 - IAM instance profile: none required for the runner itself (workflows that need AWS use repo-scoped OIDC)
 - Storage: 20 GiB gp3
@@ -60,10 +60,12 @@ On GitHub: <https://github.com/organizations/WXYC/settings/actions/runners> shou
 
 ### 4. Smoke run
 
-From the local checkout, dispatch the wxyc-shared E2E suite against prod URLs targeting the runner:
+For phase 1 acceptance, drop the workflow below onto a scratch branch as `.github/workflows/e2e-runner-smoke.yml`, push, dispatch from the Actions tab, then revert the branch once it's green. The workflow is intentionally not committed to `main` — it's a one-off acceptance probe, not retained tooling.
 
 ```yaml
 # Smoke workflow used only for phase 1 acceptance; not retained.
+# Paste into .github/workflows/e2e-runner-smoke.yml on a scratch branch,
+# dispatch via `workflow_dispatch`, then revert.
 name: e2e-runner-smoke
 on: workflow_dispatch
 jobs:
@@ -83,7 +85,7 @@ jobs:
         run: npm run test:e2e
 ```
 
-A green run completes phase 1. After that, this workflow is removed; the runner sits idle until phases 2/3/4 wire real gate workflows to it.
+A green run completes phase 1. After that, delete the scratch branch; the runner sits idle until phases 2/3/4 wire real gate workflows to it.
 
 ## Operations
 
@@ -94,7 +96,7 @@ The bootstrap script is the source-of-truth. To rebuild:
 1. Terminate the old instance.
 2. Launch a fresh Ubuntu 24.04 instance with the same SG + tag.
 3. Re-run the bootstrap with a fresh registration token.
-4. Remove the dead runner from <https://github.com/organizations/WXYC/settings/actions/runners> (or it will auto-deregister after 14 days idle).
+4. Remove the dead runner from <https://github.com/organizations/WXYC/settings/actions/runners> (GitHub auto-removes runners that have been *offline* for 14 days; a runner stuck in `Idle` polls successfully and is never auto-removed).
 
 ### Updating the runner agent
 
@@ -108,7 +110,7 @@ The runner liveness probe lives in [wxyc-canary](https://github.com/WXYC/wxyc-ca
 
 t3.small on-demand in `us-east-1` is ~$0.0208/h ≈ $15/mo. A 1-year Standard Reserved Instance drops to ~$8/mo. EBS 20 GiB gp3 is ~$1.60/mo. Total ≤ $20/mo.
 
-Per [cost-conscious-infra](https://github.com/WXYC/wiki/issues/80) constraints, do not scale this box up without confirming the workload requires it. If the E2E suites outgrow `t3.small`, prefer the reversible levers (instance class bump, scheduled stop/start outside business hours).
+Cost-conscious-infra rule: do not scale this box up without confirming the workload requires it. If the E2E suites outgrow `t3.small`, prefer reversible levers (instance class bump, scheduled stop/start outside business hours) over permanent storage increases — EBS volumes can grow but cannot shrink.
 
 ## Security notes
 
