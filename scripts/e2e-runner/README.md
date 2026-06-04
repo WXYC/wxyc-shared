@@ -8,43 +8,58 @@ Plan-of-record: [WXYC/wiki#80](https://github.com/WXYC/wiki/issues/80). This pha
 
 | Item | Value |
 |------|-------|
-| AWS account | `503977661500` (Jake's personal AWS, same account as wxyc-canary) |
+| AWS account | `203767826763` (the WXYC org AWS account; same as the Backend-Service EC2 box). SSO via `aws sso login --profile wxyc-api` |
 | Region | `us-east-1` |
 | Instance type | `t3.small` |
 | OS | Ubuntu 24.04 LTS (noble) |
 | Hostname | `wxyc-e2e-runner` |
+| Instance ID | `i-0a7b538a69e2962bd` |
+| Security group | `sg-0fe527fadc5a7a02a` (`wxyc-e2e-runner-sg`) |
+| Keypair | `wxyc-e2e-runner` (private key at `~/.ssh/wxyc_e2e_runner`) |
 | GHA runner label | `e2e-runner` |
 | GHA runner scope | Organization (`WXYC`) |
 | Estimated cost | ~$15/mo on-demand, ~$8/mo reserved (see [Cost](#cost) for the math) |
 
-The runner is intentionally separate from the Backend-Service EC2 box (account `203767826763`, instance `i-0685e373989cd5daa`) so that a wedge on either side does not take down the other. The runner box is stateless and disposable — if it dies, replace it from the AMI and re-run `bootstrap.sh`.
+The runner shares an AWS account with the Backend-Service EC2 box (`i-0685e373989cd5daa`) but is a separate instance so that a wedge on either side does not take down the other. The runner box is stateless and disposable — if it dies, replace it from the AMI and re-run `bootstrap.sh`.
 
 ## Provisioning
 
 ### 1. Launch the instance
 
-Console or `aws ec2 run-instances` from the `wxyc-canary` AWS account (`503977661500`):
+From AWS account `203767826763` (`aws sso login --profile wxyc-api`):
 
-- AMI: latest Ubuntu 24.04 LTS for `x86_64`
+- AMI: latest Ubuntu 24.04 LTS for `x86_64` (Canonical owner `099720109477`, name `ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*`)
 - Instance type: `t3.small`
-- Subnet: any public subnet in `us-east-1`
-- Security group: outbound 443 only at steady state (runner polls GitHub over outbound HTTPS; no inbound required). Note: `bootstrap.sh` itself needs egress to a wider set of hosts at provisioning time — `download.docker.com`, `deb.nodesource.com`, `ppa.launchpad.net` (deadsnakes), `archive.ubuntu.com`, and `github.com/actions/runner/releases`. Leave egress 443 open to all destinations during bootstrap; tighten only if your threat model demands it (and re-open before any re-bootstrap)
-- Key pair: existing personal key
+- Subnet: any default public subnet in `us-east-1`
+- Security group: SSH 22 from operator IP (`/32`) for provisioning + maintenance, egress all. The runner needs outbound 443 to reach `github.com`; `bootstrap.sh` additionally hits `download.docker.com`, `deb.nodesource.com`, `ppa.launchpad.net` (deadsnakes), `archive.ubuntu.com`, and `github.com/actions/runner/releases`. Leave egress 443 open to all destinations. If your threat model wants zero inbound after provisioning, drop SSH and re-add it before any re-bootstrap
+- Key pair: `wxyc-e2e-runner` (ed25519). Private key on the operator workstation at `~/.ssh/wxyc_e2e_runner`
 - IAM instance profile: none required for the runner itself (workflows that need AWS use repo-scoped OIDC)
 - Storage: 20 GiB gp3
 - Tag `Name=wxyc-e2e-runner`
 
-### 2. SSH and run the bootstrap
+### 1a. Org runner group must allow public repos
+
+`wxyc-shared` is a public repo. GitHub blocks self-hosted runners from public-repo workflows by default. One-time org-level flip:
 
 ```bash
-scp scripts/e2e-runner/bootstrap.sh ubuntu@<runner-ip>:/tmp/bootstrap.sh
-ssh ubuntu@<runner-ip>
-# On the box:
-RUNNER_TOKEN=$(gh api -X POST /orgs/WXYC/actions/runners/registration-token --jq .token)
-sudo GHA_RUNNER_TOKEN="${RUNNER_TOKEN}" \
-     GHA_RUNNER_URL=https://github.com/WXYC \
-     bash /tmp/bootstrap.sh
+gh api -X PATCH /orgs/WXYC/actions/runner-groups/1 -F allows_public_repositories=true
 ```
+
+Without this, jobs targeting `runs-on: [self-hosted, e2e-runner]` from a public repo stay queued indefinitely with no error surfaced on the runner side.
+
+### 2. SSH and run the bootstrap
+
+From the operator workstation:
+
+```bash
+RUNNER_IP=<public-ip>
+scp -i ~/.ssh/wxyc_e2e_runner scripts/e2e-runner/bootstrap.sh ubuntu@"$RUNNER_IP":/tmp/bootstrap.sh
+RUNNER_TOKEN=$(gh api -X POST /orgs/WXYC/actions/runners/registration-token --jq .token)
+ssh -i ~/.ssh/wxyc_e2e_runner ubuntu@"$RUNNER_IP" \
+  "sudo GHA_RUNNER_TOKEN='$RUNNER_TOKEN' GHA_RUNNER_URL=https://github.com/WXYC bash /tmp/bootstrap.sh"
+```
+
+Registration tokens are short-lived (~1h). Generate it on the operator side and pass through ssh so it never touches the runner's disk except in process env.
 
 The bootstrap is idempotent. Re-running it after a partial failure resumes from the failed step.
 
@@ -60,14 +75,18 @@ On GitHub: <https://github.com/organizations/WXYC/settings/actions/runners> shou
 
 ### 4. Smoke run
 
-For phase 1 acceptance, drop the workflow below onto a scratch branch as `.github/workflows/e2e-runner-smoke.yml`, push, dispatch from the Actions tab, then revert the branch once it's green. The workflow is intentionally not committed to `main` — it's a one-off acceptance probe, not retained tooling.
+For phase 1 acceptance, drop the workflow below onto a scratch branch as `.github/workflows/e2e-runner-smoke.yml`, push to trigger it, then delete the branch once it's green. The workflow is intentionally not committed to `main` — it's a one-off acceptance probe, not retained tooling.
+
+`workflow_dispatch` cannot be used until the workflow file exists on `main`, so the smoke workflow triggers on push to the scratch branch instead. The steps mirror `ci.yml` (setup-go → install oasdiff → npm ci → generate → build → lint → test) because the wxyc-shared test suite depends on `oasdiff` for breaking-change checks and on the generated TypeScript types for type-check.
 
 ```yaml
 # Smoke workflow used only for phase 1 acceptance; not retained.
-# Paste into .github/workflows/e2e-runner-smoke.yml on a scratch branch,
-# dispatch via `workflow_dispatch`, then revert.
+# Paste into .github/workflows/e2e-runner-smoke.yml on a scratch branch
+# named `e2e-runner-smoke`; pushing triggers the run.
 name: e2e-runner-smoke
-on: workflow_dispatch
+on:
+  push:
+    branches: [e2e-runner-smoke]
 jobs:
   smoke:
     runs-on: [self-hosted, e2e-runner]
@@ -76,16 +95,34 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm ci
-      - env:
-          E2E_BASE_URL: https://api.wxyc.org
-          E2E_AUTH_URL: https://api.wxyc.org/auth
-          E2E_TEST_DJ_EMAIL: ${{ secrets.E2E_TEST_DJ_EMAIL }}
-          E2E_TEST_DJ_PASSWORD: ${{ secrets.E2E_TEST_DJ_PASSWORD }}
-        run: npm run test:e2e
+      - name: Tooling versions
+        run: |
+          echo "== node =="; node --version
+          echo "== npm =="; npm --version
+          echo "== docker =="; docker --version
+          echo "== python =="; python3.12 --version
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Install oasdiff
+        run: |
+          go install github.com/oasdiff/oasdiff@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+      - name: npm ci
+        run: npm ci --ignore-scripts
+      - name: Generate TypeScript types
+        run: npm run generate:typescript
+      - name: Build
+        run: npm run build
+      - name: Type check
+        run: npm run lint
+      - name: unit tests
+        run: npm test
 ```
 
 A green run completes phase 1. After that, delete the scratch branch; the runner sits idle until phases 2/3/4 wire real gate workflows to it.
+
+The smoke deliberately does not run `npm run test:e2e` — the E2E suite needs `E2E_TEST_DJ_EMAIL` / `E2E_TEST_DJ_PASSWORD` secrets that don't exist in the wxyc-shared repo or org scope yet. Provisioning those is part of phase 5 (gate-coordinator workflow needs them too).
 
 ## Operations
 
@@ -114,7 +151,8 @@ Cost-conscious-infra rule: do not scale this box up without confirming the workl
 
 ## Security notes
 
-- The runner has no inbound exposure. The SG only needs egress 443.
+- The SG allows SSH 22 from the operator IP at steady state plus egress all. The runner agent itself only needs outbound 443; inbound exists for maintenance access.
 - The runner runs jobs as user `runner` with Docker group membership. Workflows that mount the Docker socket can break out of the user boundary — keep that in mind if you ever schedule untrusted workflows here (current scope is WXYC repos only, no public forks).
 - Registration token is short-lived (~1h). Never commit it.
 - Use org-level runners (not repo-level) so token grants are visible org-wide.
+- The org default runner group is configured with `allows_public_repositories: true` (required for `wxyc-shared`). Fork PRs from public contributors still need first-time-contributor approval before workflows run, so this does not let arbitrary forks execute on the box — but if WXYC ever onboards a contributor with `write` who is not trusted, revisit this.
