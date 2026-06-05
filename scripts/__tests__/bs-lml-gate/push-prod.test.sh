@@ -129,6 +129,17 @@ GH_EOF
     [ ! -s "$GH_CALL_LOG" ]
 }
 
+@test "exits non-zero if \$GITHUB_OUTPUT write fails (no silent did_push loss)" {
+    install_fake_gh_success
+    export PUSH_CURRENT_SHA='1111111111111111111111111111111111111111'
+    # Point GITHUB_OUTPUT at a directory (not a file) so the append
+    # fails predictably without needing root or fs manipulation.
+    export GITHUB_OUTPUT="$TEST_TEMP_DIR"
+    run "$SCRIPT_PATH"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"GITHUB_OUTPUT"* ]]
+}
+
 @test "does not leak PAT to stdout/stderr or the call log" {
     install_fake_gh_success
     export PUSH_CURRENT_SHA='1111111111111111111111111111111111111111'

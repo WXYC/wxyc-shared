@@ -208,6 +208,7 @@ jobs:
       # The noop guard prevents misleading "promoted" audit entries when
       # prods are already at main.
       - name: Audit bypass to tracker issue (before any prod push)
+        id: audit
         if: inputs.skip_gate == true && steps.noop.outputs.noop != 'true'
         env:
           BYPASS_REPO: ${{ env.BYPASS_TRACKER_REPO }}
@@ -260,10 +261,20 @@ jobs:
           # target==current, and empty when the step didn't run.
           BS_DID_PUSH: ${{ steps.push_bs.outputs.did_push }}
           LML_DID_PUSH: ${{ steps.push_lml.outputs.did_push }}
+          # Audit outcome distinguishes "audit ran and succeeded"
+          # (footer reference is valid) from "audit was skipped"
+          # (no comment posted — footer would lie).
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          # noop tells us whether the push-step skips are due to
+          # nothing-to-do (good) vs prior-step-failure (bad). Without
+          # this the table can't distinguish them.
+          NOOP: ${{ steps.noop.outputs.noop }}
+          SKIP_GATE: ${{ inputs.skip_gate }}
         run: |
           render_outcome() {
             # $1 = step outcome (success|failure|skipped|cancelled|"")
             # $2 = did_push output (true|false|"")
+            # $3 = "true" iff noop early-exit fired
             case "$1" in
               success)
                 if [[ "$2" == "false" ]]; then
@@ -273,7 +284,13 @@ jobs:
                 fi
                 ;;
               failure)   echo ":warning: **push failed**" ;;
-              skipped)   echo "skipped (no-op or prior step failed)" ;;
+              skipped)
+                if [[ "$3" == "true" ]]; then
+                  echo "unchanged (both prods already at main)"
+                else
+                  echo "skipped (prior step failed)"
+                fi
+                ;;
               cancelled) echo ":octagonal_sign: cancelled mid-push" ;;
               "")        echo "not reached" ;;
               *)         echo "$1" ;;
@@ -288,12 +305,14 @@ jobs:
             bs_new='${{ steps.shas.outputs.bs_main_sha }}'
             lml_old='${{ steps.shas.outputs.lml_prod_sha }}'
             lml_new='${{ steps.shas.outputs.lml_main_sha }}'
-            echo "| Backend-Service | \`${bs_old:0:12}\` | \`${bs_new:0:12}\` | $(render_outcome "$BS_OUTCOME" "$BS_DID_PUSH") |"
-            echo "| library-metadata-lookup | \`${lml_old:0:12}\` | \`${lml_new:0:12}\` | $(render_outcome "$LML_OUTCOME" "$LML_DID_PUSH") |"
+            echo "| Backend-Service | \`${bs_old:0:12}\` | \`${bs_new:0:12}\` | $(render_outcome "$BS_OUTCOME" "$BS_DID_PUSH" "$NOOP") |"
+            echo "| library-metadata-lookup | \`${lml_old:0:12}\` | \`${lml_new:0:12}\` | $(render_outcome "$LML_OUTCOME" "$LML_DID_PUSH" "$NOOP") |"
             echo ""
-            # Split-promotion only happens if BS actually pushed and
-            # LML didn't (or vice versa). did_push=false on either side
-            # means no API call landed, so no split.
+            # Split-promotion only happens if one side actually pushed
+            # and the other didn't. did_push=false on either side means
+            # no API call landed, so no split. Note that emit_output is
+            # now fail-loud in push-prod.sh, so a successful push is
+            # guaranteed to have did_push=true (no false negatives).
             if [[ "$BS_DID_PUSH" == "true" && "$LML_DID_PUSH" != "true" ]]; then
               echo ":rotating_light: **Split promotion**: BS prod advanced but LML did not. Manually fast-forward LML prod to its current main SHA, or roll BS prod back. See runbook (wiki#81)."
               echo ""
@@ -304,7 +323,15 @@ jobs:
               echo ":rotating_light: **Split promotion (inverted)**: LML prod advanced but BS did not. This violates the gate's ordering invariant; investigate the workflow."
               echo ""
             fi
-            if [[ "${{ inputs.skip_gate }}" == "true" ]]; then
+            # Only print the bypass footer if the audit step actually
+            # ran and succeeded — otherwise it would point at a tracker
+            # comment that doesn't exist (e.g., noop + skip_gate=true
+            # skips the audit step, so no comment was posted).
+            if [[ "$SKIP_GATE" == "true" && "$AUDIT_OUTCOME" == "success" ]]; then
               echo "**Bypass:** gate skipped per workflow_dispatch input. Justification logged at ${BYPASS_TRACKER_REPO}#${BYPASS_TRACKER_ISSUE}."
+            elif [[ "$SKIP_GATE" == "true" && "$NOOP" == "true" ]]; then
+              echo "**Bypass requested but suppressed:** both prods already at main; nothing to promote. No audit comment posted."
+            elif [[ "$SKIP_GATE" == "true" ]]; then
+              echo "**Bypass requested but blocked:** audit step did not succeed (\`$AUDIT_OUTCOME\`); no prod was advanced."
             fi
           } >>"$GITHUB_STEP_SUMMARY"
