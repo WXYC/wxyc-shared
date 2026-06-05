@@ -30,9 +30,15 @@ on:
         type: boolean
         default: false
       justification:
-        description: 'Audited (markdown is escaped). Required when skip_gate=true; ignored otherwise.'
+        # `required: true` would force a justification on every
+        # workflow_dispatch (including normal re-runs where it's
+        # ignored), so we keep this as `required: false` and let
+        # log-bypass.sh enforce non-emptiness when skip_gate=true.
+        # The form description is the contract; the script is the
+        # enforcement.
+        description: 'Required when skip_gate=true; ignored otherwise. Audited (markdown is escaped).'
         type: string
-        required: true
+        required: false
 
 permissions:
   contents: read
@@ -68,15 +74,28 @@ jobs:
         run: ./scripts/bs-lml-gate/resolve-shas.sh
 
       - name: Summarize triggering dispatch + resolved SHAs
+        # client_payload is attacker-controllable via the
+        # repository_dispatch API (requires repo:write — non-trivial
+        # but possible via PAT compromise). Pass through env so a
+        # malicious payload value cannot break out of shell quoting.
+        env:
+          DISPATCH_EVENT:       ${{ github.event_name }}
+          DISPATCH_TYPE:        ${{ github.event.action || 'workflow_dispatch' }}
+          DISPATCH_SOURCE_REPO: ${{ github.event.client_payload.source_repo || 'n/a' }}
+          DISPATCH_SOURCE_SHA:  ${{ github.event.client_payload.source_sha  || 'n/a' }}
+          BS_MAIN:  ${{ steps.shas.outputs.bs_main_sha }}
+          BS_PROD:  ${{ steps.shas.outputs.bs_prod_sha }}
+          LML_MAIN: ${{ steps.shas.outputs.lml_main_sha }}
+          LML_PROD: ${{ steps.shas.outputs.lml_prod_sha }}
         run: |
-          echo "Dispatch event: ${{ github.event_name }}"
-          echo "Dispatch type:  ${{ github.event.action || 'workflow_dispatch' }}"
-          echo "Dispatch source repo: ${{ github.event.client_payload.source_repo || 'n/a' }}"
-          echo "Dispatch source sha:  ${{ github.event.client_payload.source_sha  || 'n/a' }}"
-          echo "BS  main: ${{ steps.shas.outputs.bs_main_sha }}"
-          echo "BS  prod: ${{ steps.shas.outputs.bs_prod_sha }}"
-          echo "LML main: ${{ steps.shas.outputs.lml_main_sha }}"
-          echo "LML prod: ${{ steps.shas.outputs.lml_prod_sha }}"
+          echo "Dispatch event: $DISPATCH_EVENT"
+          echo "Dispatch type:  $DISPATCH_TYPE"
+          echo "Dispatch source repo: $DISPATCH_SOURCE_REPO"
+          echo "Dispatch source sha:  $DISPATCH_SOURCE_SHA"
+          echo "BS  main: $BS_MAIN"
+          echo "BS  prod: $BS_PROD"
+          echo "LML main: $LML_MAIN"
+          echo "LML prod: $LML_PROD"
 
       - name: Early-exit if both prod already match main (nothing to promote)
         id: noop
@@ -156,20 +175,31 @@ jobs:
       - name: Run canary smoke suite against staging
         if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
         env:
-          # CLI flags: BS base URL, BS auth URL, LML base URL, suite name.
-          # Env: CANARY_DJ_EMAIL/PASSWORD for the authenticated checks,
-          # CANARY_LML_API_KEY for the lml-auth check, CANARY_ORIGIN_URL
-          # for the Origin header on better-auth requests (must match
-          # BETTER_AUTH_TRUSTED_ORIGINS for the staging deploy).
-          CANARY_DJ_EMAIL: ${{ secrets.E2E_TEST_DJ_EMAIL }}
+          # All URLs + secrets via env (NOT inline `${{ ... }}` in the
+          # run script) so a repo variable containing an apostrophe
+          # cannot break out of shell quoting and inject commands. The
+          # var-write privilege is lower than secret-write, so this
+          # tightens the gate against an admin-account compromise.
+          BS_BASE_URL:  ${{ vars.BS_STAGING_BASE_URL }}
+          BS_AUTH_URL:  ${{ vars.BS_STAGING_AUTH_URL }}
+          LML_BASE_URL: ${{ vars.LML_STAGING_BASE_URL }}
+          CANARY_DJ_EMAIL:    ${{ secrets.E2E_TEST_DJ_EMAIL }}
           CANARY_DJ_PASSWORD: ${{ secrets.E2E_TEST_DJ_PASSWORD }}
           CANARY_LML_API_KEY: ${{ secrets.LML_API_KEY_STAGING }}
+          # CANARY_ORIGIN_URL is the Origin header sent on better-auth
+          # requests; it must match BS staging's BETTER_AUTH_TRUSTED_ORIGINS.
+          # Today BETTER_AUTH_TRUSTED_ORIGINS in production is the dj-site
+          # frontend URL — the staging equivalent (vars.BS_STAGING_BASE_URL
+          # = the API URL) will only work if phase 4 (BS#1335) configures
+          # BS staging to trust its own API origin, OR if a separate
+          # CANARY_STAGING_ORIGIN repo var is added pointing at the dj-site
+          # staging URL. Revisit when phase 4 wiring is in.
           CANARY_ORIGIN_URL: ${{ vars.BS_STAGING_BASE_URL }}
         run: |
           wxyc-canary check \
-            --base-url='${{ vars.BS_STAGING_BASE_URL }}' \
-            --auth-url='${{ vars.BS_STAGING_AUTH_URL }}' \
-            --lml-url='${{ vars.LML_STAGING_BASE_URL }}' \
+            --base-url="$BS_BASE_URL" \
+            --auth-url="$BS_AUTH_URL" \
+            --lml-url="$LML_BASE_URL" \
             --suite=smoke
 
       # Bypass audit MUST run before any prod push. The push steps below
@@ -206,10 +236,13 @@ jobs:
 
       - name: Push library-metadata-lookup prod
         id: push_lml
-        # `always()` here: BS push may have succeeded; we still want to
-        # attempt LML so we don't compound a partial promotion by silent
-        # skip. The job summary distinguishes the two outcomes.
-        if: always() && steps.push_bs.outcome != 'skipped' && steps.noop.outputs.noop != 'true'
+        # Same `success() &&` rule as BS push: if anything earlier
+        # failed (verify, E2E, canary, audit, OR the BS push itself),
+        # skip LML to keep prod consistent. iter-2 tried `always() &&
+        # push_bs.outcome != 'skipped'` but that ran LML on BS failure,
+        # producing exactly the split-prod state the gate is supposed
+        # to prevent.
+        if: success() && steps.noop.outputs.noop != 'true'
         env:
           PUSH_REPO: WXYC/library-metadata-lookup
           PUSH_TARGET_SHA: ${{ steps.shas.outputs.lml_main_sha }}
@@ -222,15 +255,28 @@ jobs:
         env:
           BS_OUTCOME: ${{ steps.push_bs.outcome }}
           LML_OUTCOME: ${{ steps.push_lml.outcome }}
+          # did_push is "true" when push-prod actually called the
+          # refs API, "false" when it short-circuited at
+          # target==current, and empty when the step didn't run.
+          BS_DID_PUSH: ${{ steps.push_bs.outputs.did_push }}
+          LML_DID_PUSH: ${{ steps.push_lml.outputs.did_push }}
         run: |
           render_outcome() {
-            # success | failure | skipped | cancelled (from step outcome)
+            # $1 = step outcome (success|failure|skipped|cancelled|"")
+            # $2 = did_push output (true|false|"")
             case "$1" in
-              success) echo "advanced" ;;
-              failure) echo ":warning: **push failed**" ;;
-              skipped) echo "skipped (no-op or prior step failed)" ;;
-              "")      echo "not reached" ;;
-              *)       echo "$1" ;;
+              success)
+                if [[ "$2" == "false" ]]; then
+                  echo "unchanged (already at main)"
+                else
+                  echo "advanced"
+                fi
+                ;;
+              failure)   echo ":warning: **push failed**" ;;
+              skipped)   echo "skipped (no-op or prior step failed)" ;;
+              cancelled) echo ":octagonal_sign: cancelled mid-push" ;;
+              "")        echo "not reached" ;;
+              *)         echo "$1" ;;
             esac
           }
           {
@@ -242,11 +288,20 @@ jobs:
             bs_new='${{ steps.shas.outputs.bs_main_sha }}'
             lml_old='${{ steps.shas.outputs.lml_prod_sha }}'
             lml_new='${{ steps.shas.outputs.lml_main_sha }}'
-            echo "| Backend-Service | \`${bs_old:0:12}\` | \`${bs_new:0:12}\` | $(render_outcome "$BS_OUTCOME") |"
-            echo "| library-metadata-lookup | \`${lml_old:0:12}\` | \`${lml_new:0:12}\` | $(render_outcome "$LML_OUTCOME") |"
+            echo "| Backend-Service | \`${bs_old:0:12}\` | \`${bs_new:0:12}\` | $(render_outcome "$BS_OUTCOME" "$BS_DID_PUSH") |"
+            echo "| library-metadata-lookup | \`${lml_old:0:12}\` | \`${lml_new:0:12}\` | $(render_outcome "$LML_OUTCOME" "$LML_DID_PUSH") |"
             echo ""
-            if [[ "$BS_OUTCOME" == "success" && "$LML_OUTCOME" != "success" && "$LML_OUTCOME" != "skipped" ]]; then
+            # Split-promotion only happens if BS actually pushed and
+            # LML didn't (or vice versa). did_push=false on either side
+            # means no API call landed, so no split.
+            if [[ "$BS_DID_PUSH" == "true" && "$LML_DID_PUSH" != "true" ]]; then
               echo ":rotating_light: **Split promotion**: BS prod advanced but LML did not. Manually fast-forward LML prod to its current main SHA, or roll BS prod back. See runbook (wiki#81)."
+              echo ""
+            elif [[ "$LML_DID_PUSH" == "true" && "$BS_DID_PUSH" != "true" ]]; then
+              # Should never happen under the current `success() &&`
+              # gating (LML can't push if BS didn't), but flag it if
+              # it does — the gate's correctness depends on this.
+              echo ":rotating_light: **Split promotion (inverted)**: LML prod advanced but BS did not. This violates the gate's ordering invariant; investigate the workflow."
               echo ""
             fi
             if [[ "${{ inputs.skip_gate }}" == "true" ]]; then
