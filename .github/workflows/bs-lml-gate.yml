@@ -30,9 +30,9 @@ on:
         type: boolean
         default: false
       justification:
-        description: 'Required when skip_gate=true. Audited.'
+        description: 'Audited (markdown is escaped). Required when skip_gate=true; ignored otherwise.'
         type: string
-        required: false
+        required: true
 
 permissions:
   contents: read
@@ -47,6 +47,11 @@ env:
   # Set in the repo as a *variable* (not secret). Created once by the
   # setup checklist in README — points at the long-lived pinned issue.
   BYPASS_TRACKER_ISSUE: ${{ vars.GATE_BYPASS_ISSUE_NUMBER }}
+  # Pin of WXYC/wxyc-canary commit to install for the smoke suite.
+  # Bump intentionally when canary contracts change; see install step.
+  # This pin must include the `prepare` script (wxyc-canary#47) so
+  # `npm install -g github:...` actually builds dist/cli.js.
+  CANARY_PIN: 4462530c131c92605e777a58e496776fde8561af
 
 jobs:
   gate:
@@ -96,6 +101,12 @@ jobs:
           POLL_URL: ${{ vars.LML_STAGING_BASE_URL }}/health
         run: ./scripts/bs-lml-gate/poll-staging-health.sh
 
+      # /version routes are added by phase 4 (WXYC/Backend-Service#1335) and
+      # phase 3 (WXYC/library-metadata-lookup#496) — both list "Stamp build
+      # SHA at /version" in their scopes. Until those land, these steps
+      # will 404; that's fine because staging envs themselves don't exist
+      # until those phases either. Override VERIFY_JQ_PATH if the eventual
+      # /version response nests the sha (e.g. '.build.commit').
       - name: Verify BS-staging /version matches main
         if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
         env:
@@ -133,23 +144,41 @@ jobs:
           E2E_TEST_DJ_PASSWORD: ${{ secrets.E2E_TEST_DJ_PASSWORD }}
         run: npm run test:e2e
 
+      # Pinned to wxyc-canary main @ <SHA> (Phase 5a + the prepare-script
+      # fix in wxyc-canary#47). Bump intentionally when canary contracts
+      # change. Prepare runs on git installs so dist/cli.js gets built.
       - name: Install wxyc-canary CLI
         if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
-        # Pinned to wxyc-canary main @ 36178c8 (Phase 5a, wxyc-canary#43).
-        # Bump intentionally when canary contracts change.
-        run: npm install -g github:WXYC/wxyc-canary#36178c85fbe920523ac5482c4766537abc2aa5ef
+        run: |
+          npm install -g github:WXYC/wxyc-canary#${{ env.CANARY_PIN }}
+          wxyc-canary --help >/dev/null   # smoke-test the install produced a working bin
 
       - name: Run canary smoke suite against staging
         if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
         env:
-          ORIGIN_URL: ${{ vars.BS_STAGING_BASE_URL }}
+          # CLI flags: BS base URL, BS auth URL, LML base URL, suite name.
+          # Env: CANARY_DJ_EMAIL/PASSWORD for the authenticated checks,
+          # CANARY_LML_API_KEY for the lml-auth check, CANARY_ORIGIN_URL
+          # for the Origin header on better-auth requests (must match
+          # BETTER_AUTH_TRUSTED_ORIGINS for the staging deploy).
           CANARY_DJ_EMAIL: ${{ secrets.E2E_TEST_DJ_EMAIL }}
           CANARY_DJ_PASSWORD: ${{ secrets.E2E_TEST_DJ_PASSWORD }}
           CANARY_LML_API_KEY: ${{ secrets.LML_API_KEY_STAGING }}
-        run: wxyc-canary check --suite=smoke
+          CANARY_ORIGIN_URL: ${{ vars.BS_STAGING_BASE_URL }}
+        run: |
+          wxyc-canary check \
+            --base-url='${{ vars.BS_STAGING_BASE_URL }}' \
+            --auth-url='${{ vars.BS_STAGING_AUTH_URL }}' \
+            --lml-url='${{ vars.LML_STAGING_BASE_URL }}' \
+            --suite=smoke
 
+      # Bypass audit MUST run before any prod push. The push steps below
+      # gate on `success() &&` (load-bearing — see below): if log-bypass
+      # exits non-zero, success() goes false and both push steps skip.
+      # The noop guard prevents misleading "promoted" audit entries when
+      # prods are already at main.
       - name: Audit bypass to tracker issue (before any prod push)
-        if: inputs.skip_gate == true
+        if: inputs.skip_gate == true && steps.noop.outputs.noop != 'true'
         env:
           BYPASS_REPO: ${{ env.BYPASS_TRACKER_REPO }}
           BYPASS_ISSUE_NUMBER: ${{ env.BYPASS_TRACKER_ISSUE }}
@@ -161,8 +190,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/bs-lml-gate/log-bypass.sh
 
+      # `success() &&` is explicit here (and load-bearing): it ensures
+      # that if ANY prior step failed — verify, E2E, canary, audit — the
+      # prod push is skipped. Do not remove without first replacing it
+      # with an equivalent guard, or the gate will silently bypass.
       - name: Push Backend-Service prod
-        if: steps.noop.outputs.noop != 'true'
+        id: push_bs
+        if: success() && steps.noop.outputs.noop != 'true'
         env:
           PUSH_REPO: WXYC/Backend-Service
           PUSH_TARGET_SHA: ${{ steps.shas.outputs.bs_main_sha }}
@@ -171,7 +205,11 @@ jobs:
         run: ./scripts/bs-lml-gate/push-prod.sh
 
       - name: Push library-metadata-lookup prod
-        if: steps.noop.outputs.noop != 'true'
+        id: push_lml
+        # `always()` here: BS push may have succeeded; we still want to
+        # attempt LML so we don't compound a partial promotion by silent
+        # skip. The job summary distinguishes the two outcomes.
+        if: always() && steps.push_bs.outcome != 'skipped' && steps.noop.outputs.noop != 'true'
         env:
           PUSH_REPO: WXYC/library-metadata-lookup
           PUSH_TARGET_SHA: ${{ steps.shas.outputs.lml_main_sha }}
@@ -181,7 +219,20 @@ jobs:
 
       - name: Job summary
         if: always()
+        env:
+          BS_OUTCOME: ${{ steps.push_bs.outcome }}
+          LML_OUTCOME: ${{ steps.push_lml.outcome }}
         run: |
+          render_outcome() {
+            # success | failure | skipped | cancelled (from step outcome)
+            case "$1" in
+              success) echo "advanced" ;;
+              failure) echo ":warning: **push failed**" ;;
+              skipped) echo "skipped (no-op or prior step failed)" ;;
+              "")      echo "not reached" ;;
+              *)       echo "$1" ;;
+            esac
+          }
           {
             echo "## bs-lml-gate run"
             echo ""
@@ -191,13 +242,13 @@ jobs:
             bs_new='${{ steps.shas.outputs.bs_main_sha }}'
             lml_old='${{ steps.shas.outputs.lml_prod_sha }}'
             lml_new='${{ steps.shas.outputs.lml_main_sha }}'
-            bs_outcome='advanced'
-            lml_outcome='advanced'
-            [[ "$bs_old" == "$bs_new" ]] && bs_outcome='no-op (already at main)'
-            [[ "$lml_old" == "$lml_new" ]] && lml_outcome='no-op (already at main)'
-            echo "| Backend-Service | \`${bs_old:0:12}\` | \`${bs_new:0:12}\` | ${bs_outcome} |"
-            echo "| library-metadata-lookup | \`${lml_old:0:12}\` | \`${lml_new:0:12}\` | ${lml_outcome} |"
+            echo "| Backend-Service | \`${bs_old:0:12}\` | \`${bs_new:0:12}\` | $(render_outcome "$BS_OUTCOME") |"
+            echo "| library-metadata-lookup | \`${lml_old:0:12}\` | \`${lml_new:0:12}\` | $(render_outcome "$LML_OUTCOME") |"
             echo ""
+            if [[ "$BS_OUTCOME" == "success" && "$LML_OUTCOME" != "success" && "$LML_OUTCOME" != "skipped" ]]; then
+              echo ":rotating_light: **Split promotion**: BS prod advanced but LML did not. Manually fast-forward LML prod to its current main SHA, or roll BS prod back. See runbook (wiki#81)."
+              echo ""
+            fi
             if [[ "${{ inputs.skip_gate }}" == "true" ]]; then
               echo "**Bypass:** gate skipped per workflow_dispatch input. Justification logged at ${BYPASS_TRACKER_REPO}#${BYPASS_TRACKER_ISSUE}."
             fi

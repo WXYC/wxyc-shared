@@ -23,15 +23,17 @@ teardown() {
     rm -rf "$TEST_TEMP_DIR"
 }
 
-# Install a fake `gh` that emits canned JSON keyed by the path it was called with.
+# Install a fake `gh` that emits canned JSON keyed by the path it was
+# called with. Missing fixture defaults to a 404-style stderr so the
+# script's 404→empty path is exercised (the production gh emits e.g.
+# `gh: Not Found (HTTP 404)`). Tests that want a non-404 failure write
+# a fixture-suffixed file `<path>.500` or `<path>.401`.
 install_fake_gh() {
     local fixture_dir="$TEST_TEMP_DIR/gh-fixtures"
     mkdir -p "$fixture_dir"
     export GH_FIXTURE_DIR="$fixture_dir"
     cat >"$FAKE_BIN/gh" <<'GH_EOF'
 #!/usr/bin/env bash
-# Expects: gh api <path>
-# Returns body for $GH_FIXTURE_DIR/<sanitized-path>.json or exits 22.
 if [[ "$1" != "api" ]]; then
     echo "fake gh: unexpected first arg '$1'" >&2
     exit 99
@@ -39,13 +41,27 @@ fi
 path="$2"
 sanitized="${path//\//_}"
 fixture="$GH_FIXTURE_DIR/${sanitized}.json"
+# Non-404 failure fixture support: presence of <sanitized>.HTTP_xxx
+# means simulate that status code with a matching stderr.
+for code in 401 403 429 500 503; do
+    if [[ -f "$GH_FIXTURE_DIR/${sanitized}.HTTP_${code}" ]]; then
+        echo "gh: HTTP ${code}: simulated (https://api.github.com/${path})" >&2
+        exit 1
+    fi
+done
 if [[ ! -f "$fixture" ]]; then
-    echo "fake gh: no fixture for '$path' (looked at $fixture)" >&2
-    exit 22
+    echo "gh: Not Found (HTTP 404)" >&2
+    exit 1
 fi
 cat "$fixture"
 GH_EOF
     chmod +x "$FAKE_BIN/gh"
+}
+
+simulate_http() {
+    # simulate_http <path> <status>
+    local sanitized="${1//\//_}"
+    : >"$GH_FIXTURE_DIR/${sanitized}.HTTP_${2}"
 }
 
 set_fixture() {
@@ -116,4 +132,29 @@ LML_PROD='c000000000000000000000000000000000000002'
     run "$SCRIPT_PATH"
     [ "$status" -ne 0 ]
     [[ "$output" == *"sha"* || "$output" == *"SHA"* ]]
+}
+
+@test "fails fast on transient 5xx for prod lookup (does NOT collapse to seed path)" {
+    install_fake_gh
+    set_fixture "repos/WXYC/Backend-Service/branches/main"           "{\"commit\":{\"sha\":\"$BS_MAIN\"}}"
+    set_fixture "repos/WXYC/library-metadata-lookup/branches/main"   "{\"commit\":{\"sha\":\"$LML_MAIN\"}}"
+    set_fixture "repos/WXYC/library-metadata-lookup/branches/prod"   "{\"commit\":{\"sha\":\"$LML_PROD\"}}"
+    # BS prod returns 503 — must surface as a failure, not as 'seed needed'
+    simulate_http "repos/WXYC/Backend-Service/branches/prod" 503
+
+    run "$SCRIPT_PATH"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"503"* ]]
+}
+
+@test "fails fast on 401 for any lookup (expired PAT, do NOT silently bypass)" {
+    install_fake_gh
+    set_fixture "repos/WXYC/Backend-Service/branches/main"           "{\"commit\":{\"sha\":\"$BS_MAIN\"}}"
+    set_fixture "repos/WXYC/library-metadata-lookup/branches/main"   "{\"commit\":{\"sha\":\"$LML_MAIN\"}}"
+    set_fixture "repos/WXYC/Backend-Service/branches/prod"           "{\"commit\":{\"sha\":\"$BS_PROD\"}}"
+    simulate_http "repos/WXYC/library-metadata-lookup/branches/prod" 401
+
+    run "$SCRIPT_PATH"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"401"* ]]
 }

@@ -24,18 +24,14 @@
 
 set -uo pipefail
 
-REPO="${BYPASS_REPO:-}"
-ISSUE="${BYPASS_ISSUE_NUMBER:-}"
-ACTOR="${BYPASS_ACTOR:-}"
-JUSTIFICATION="${BYPASS_JUSTIFICATION:-}"
-BS_SHA="${BYPASS_BS_SHA:-}"
-LML_SHA="${BYPASS_LML_SHA:-}"
-RUN_URL="${BYPASS_RUN_URL:-}"
 WHEN="${BYPASS_WHEN:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
-for var in REPO ISSUE ACTOR JUSTIFICATION BS_SHA LML_SHA RUN_URL; do
-    if [[ -z "${!var}" ]]; then
-        echo "log-bypass: BYPASS_${var} is required (no silent bypasses)" >&2
+# Loop iterates over the ACTUAL env-var names so error messages match
+# what an operator needs to set — not the local script aliases.
+for var in BYPASS_REPO BYPASS_ISSUE_NUMBER BYPASS_ACTOR \
+           BYPASS_JUSTIFICATION BYPASS_BS_SHA BYPASS_LML_SHA BYPASS_RUN_URL; do
+    if [[ -z "${!var:-}" ]]; then
+        echo "log-bypass: ${var} is required (no silent bypasses)" >&2
         exit 2
     fi
 done
@@ -43,26 +39,44 @@ done
 body_file="$(mktemp)"
 trap 'rm -f "$body_file"' EXIT
 
-# Plain markdown — the tracker issue is a long-lived pinned issue so
-# comments append naturally. Keep this format stable; runbook may grep it.
+# Justification is user input; render it inside a fenced code block so
+# markdown (@-mentions, links, headings) is neutralized in the audit
+# comment. The fence label is empty so the block doesn't get a language
+# tag. Anyone reading the source can still see the text verbatim, but
+# they can't be social-engineered by a fake "Approved by" link.
+#
+# Defense against fence-escape: if the justification itself contains
+# ``` we fall back to ~~~ (CommonMark allows either, and code fences
+# must match the opening sequence). Belt-and-suspenders: we also strip
+# any embedded fence sequence that matches the chosen delimiter.
+if [[ "$BYPASS_JUSTIFICATION" == *'```'* ]]; then
+    fence='~~~'
+    sanitized="${BYPASS_JUSTIFICATION//\~\~\~/\~\~ \~}"
+else
+    fence='```'
+    sanitized="${BYPASS_JUSTIFICATION//\`\`\`/\`\` \`}"
+fi
+
 cat >"$body_file" <<EOF
 ## Gate bypass — ${WHEN}
 
-- **Actor:** @${ACTOR}
-- **Run:** ${RUN_URL}
-- **Backend-Service SHA promoted:** \`${BS_SHA}\`
-- **library-metadata-lookup SHA promoted:** \`${LML_SHA}\`
+- **Actor:** @${BYPASS_ACTOR}
+- **Run:** ${BYPASS_RUN_URL}
+- **Backend-Service SHA promoted:** \`${BYPASS_BS_SHA}\`
+- **library-metadata-lookup SHA promoted:** \`${BYPASS_LML_SHA}\`
 
 **Justification**
 
-${JUSTIFICATION}
+${fence}
+${sanitized}
+${fence}
 EOF
 
-if ! gh api -X POST "repos/${REPO}/issues/${ISSUE}/comments" \
-    -F "body=@${body_file}" --silent; then
-    echo "log-bypass: failed to append comment to ${REPO}#${ISSUE}" >&2
+if ! gh api -X POST "repos/${BYPASS_REPO}/issues/${BYPASS_ISSUE_NUMBER}/comments" \
+    -f "body=@${body_file}" --silent; then
+    echo "log-bypass: failed to append comment to ${BYPASS_REPO}#${BYPASS_ISSUE_NUMBER}" >&2
     exit 1
 fi
 
-echo "log-bypass: appended bypass audit to ${REPO}#${ISSUE}"
+echo "log-bypass: appended bypass audit to ${BYPASS_REPO}#${BYPASS_ISSUE_NUMBER}"
 exit 0

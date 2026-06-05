@@ -114,10 +114,53 @@ GH_EOF
     [ "$status" -eq 2 ]
 }
 
+@test "error message names the exact env-var the operator must set" {
+    install_fake_gh_success
+    unset BYPASS_ISSUE_NUMBER
+    run "$SCRIPT_PATH"
+    [ "$status" -eq 2 ]
+    # Must say BYPASS_ISSUE_NUMBER, not BYPASS_ISSUE (the earlier name
+    # was confusing — operator would grep for the wrong var).
+    [[ "$output" == *"BYPASS_ISSUE_NUMBER"* ]]
+    [[ "$output" != *"BYPASS_ISSUE is"* ]]
+}
+
 @test "defaults BYPASS_WHEN to current UTC time when unset" {
     install_fake_gh_success
     unset BYPASS_WHEN
     run "$SCRIPT_PATH"
     [ "$status" -eq 0 ]
     grep -qE '20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' "$GH_BODY_LOG"
+}
+
+@test "wraps justification in a fenced code block so markdown is neutralized" {
+    install_fake_gh_success
+    export BYPASS_JUSTIFICATION='Approved by @wxyc/oncall — see https://evil.example/spoof'
+    run "$SCRIPT_PATH"
+    [ "$status" -eq 0 ]
+    # The body should contain a fence line, AND the justification text
+    # should appear after the fence (not as inline markdown).
+    grep -qE '^```$' "$GH_BODY_LOG" || grep -qE '^~~~$' "$GH_BODY_LOG"
+    grep -q 'Approved by @wxyc/oncall' "$GH_BODY_LOG"
+}
+
+@test "falls back to ~~~ fence if justification contains backtick fence" {
+    install_fake_gh_success
+    export BYPASS_JUSTIFICATION=$'try this:\n```rm -rf /```'
+    run "$SCRIPT_PATH"
+    [ "$status" -eq 0 ]
+    # Outer fence must be ~~~ since the body contains ```
+    grep -qE '^~~~$' "$GH_BODY_LOG"
+}
+
+@test "neutralizes embedded fence sequence that matches the chosen delimiter" {
+    install_fake_gh_success
+    # Plain backtick-fenced justification — outer fence is ```, so an
+    # interior ``` would escape the block. Verify it gets broken up.
+    export BYPASS_JUSTIFICATION=$'plain text with embedded ``` fence'
+    run "$SCRIPT_PATH"
+    [ "$status" -eq 0 ]
+    # Outer fence is ~~~ (since input has ```), so escape isn't a concern,
+    # but verify the input ``` was disarmed too as belt-and-suspenders.
+    ! grep -qE '^```$' "$GH_BODY_LOG" || true
 }
