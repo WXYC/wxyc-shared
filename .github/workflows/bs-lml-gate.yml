@@ -334,13 +334,15 @@ jobs:
               # it does — the gate's correctness depends on this.
               echo ":rotating_light: **Split promotion (inverted)**: LML prod advanced but BS did not. This violates the gate's ordering invariant; investigate the workflow."
               echo ""
-            elif [[ "$BS_OUTCOME" == "failure" && "$LML_OUTCOME" != "success" ]]; then
-              # BS push step failed (gh error OR emit_output write
-              # error after a successful PATCH). The ref MAY have
-              # moved on the BS side; LML definitely didn't push.
-              # Verify before deciding whether to retry the gate
-              # or recover manually.
-              echo ":warning: **Possible split promotion**: BS push step failed; the API PATCH may have landed before the failure. Check Backend-Service \`prod\` HEAD against \`${bs_new:0:12}\` directly via the GitHub API. If advanced, follow the split-promotion section of the runbook (wiki#81)."
+            elif [[ ( "$BS_OUTCOME" == "failure" || "$BS_OUTCOME" == "cancelled" ) && "$LML_OUTCOME" != "success" ]]; then
+              # BS push step ended in failure or cancellation. Both
+              # leave the same ambiguity: the gh API PATCH may have
+              # landed before the bad-state outcome (gh error,
+              # emit_output write error, runner SIGTERM). LML
+              # definitely didn't push. Verify the BS prod ref
+              # directly before deciding whether to retry or
+              # recover manually.
+              echo ":warning: **Possible split promotion**: BS push step ended in \`$BS_OUTCOME\`; the API PATCH may have landed before the bad-state outcome. Check Backend-Service \`prod\` HEAD against \`${bs_new:0:12}\` directly via the GitHub API. If advanced, follow the split-promotion section of the runbook (wiki#81)."
               echo ""
             fi
             # Only print the bypass footer if the audit step actually
