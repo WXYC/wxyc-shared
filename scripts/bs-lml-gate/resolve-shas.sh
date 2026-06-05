@@ -25,16 +25,45 @@ if [[ -z "${GITHUB_OUTPUT:-}" ]]; then
     exit 2
 fi
 
-# Fetch the `commit.sha` for a branch; on any gh failure, echo empty.
+# Fetch the `commit.sha` for a branch.
+#
+# Exit semantics — we distinguish 404 (branch missing → seed path) from
+# every other gh failure (transient 5xx, expired PAT, rate-limit). The
+# old behavior of collapsing all failures into "empty" would let a 503
+# on a `prod` lookup mis-trigger the seed/POST path on an existing
+# branch and corrupt the audit trail.
+#
+# Returns: prints SHA on stdout (empty if branch is genuinely missing).
+# Exits the script on any non-404 failure (set -e propagates).
 fetch_branch_sha() {
     local repo="$1" branch="$2"
-    local body sha
-    if ! body="$(gh api "repos/${repo}/branches/${branch}" 2>/dev/null)"; then
+    local body="" err_file rc=0
+    err_file="$(mktemp)"
+
+    # NB: `if body="$(cmd)"; then` would clobber $? to 0 in the else
+    # branch (bash if-statement quirk). `|| rc=$?` keeps the real code.
+    body="$(gh api "repos/${repo}/branches/${branch}" 2>"$err_file")" || rc=$?
+
+    if (( rc == 0 )); then
+        rm -f "$err_file"
+        printf '%s' "$body" | jq -r '.commit.sha // ""'
+        return 0
+    fi
+
+    # gh's 404 stderr looks like `gh: Not Found (HTTP 404)`. Be liberal
+    # in what we accept here so a gh version bump doesn't surprise us.
+    if grep -qiE 'HTTP 404|Not Found' "$err_file"; then
+        rm -f "$err_file"
         echo ""
         return 0
     fi
-    sha="$(printf '%s' "$body" | jq -r '.commit.sha // ""')"
-    echo "$sha"
+
+    # Anything else: surface the error and propagate. set -e in main
+    # will fail the script.
+    echo "resolve-shas: gh api repos/${repo}/branches/${branch} failed (rc=$rc):" >&2
+    cat "$err_file" >&2
+    rm -f "$err_file"
+    return "$rc"
 }
 
 validate_sha() {
