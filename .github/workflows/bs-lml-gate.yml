@@ -308,11 +308,23 @@ jobs:
             echo "| Backend-Service | \`${bs_old:0:12}\` | \`${bs_new:0:12}\` | $(render_outcome "$BS_OUTCOME" "$BS_DID_PUSH" "$NOOP") |"
             echo "| library-metadata-lookup | \`${lml_old:0:12}\` | \`${lml_new:0:12}\` | $(render_outcome "$LML_OUTCOME" "$LML_DID_PUSH" "$NOOP") |"
             echo ""
-            # Split-promotion only happens if one side actually pushed
-            # and the other didn't. did_push=false on either side means
-            # no API call landed, so no split. Note that emit_output is
-            # now fail-loud in push-prod.sh, so a successful push is
-            # guaranteed to have did_push=true (no false negatives).
+            # Split-promotion detection has two layers:
+            #
+            # 1. did_push-confirmed splits: emit_output writes
+            #    `did_push=true` AFTER the gh PATCH succeeds; if one
+            #    side has did_push=true and the other doesn't, the
+            #    split is real.
+            #
+            # 2. Possible-split on push-step failure: emit_output is
+            #    fail-loud, so a successful gh PATCH followed by a
+            #    failed $GITHUB_OUTPUT write produces step
+            #    outcome=failure with did_push="" — the ref may or
+            #    may not have moved. We can't tell from the step
+            #    output, so we flag it as possible-split and point
+            #    at the runbook. Most push failures will be before
+            #    the API call (so no split), but the runbook check
+            #    is cheap and the cost of missing a real split is
+            #    much higher than a false alarm.
             if [[ "$BS_DID_PUSH" == "true" && "$LML_DID_PUSH" != "true" ]]; then
               echo ":rotating_light: **Split promotion**: BS prod advanced but LML did not. Manually fast-forward LML prod to its current main SHA, or roll BS prod back. See runbook (wiki#81)."
               echo ""
@@ -321,6 +333,14 @@ jobs:
               # gating (LML can't push if BS didn't), but flag it if
               # it does — the gate's correctness depends on this.
               echo ":rotating_light: **Split promotion (inverted)**: LML prod advanced but BS did not. This violates the gate's ordering invariant; investigate the workflow."
+              echo ""
+            elif [[ "$BS_OUTCOME" == "failure" && "$LML_OUTCOME" != "success" ]]; then
+              # BS push step failed (gh error OR emit_output write
+              # error after a successful PATCH). The ref MAY have
+              # moved on the BS side; LML definitely didn't push.
+              # Verify before deciding whether to retry the gate
+              # or recover manually.
+              echo ":warning: **Possible split promotion**: BS push step failed; the API PATCH may have landed before the failure. Check Backend-Service \`prod\` HEAD against \`${bs_new:0:12}\` directly via the GitHub API. If advanced, follow the split-promotion section of the runbook (wiki#81)."
               echo ""
             fi
             # Only print the bypass footer if the audit step actually
