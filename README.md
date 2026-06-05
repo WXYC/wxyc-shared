@@ -583,6 +583,53 @@ npm run generate:python      # Python models (datamodel-codegen)
 
 See [e2e/README.md](./e2e/README.md) for details on running E2E tests.
 
+## Staging gate (bs-lml-gate)
+
+`.github/workflows/bs-lml-gate.yml` coordinates Backend-Service + library-metadata-lookup prod promotion. The shape: a PR merges to `main` in either repo → that repo's staging deploy fires → on healthy, the deploy job sends a `repository_dispatch` here → this workflow re-resolves the *current* `main` SHA of both repos, polls both staging `/health` endpoints, verifies each staging build's `/version` matches its `main` SHA, runs the wxyc-shared E2E suite + `wxyc-canary check --suite=smoke` against staging, and on all-pass fast-forwards each repo's `prod` branch to its `main` SHA. The existing prod auto-deploys in each repo then fire on `push: prod`.
+
+The gate is intentionally coupled — BS and LML promote together, and a broken BS staging holds LML hotfixes hostage. That's the trade-off for catching schema drift between the two pre-prod. There's a documented bypass path (see below).
+
+### Trigger
+
+```
+repository_dispatch:
+  types: [bs-staging-deployed, lml-staging-deployed]
+```
+
+`client_payload.source_sha` is informational only. The gate always re-queries `main` via the GitHub API after acquiring the concurrency lock, so a stale dispatch arriving after a newer merge cannot regress `prod`.
+
+### Concurrency
+
+`group: bs-lml-gate`, `cancel-in-progress: false`. A new dispatch queues behind a running gate; cancellation mid-push could leave one repo's `prod` advanced and the other not. Each dequeue uses whatever `main` SHA is current at that moment — we always promote the latest green pair.
+
+### Bypass
+
+`workflow_dispatch` with `skip_gate: true` and a non-empty `justification`. The bypass path still resolves both `main` SHAs and is still a no-op if `prod == main` already; it only skips the health/version/E2E/canary checks. A comment is appended to the pinned tracker issue (`vars.GATE_BYPASS_ISSUE_NUMBER`) *before* any prod push — if the audit append fails, the workflow exits non-zero before touching prod. There are no silent bypasses.
+
+### Setup checklist
+
+This workflow assumes the following one-time setup is done in the wxyc-shared repo:
+
+1. **Fine-grained PATs**: `PROD_PUSH_TOKEN_BS` and `PROD_PUSH_TOKEN_LML`, each scoped to `Contents: write` on the `prod` branch of *only* their respective repo. Store as repo secrets.
+2. **Staging URLs** as repo *variables* (not secrets — staging hostnames aren't sensitive): `BS_STAGING_BASE_URL`, `BS_STAGING_AUTH_URL`, `LML_STAGING_BASE_URL`.
+3. **Bypass tracker issue**: a pinned issue in this repo. Set `vars.GATE_BYPASS_ISSUE_NUMBER` to its number.
+4. **Staging API key**: `LML_API_KEY_STAGING` (added by phase 3).
+5. **E2E credentials**: already present (`E2E_TEST_DJ_EMAIL`, `E2E_TEST_DJ_PASSWORD`).
+
+Once the dispatchers in BS (phase 4) and LML (phase 3) are live, the gate fires automatically.
+
+### Helpers
+
+The workflow keeps logic in shell helpers at `scripts/bs-lml-gate/` (not the top-level `scripts/` dir, so the gate's blast radius is one directory listing). Each helper takes input via env vars, writes outputs to `$GITHUB_OUTPUT`, and has bats tests at `scripts/__tests__/bs-lml-gate/`:
+
+- `resolve-shas.sh` — fetches both repos' main + prod SHAs via `gh api`
+- `poll-staging-health.sh` — polls a URL until 200 or timeout
+- `verify-version.sh` — compares a service's `/version` to an expected SHA
+- `push-prod.sh` — advances a repo's `prod` ref via the GitHub refs API
+- `log-bypass.sh` — appends an audit comment to the tracker issue
+
+Run helper tests with `npm run test:bs-lml-gate`.
+
 ## Railway Deployment
 
 See [`railway/`](./railway/) for the Railway service topology, environment variable reference, and setup instructions for replicating the deployment environment.

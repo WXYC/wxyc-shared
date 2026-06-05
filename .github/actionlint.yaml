@@ -1,0 +1,8 @@
+# actionlint config for wxyc-shared workflows.
+#
+# self-hosted-runner.labels lists custom labels we register on org-level
+# self-hosted runners. Without this, actionlint flags `runs-on:
+# [self-hosted, e2e-runner]` as an unknown label.
+self-hosted-runner:
+  labels:
+    - e2e-runner
