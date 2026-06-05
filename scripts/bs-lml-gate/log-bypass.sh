@@ -36,6 +36,14 @@ for var in BYPASS_REPO BYPASS_ISSUE_NUMBER BYPASS_ACTOR \
     fi
 done
 
+# Whitespace-only justification is a silent-bypass-by-content. `-z`
+# above catches truly empty strings; this catches space/tab/newline-only
+# payloads that would pass the length check but contribute no content.
+if [[ -z "${BYPASS_JUSTIFICATION//[[:space:]]/}" ]]; then
+    echo "log-bypass: BYPASS_JUSTIFICATION is whitespace-only (no silent bypasses)" >&2
+    exit 2
+fi
+
 body_file="$(mktemp)"
 trap 'rm -f "$body_file"' EXIT
 
@@ -57,23 +65,30 @@ else
     sanitized="${BYPASS_JUSTIFICATION//\`\`\`/\`\` \`}"
 fi
 
-cat >"$body_file" <<EOF
-## Gate bypass — ${WHEN}
+# Build the body via printf (not heredoc) so a justification line of
+# exactly `EOF` can't terminate the heredoc early and corrupt the
+# audit comment. printf doesn't have a delimiter to inject.
+printf '%s\n' \
+    "## Gate bypass — ${WHEN}" \
+    "" \
+    "- **Actor:** @${BYPASS_ACTOR}" \
+    "- **Run:** ${BYPASS_RUN_URL}" \
+    "- **Backend-Service SHA promoted:** \`${BYPASS_BS_SHA}\`" \
+    "- **library-metadata-lookup SHA promoted:** \`${BYPASS_LML_SHA}\`" \
+    "" \
+    "**Justification**" \
+    "" \
+    "${fence}" \
+    "${sanitized}" \
+    "${fence}" \
+    >"$body_file"
 
-- **Actor:** @${BYPASS_ACTOR}
-- **Run:** ${BYPASS_RUN_URL}
-- **Backend-Service SHA promoted:** \`${BYPASS_BS_SHA}\`
-- **library-metadata-lookup SHA promoted:** \`${BYPASS_LML_SHA}\`
-
-**Justification**
-
-${fence}
-${sanitized}
-${fence}
-EOF
-
+# NB: `-F` (--field) is required here, NOT `-f` (--raw-field). Per
+# `gh api --help`: only `-F` supports the `@<path>` syntax to read
+# the value from a file. `-f body=@path` posts the literal seven-char
+# string `@<path>` — destroying the audit trail without erroring.
 if ! gh api -X POST "repos/${BYPASS_REPO}/issues/${BYPASS_ISSUE_NUMBER}/comments" \
-    -f "body=@${body_file}" --silent; then
+    -F "body=@${body_file}" --silent; then
     echo "log-bypass: failed to append comment to ${BYPASS_REPO}#${BYPASS_ISSUE_NUMBER}" >&2
     exit 1
 fi

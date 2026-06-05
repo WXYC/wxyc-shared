@@ -50,9 +50,14 @@ fetch_branch_sha() {
         return 0
     fi
 
-    # gh's 404 stderr looks like `gh: Not Found (HTTP 404)`. Be liberal
-    # in what we accept here so a gh version bump doesn't surprise us.
-    if grep -qiE 'HTTP 404|Not Found' "$err_file"; then
+    # gh's 404 stderr always includes the literal `HTTP 404`. We anchor
+    # on that exact substring (no `-i`, no 'Not Found' alternation) to
+    # avoid false-matching on errors like `host not found` (DNS),
+    # `token not found` (auth), or upstream proxy messages that happen
+    # to contain the phrase. A false 404 match drives push-prod.sh into
+    # the seed/POST path on an existing branch, which then 422s loudly
+    # but mis-attributes the cause.
+    if grep -q 'HTTP 404' "$err_file"; then
         rm -f "$err_file"
         echo ""
         return 0

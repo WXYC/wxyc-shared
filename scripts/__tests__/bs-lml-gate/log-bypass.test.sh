@@ -53,14 +53,23 @@ teardown() {
 install_fake_gh_success() {
     cat >"$FAKE_BIN/gh" <<GH_EOF
 #!/usr/bin/env bash
+# Mirror real \`gh api\` flag semantics: only -F (--field) treats
+# @<path> as a file reference; -f (--raw-field) sends it as a literal
+# string. Capturing both behaviors lets the test distinguish them so
+# a swap of -F → -f doesn't silently pass.
 printf '%s\n' "\$*" >>"$GH_CALL_LOG"
-# Capture the body sent via -F body=@... if present
-for ((i=1; i<=\$#; i++)); do
-    arg="\${!i}"
-    if [[ "\$arg" == "body=@"* ]]; then
-        path="\${arg#body=@}"
-        cat "\$path" >>"$GH_BODY_LOG"
+prev=""
+for arg in "\$@"; do
+    if [[ "\$arg" == "body="* ]]; then
+        value="\${arg#body=}"
+        if [[ "\$value" == "@"* && ( "\$prev" == "-F" || "\$prev" == "--field" ) ]]; then
+            cat "\${value#@}" >>"\$GH_BODY_LOG"
+        else
+            # -f or no flag context: body is the literal string value
+            printf '%s\n' "\$value" >>"\$GH_BODY_LOG"
+        fi
     fi
+    prev="\$arg"
 done
 exit 0
 GH_EOF
@@ -105,6 +114,31 @@ GH_EOF
     run "$SCRIPT_PATH"
     [ "$status" -eq 2 ]
     [ ! -s "$GH_CALL_LOG" ]
+}
+
+@test "exits 2 when justification is whitespace-only (no silent bypass via blank)" {
+    install_fake_gh_success
+    export BYPASS_JUSTIFICATION=$'   \n\t  \n'
+    run "$SCRIPT_PATH"
+    [ "$status" -eq 2 ]
+    [ ! -s "$GH_CALL_LOG" ]
+}
+
+@test "handles justification line equal to 'EOF' (heredoc-injection defense)" {
+    install_fake_gh_success
+    # If the body were built with an unquoted heredoc <<EOF, this line
+    # would terminate the heredoc early. The script must build the
+    # body via a delimiter-free mechanism so this is just text.
+    export BYPASS_JUSTIFICATION=$'before\nEOF\nafter'
+    run "$SCRIPT_PATH"
+    [ "$status" -eq 0 ]
+    # Body must contain all three lines verbatim plus the closing fence.
+    grep -q '^before$' "$GH_BODY_LOG"
+    grep -q '^EOF$' "$GH_BODY_LOG"
+    grep -q '^after$' "$GH_BODY_LOG"
+    # And the body must end with the closing fence (either ``` or ~~~);
+    # if heredoc-EOF had terminated early, the closing fence would be missing.
+    tail -1 "$GH_BODY_LOG" | grep -qE '^(```|~~~)$'
 }
 
 @test "exits 2 when any required field is missing" {
@@ -153,14 +187,39 @@ GH_EOF
     grep -qE '^~~~$' "$GH_BODY_LOG"
 }
 
-@test "neutralizes embedded fence sequence that matches the chosen delimiter" {
+@test "disarms input fence that matches the chosen outer fence" {
     install_fake_gh_success
-    # Plain backtick-fenced justification — outer fence is ```, so an
-    # interior ``` would escape the block. Verify it gets broken up.
-    export BYPASS_JUSTIFICATION=$'plain text with embedded ``` fence'
+    # Outer fence is chosen based on input: ``` is the default; if
+    # input contains ```, outer flips to ~~~. The remaining defense:
+    # if the chosen outer fence sequence appears in the input, it
+    # must be broken up so it can't close the outer block early.
+    #
+    # Input contains BOTH ``` and ~~~. Outer fence becomes ~~~
+    # (input has ```). The script must disarm the standalone ~~~
+    # line in the input so it doesn't close the outer ~~~ block.
+    export BYPASS_JUSTIFICATION=$'has ``` and\n~~~\nstandalone'
     run "$SCRIPT_PATH"
     [ "$status" -eq 0 ]
-    # Outer fence is ~~~ (since input has ```), so escape isn't a concern,
-    # but verify the input ``` was disarmed too as belt-and-suspenders.
-    ! grep -qE '^```$' "$GH_BODY_LOG" || true
+    # Body must not contain a standalone ~~~ line in positions where
+    # it would close the outer block. The opening and closing fences
+    # are the only legitimate ~~~ lines; the middle of the body
+    # (inside the fence) must not have ~~~ alone on a line.
+    # Count standalone ~~~ lines: should be exactly 2 (open + close).
+    count=$(grep -cE '^~~~$' "$GH_BODY_LOG")
+    [ "$count" -eq 2 ]
+}
+
+@test "posts the rendered body via -F (not -f), so audit content reaches the issue" {
+    # Regression test for the iter-2 swap of -F → -f that silently
+    # broke the audit body: gh api -f body=@path sends the LITERAL
+    # string '@path', not the file content. The fake gh distinguishes
+    # the two flags, so this asserts the script uses -F.
+    install_fake_gh_success
+    run "$SCRIPT_PATH"
+    [ "$status" -eq 0 ]
+    grep -qE '(^| )-F( |$)' "$GH_CALL_LOG"
+    # And the body that landed must be the rendered markdown, not
+    # the literal '@/tmp/...' string the -f path would produce.
+    [ -s "$GH_BODY_LOG" ]
+    ! grep -qE '^@/' "$GH_BODY_LOG"
 }

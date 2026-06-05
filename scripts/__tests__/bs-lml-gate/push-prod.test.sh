@@ -30,6 +30,8 @@ setup() {
     export PATH="$FAKE_BIN:$PATH"
     export GH_CALL_LOG="$TEST_TEMP_DIR/gh-calls.log"
     : >"$GH_CALL_LOG"
+    export GITHUB_OUTPUT="$TEST_TEMP_DIR/github_output"
+    : >"$GITHUB_OUTPUT"
     # Common required env
     export PUSH_REPO='WXYC/Backend-Service'
     export PUSH_TARGET_SHA="$EXPECTED"
@@ -60,16 +62,17 @@ GH_EOF
     chmod +x "$FAKE_BIN/gh"
 }
 
-@test "no-op when PUSH_TARGET_SHA == PUSH_CURRENT_SHA (skips gh entirely)" {
+@test "no-op when PUSH_TARGET_SHA == PUSH_CURRENT_SHA (skips gh entirely, did_push=false)" {
     install_fake_gh_failure   # would fail if it were called
     export PUSH_CURRENT_SHA="$EXPECTED"
     run "$SCRIPT_PATH"
     [ "$status" -eq 0 ]
     [[ "$output" == *"no-op"* || "$output" == *"already"* ]]
     [ ! -s "$GH_CALL_LOG" ]
+    grep -q '^did_push=false$' "$GITHUB_OUTPUT"
 }
 
-@test "fast-forward updates an existing prod ref via PATCH" {
+@test "fast-forward updates an existing prod ref via PATCH (did_push=true)" {
     install_fake_gh_success
     export PUSH_CURRENT_SHA='1111111111111111111111111111111111111111'
     run "$SCRIPT_PATH"
@@ -77,9 +80,10 @@ GH_EOF
     grep -q 'PATCH' "$GH_CALL_LOG"
     grep -q "refs/heads/prod" "$GH_CALL_LOG"
     grep -q "$EXPECTED" "$GH_CALL_LOG"
+    grep -q '^did_push=true$' "$GITHUB_OUTPUT"
 }
 
-@test "seed (PUSH_CURRENT_SHA empty) POSTs a new ref" {
+@test "seed (PUSH_CURRENT_SHA empty) POSTs a new ref (did_push=true)" {
     install_fake_gh_success
     export PUSH_CURRENT_SHA=""
     run "$SCRIPT_PATH"
@@ -87,13 +91,17 @@ GH_EOF
     grep -q 'POST' "$GH_CALL_LOG"
     grep -q "refs/heads/prod" "$GH_CALL_LOG"
     grep -q "$EXPECTED" "$GH_CALL_LOG"
+    grep -q '^did_push=true$' "$GITHUB_OUTPUT"
 }
 
-@test "exits 1 if gh fails" {
+@test "exits 1 if gh fails (and does NOT claim did_push=true)" {
     install_fake_gh_failure
     export PUSH_CURRENT_SHA='1111111111111111111111111111111111111111'
     run "$SCRIPT_PATH"
     [ "$status" -eq 1 ]
+    # On gh failure, we don't know if the ref moved; the summary
+    # logic depends on did_push staying unset rather than 'true'.
+    ! grep -q '^did_push=true$' "$GITHUB_OUTPUT"
 }
 
 @test "dry-run does not invoke gh" {

@@ -14,6 +14,10 @@
 #   PUSH_PAT         — required, fine-grained PAT
 #   PUSH_DRY_RUN     — optional, "1" prints the planned API call
 #
+# Outputs (to $GITHUB_OUTPUT if set):
+#   did_push=true    — a PATCH/POST landed against the GitHub API
+#   did_push=false   — short-circuited at target==current (no API call)
+#
 # Exit:
 #   0 — push succeeded OR no-op (target == current)
 #   1 — push failed
@@ -44,8 +48,16 @@ if [[ -n "$CURRENT" ]] && ! [[ "$CURRENT" =~ ^[0-9a-f]{40}$ ]]; then
     exit 2
 fi
 
+emit_output() {
+    # Write key=value to $GITHUB_OUTPUT when in GHA; no-op locally.
+    if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+        printf '%s=%s\n' "$1" "$2" >>"$GITHUB_OUTPUT"
+    fi
+}
+
 if [[ "$TARGET" == "$CURRENT" ]]; then
     echo "push-prod: $REPO prod already at $TARGET (no-op)"
+    emit_output did_push false
     exit 0
 fi
 
@@ -63,6 +75,7 @@ fi
 
 if [[ "$DRY_RUN" == "1" ]]; then
     echo "push-prod: DRY_RUN $method $path sha=$TARGET (repo=$REPO from=${CURRENT:-<seed>})"
+    emit_output did_push false
     exit 0
 fi
 
@@ -70,8 +83,12 @@ fi
 # show in `ps`). `gh` reads $GH_TOKEN before $GITHUB_TOKEN.
 if ! GH_TOKEN="$PAT" gh api -X "$method" "$path" "${fields[@]}" --silent; then
     echo "push-prod: $method $path failed" >&2
+    # Even on failure, the request reached the API — but we don't
+    # know whether the ref moved. Don't claim did_push=true; leave
+    # the output unset so the workflow falls back to step outcome.
     exit 1
 fi
 
 echo "push-prod: $REPO prod -> $TARGET (${method})"
+emit_output did_push true
 exit 0
