@@ -50,8 +50,15 @@ fi
 
 emit_output() {
     # Write key=value to $GITHUB_OUTPUT when in GHA; no-op locally.
+    # Fail loud on write error — the workflow's split-promotion detector
+    # tests `did_push == "true"` exactly, so a silent emit-failure after
+    # a real push would mask the actual state and could even trigger a
+    # spurious inverted-split warning.
     if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-        printf '%s=%s\n' "$1" "$2" >>"$GITHUB_OUTPUT"
+        if ! printf '%s=%s\n' "$1" "$2" >>"$GITHUB_OUTPUT"; then
+            echo "push-prod: failed to write $1=$2 to \$GITHUB_OUTPUT ($GITHUB_OUTPUT)" >&2
+            exit 1
+        fi
     fi
 }
 
