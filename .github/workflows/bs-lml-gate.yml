@@ -1,0 +1,204 @@
+name: bs-lml-gate
+
+# Coordinator for Backend-Service + library-metadata-lookup prod promotion.
+#
+# After either repo's staging deploy reports healthy, it dispatches here.
+# This workflow re-resolves both `main` SHAs, verifies both staging envs,
+# runs E2E + canary smoke, and on pass fast-forwards each repo's `prod`
+# branch to its `main` SHA. The repos' existing prod auto-deploys then
+# fire on `push: prod`.
+#
+# Helpers live alongside this workflow at scripts/bs-lml-gate/ (not
+# scripts/) so the gate's blast radius is obvious from one directory
+# listing. Each helper has bats tests in scripts/__tests__/bs-lml-gate/.
+#
+# Design notes:
+#   - client_payload.source_sha is informational only. The gate always
+#     re-queries main so a stale dispatch can't regress prod.
+#   - concurrency: cancel-in-progress is false because a cancelled
+#     mid-push would leave one repo's prod advanced and the other not.
+#   - prod pushes use repo-scoped fine-grained PATs, not GITHUB_TOKEN,
+#     so the audit log shows the promoter bot rather than the GHA actor.
+
+on:
+  repository_dispatch:
+    types: [bs-staging-deployed, lml-staging-deployed]
+  workflow_dispatch:
+    inputs:
+      skip_gate:
+        description: 'Bypass staging checks (still posts audit comment).'
+        type: boolean
+        default: false
+      justification:
+        description: 'Required when skip_gate=true. Audited.'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  issues: write   # for the bypass audit comment
+
+concurrency:
+  group: bs-lml-gate
+  cancel-in-progress: false
+
+env:
+  BYPASS_TRACKER_REPO: ${{ github.repository }}
+  # Set in the repo as a *variable* (not secret). Created once by the
+  # setup checklist in README — points at the long-lived pinned issue.
+  BYPASS_TRACKER_ISSUE: ${{ vars.GATE_BYPASS_ISSUE_NUMBER }}
+
+jobs:
+  gate:
+    runs-on: [self-hosted, e2e-runner]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout wxyc-shared (for E2E suite + helpers)
+        uses: actions/checkout@v6
+
+      - name: Resolve current main + prod SHAs for both repos
+        id: shas
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/bs-lml-gate/resolve-shas.sh
+
+      - name: Summarize triggering dispatch + resolved SHAs
+        run: |
+          echo "Dispatch event: ${{ github.event_name }}"
+          echo "Dispatch type:  ${{ github.event.action || 'workflow_dispatch' }}"
+          echo "Dispatch source repo: ${{ github.event.client_payload.source_repo || 'n/a' }}"
+          echo "Dispatch source sha:  ${{ github.event.client_payload.source_sha  || 'n/a' }}"
+          echo "BS  main: ${{ steps.shas.outputs.bs_main_sha }}"
+          echo "BS  prod: ${{ steps.shas.outputs.bs_prod_sha }}"
+          echo "LML main: ${{ steps.shas.outputs.lml_main_sha }}"
+          echo "LML prod: ${{ steps.shas.outputs.lml_prod_sha }}"
+
+      - name: Early-exit if both prod already match main (nothing to promote)
+        id: noop
+        run: |
+          if [[ "${{ steps.shas.outputs.bs_main_sha }}" == "${{ steps.shas.outputs.bs_prod_sha }}" \
+             && "${{ steps.shas.outputs.lml_main_sha }}" == "${{ steps.shas.outputs.lml_prod_sha }}" ]]; then
+            echo "noop=true" >>"$GITHUB_OUTPUT"
+            echo "Both prod branches already at main; nothing to do."
+          else
+            echo "noop=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Poll BS-staging /health
+        if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
+        env:
+          POLL_URL: ${{ vars.BS_STAGING_BASE_URL }}/healthcheck
+        run: ./scripts/bs-lml-gate/poll-staging-health.sh
+
+      - name: Poll LML-staging /health
+        if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
+        env:
+          POLL_URL: ${{ vars.LML_STAGING_BASE_URL }}/health
+        run: ./scripts/bs-lml-gate/poll-staging-health.sh
+
+      - name: Verify BS-staging /version matches main
+        if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
+        env:
+          VERIFY_URL: ${{ vars.BS_STAGING_BASE_URL }}/version
+          EXPECTED_SHA: ${{ steps.shas.outputs.bs_main_sha }}
+        run: ./scripts/bs-lml-gate/verify-version.sh
+
+      - name: Verify LML-staging /version matches main
+        if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
+        env:
+          VERIFY_URL: ${{ vars.LML_STAGING_BASE_URL }}/version
+          EXPECTED_SHA: ${{ steps.shas.outputs.lml_main_sha }}
+        run: ./scripts/bs-lml-gate/verify-version.sh
+
+      - name: Setup Node
+        if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies + build (E2E needs the dist)
+        if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
+        run: |
+          npm ci --ignore-scripts
+          npm run generate:typescript
+          npm run build
+
+      - name: Run wxyc-shared E2E against BS-staging
+        if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
+        env:
+          E2E_BASE_URL: ${{ vars.BS_STAGING_BASE_URL }}
+          E2E_AUTH_URL: ${{ vars.BS_STAGING_AUTH_URL }}
+          E2E_TEST_DJ_EMAIL: ${{ secrets.E2E_TEST_DJ_EMAIL }}
+          E2E_TEST_DJ_PASSWORD: ${{ secrets.E2E_TEST_DJ_PASSWORD }}
+        run: npm run test:e2e
+
+      - name: Install wxyc-canary CLI
+        if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
+        # Pinned to wxyc-canary main @ 36178c8 (Phase 5a, wxyc-canary#43).
+        # Bump intentionally when canary contracts change.
+        run: npm install -g github:WXYC/wxyc-canary#36178c85fbe920523ac5482c4766537abc2aa5ef
+
+      - name: Run canary smoke suite against staging
+        if: steps.noop.outputs.noop != 'true' && inputs.skip_gate != true
+        env:
+          ORIGIN_URL: ${{ vars.BS_STAGING_BASE_URL }}
+          CANARY_DJ_EMAIL: ${{ secrets.E2E_TEST_DJ_EMAIL }}
+          CANARY_DJ_PASSWORD: ${{ secrets.E2E_TEST_DJ_PASSWORD }}
+          CANARY_LML_API_KEY: ${{ secrets.LML_API_KEY_STAGING }}
+        run: wxyc-canary check --suite=smoke
+
+      - name: Audit bypass to tracker issue (before any prod push)
+        if: inputs.skip_gate == true
+        env:
+          BYPASS_REPO: ${{ env.BYPASS_TRACKER_REPO }}
+          BYPASS_ISSUE_NUMBER: ${{ env.BYPASS_TRACKER_ISSUE }}
+          BYPASS_ACTOR: ${{ github.actor }}
+          BYPASS_JUSTIFICATION: ${{ inputs.justification }}
+          BYPASS_BS_SHA: ${{ steps.shas.outputs.bs_main_sha }}
+          BYPASS_LML_SHA: ${{ steps.shas.outputs.lml_main_sha }}
+          BYPASS_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/bs-lml-gate/log-bypass.sh
+
+      - name: Push Backend-Service prod
+        if: steps.noop.outputs.noop != 'true'
+        env:
+          PUSH_REPO: WXYC/Backend-Service
+          PUSH_TARGET_SHA: ${{ steps.shas.outputs.bs_main_sha }}
+          PUSH_CURRENT_SHA: ${{ steps.shas.outputs.bs_prod_sha }}
+          PUSH_PAT: ${{ secrets.PROD_PUSH_TOKEN_BS }}
+        run: ./scripts/bs-lml-gate/push-prod.sh
+
+      - name: Push library-metadata-lookup prod
+        if: steps.noop.outputs.noop != 'true'
+        env:
+          PUSH_REPO: WXYC/library-metadata-lookup
+          PUSH_TARGET_SHA: ${{ steps.shas.outputs.lml_main_sha }}
+          PUSH_CURRENT_SHA: ${{ steps.shas.outputs.lml_prod_sha }}
+          PUSH_PAT: ${{ secrets.PROD_PUSH_TOKEN_LML }}
+        run: ./scripts/bs-lml-gate/push-prod.sh
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## bs-lml-gate run"
+            echo ""
+            echo "| Repo | Old prod | New prod | Outcome |"
+            echo "| --- | --- | --- | --- |"
+            bs_old='${{ steps.shas.outputs.bs_prod_sha }}'
+            bs_new='${{ steps.shas.outputs.bs_main_sha }}'
+            lml_old='${{ steps.shas.outputs.lml_prod_sha }}'
+            lml_new='${{ steps.shas.outputs.lml_main_sha }}'
+            bs_outcome='advanced'
+            lml_outcome='advanced'
+            [[ "$bs_old" == "$bs_new" ]] && bs_outcome='no-op (already at main)'
+            [[ "$lml_old" == "$lml_new" ]] && lml_outcome='no-op (already at main)'
+            echo "| Backend-Service | \`${bs_old:0:12}\` | \`${bs_new:0:12}\` | ${bs_outcome} |"
+            echo "| library-metadata-lookup | \`${lml_old:0:12}\` | \`${lml_new:0:12}\` | ${lml_outcome} |"
+            echo ""
+            if [[ "${{ inputs.skip_gate }}" == "true" ]]; then
+              echo "**Bypass:** gate skipped per workflow_dispatch input. Justification logged at ${BYPASS_TRACKER_REPO}#${BYPASS_TRACKER_ISSUE}."
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"

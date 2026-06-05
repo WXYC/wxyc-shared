@@ -50,6 +50,7 @@
     "test:e2e:contracts": "vitest run --config vitest.e2e.config.ts tests/e2e-contracts.test.ts",
     "test:setup-script": "bats scripts/__tests__/setup-dev-environment.test.sh",
     "test:drift-guard": "bats scripts/__tests__/check-corpus-drift.test.sh",
+    "test:bs-lml-gate": "bats scripts/__tests__/bs-lml-gate/*.test.sh",
     "lint": "tsc --noEmit --declaration false --declarationMap false",
     "clean": "rm -rf dist",
     "generate": "npm run generate:typescript && npm run generate:python && npm run generate:swift && npm run generate:kotlin",
