@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.12.0
+  version: 1.13.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2902,6 +2902,104 @@ components:
           $ref: '#/components/schemas/CacheStats'
 
     # ====================================
+    # Release identity (LML#526)
+    # ====================================
+    # The `POST /api/v1/identity/resolve` endpoint mints (or returns) a
+    # stable identity_id for a release-shaped (source, external_id) pair.
+    # The wire shape is polymorphic on `kind` for forward compatibility —
+    # `kind: artist` will be added in a follow-up — but v1 accepts only
+    # `release`. Both first-mint and idempotent re-resolve return 200; the
+    # `minted` field distinguishes them. Sentinel inputs (Discogs id <= 0,
+    # malformed Bandcamp URL, etc.) are rejected with 422 before any DB
+    # write, so no poisoned identity row can be created.
+
+    IdentityKind:
+      type: string
+      description: >
+        Discriminator for the identity being resolved. v1 of the
+        `/api/v1/identity/resolve` endpoint accepts only `release`; the
+        `artist` value is reserved for the planned symmetric extension.
+      enum:
+        - release
+
+    ReleaseIdentitySource:
+      type: string
+      description: >
+        Source whose external ID is being resolved into a release identity.
+        Matches the v1 source list from LML#526; new sources land in
+        lockstep with their column on `entity.release_identity` and a
+        matching sentinel rule on the LML side.
+      enum:
+        - discogs_release
+        - discogs_master
+        - bandcamp
+
+    ReleaseIdentityResolveRequest:
+      type: object
+      description: >
+        Request body for `POST /api/v1/identity/resolve`. The triple
+        `(kind, source, external_id)` is the identity key — the same triple
+        always returns the same identity_id.
+      required:
+        - kind
+        - source
+        - external_id
+      properties:
+        kind:
+          $ref: '#/components/schemas/IdentityKind'
+        source:
+          $ref: '#/components/schemas/ReleaseIdentitySource'
+        external_id:
+          type: string
+          description: >
+            Source-specific identifier. For `discogs_release` /
+            `discogs_master` it is the positive integer ID as a string;
+            zero and negative values are rejected with 422 (Discogs uses
+            `0` for the unknown-release sentinel). For `bandcamp` it is
+            the canonical album URL (e.g.
+            `https://autechre.bandcamp.com/album/confield`); LML
+            URL-canonicalises before mint so trailing-slash and
+            equivalent variants converge on one identity row. Non-album
+            Bandcamp URLs (track URLs, bare subdomain) are rejected with
+            422.
+      example:
+        kind: release
+        source: discogs_release
+        external_id: "12345"
+
+    ReleaseIdentityResolveResponse:
+      type: object
+      description: >
+        Response to `POST /api/v1/identity/resolve`. `identity_id` is
+        stable across calls; `minted` distinguishes the first call (true)
+        from subsequent lookups (false). Re-resolves do not write a new
+        reconciliation log row — the resolver only logs the act of
+        minting.
+      required:
+        - identity_id
+        - kind
+        - minted
+      properties:
+        identity_id:
+          type: integer
+          description: >
+            `entity.release_identity.id` for the resolved row. Stable
+            across calls with the same `(kind, source, external_id)`.
+        kind:
+          $ref: '#/components/schemas/IdentityKind'
+        minted:
+          type: boolean
+          description: >
+            `true` when this call inserted a new row, `false` when an
+            existing row was returned. Useful for callers that want to
+            observe whether they were the first to surface a given
+            release.
+      example:
+        identity_id: 42
+        kind: release
+        minted: true
+
+    # ====================================
     # Artist Search Alias (artist-search-alias plan)
     # ====================================
 
@@ -4968,6 +5066,69 @@ paths:
                 $ref: '#/components/schemas/LookupResponse'
         '422':
           description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /api/v1/identity/resolve:
+    post:
+      summary: Mint or resolve a stable identity for a release
+      description: >
+        Resolves a `(kind, source, external_id)` triple to a stable
+        `identity_id` on `entity.release_identity`. First call with a new
+        triple mints the row and writes one reconciliation log entry;
+        subsequent calls return the same `identity_id` with `minted:
+        false` and write no log row. Idempotent and concurrency-safe —
+        two simultaneous mints with the same input converge on one row
+        via the per-source `UNIQUE` constraints on
+        `entity.release_identity`.
+
+        Validation runs before any DB write. Sentinel inputs — Discogs
+        `external_id <= 0`, malformed or non-album Bandcamp URLs,
+        unknown source — are rejected with 422 so no poisoned identity
+        rows can land.
+
+        v1 accepts only `kind: release`. The `kind: artist` symmetric
+        extension is reserved for a follow-up; for the artist-name
+        lookup case, `GET /identity/resolve?name=<artist>` remains the
+        right endpoint.
+      security:
+        - LMLBearerAuth: []
+      tags:
+        - lookup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseIdentityResolveRequest'
+      responses:
+        '200':
+          description: Identity resolved (minted or pre-existing).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseIdentityResolveResponse'
+        '401':
+          description: Missing or invalid `LML_API_KEY` bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: >
+            Validation error — sentinel input (e.g. Discogs id <= 0,
+            malformed Bandcamp URL) or unknown source / kind.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: >
+            Entity store unavailable — either `DATABASE_URL_DISCOGS` is
+            unset or the `entity.release_identity` schema has not been
+            applied to the discogs-cache PostgreSQL.
           content:
             application/json:
               schema:
