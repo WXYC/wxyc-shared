@@ -3292,6 +3292,34 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CacheRefreshResultItem'
+      example:
+        results:
+          - identity_id: 42
+            status: warmed
+            sources:
+              discogs_release:
+                release_outcome: success
+                artists:
+                  - external_id: "999"
+                    outcome: success
+                  - external_id: "1001"
+                    outcome: success
+          - identity_id: 99
+            status: not_found
+            sources: null
+          - identity_id: 12345
+            status: not_implemented
+            sources:
+              discogs_master:
+                release_outcome: not_implemented
+                artists: []
+          - identity_id: 7
+            status: error
+            sources:
+              discogs_release:
+                release_outcome: error
+                artists: []
+                message: ConnectError
 
     # ====================================
     # LML Discogs & Metadata Service Types
