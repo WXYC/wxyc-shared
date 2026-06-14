@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.13.0
+  version: 1.14.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3144,6 +3144,156 @@ components:
           $ref: '#/components/schemas/CacheStats'
 
     # ====================================
+    # Cache refresh for identities (LML#525)
+    # ====================================
+    # `POST /api/v1/cache/refresh-for-identities` is the source-agnostic
+    # cache-warmer that Backend's rotation-artist-backfill cron consumes
+    # (WXYC/Backend-Service#1381). The cron passes `entity.release_identity.id`
+    # values; LML maps each to its per-source `(source, external_id)` pairs
+    # and dispatches the per-source release-cache refresh. After each
+    # refreshed Discogs release, LML walks the release's artist credits and
+    # refreshes the per-artist cache too — applying the LML#525 sentinel
+    # guard at the walk site so VA compilations with `artist_id = 0` don't
+    # leak through. Today only the Discogs leg is wired; other sources
+    # return `release_outcome = "not_implemented"`.
+
+    CacheRefreshSourceOutcome:
+      type: string
+      description: >
+        Per-source release-leg outcome. `success` covers both cache hits and
+        fresh fetches AND tombstones (Discogs 404s — the cache state is
+        still current). `error` is transport / 5xx / parse failure. The
+        leg did not complete. `not_implemented` is for sources whose cache
+        layer doesn't exist yet (discogs_master pre-`MasterRelease.artists`,
+        musicbrainz_release pre-LML#217, etc.). Consumers that need to
+        distinguish "warm-real" from "warm-tombstone" should read the cache
+        row's `not_found` flag directly, not infer from this enum.
+      enum:
+        - success
+        - error
+        - not_implemented
+
+    CacheRefreshItemStatus:
+      type: string
+      description: >
+        Per-identity rollup of the per-source outcomes. Release-leg-gated:
+        any source `success` → `warmed` (artist failures inside a release
+        walk are partial value, not a retry trigger). Only `not_implemented`
+        sources → `not_implemented`. All sources errored → `error`. Row
+        absent in `entity.release_identity` → `not_found` (with `sources`
+        as null). Only `error` is a retry signal.
+      enum:
+        - warmed
+        - not_found
+        - not_implemented
+        - error
+
+    CacheRefreshArtistOutcome:
+      type: object
+      description: >
+        Per-artist outcome inside the walk-to-artists step of a per-source
+        release refresh. `external_id` is string-typed for future
+        source-agnosticism — Discogs IDs serialize as decimal strings.
+      required:
+        - external_id
+        - outcome
+      properties:
+        external_id:
+          type: string
+        outcome:
+          $ref: '#/components/schemas/CacheRefreshSourceOutcome'
+        message:
+          type: string
+          nullable: true
+          description: >
+            Exception class name when `outcome != success`. Bare `str()` of
+            the exception is intentionally NOT serialized — it may carry
+            upstream error bodies, SQL fragments, or file paths. Full
+            traceback lands in Sentry.
+
+    CacheRefreshSourceResult:
+      type: object
+      description: >
+        Per-source outcome for one identity. `artists` is the walk-to-artists
+        fan-out result for the Discogs release leg — empty list on
+        tombstone-success (no artists to walk) and on legs that don't do a
+        walk (every non-Discogs source today).
+      required:
+        - release_outcome
+      properties:
+        release_outcome:
+          $ref: '#/components/schemas/CacheRefreshSourceOutcome'
+        artists:
+          type: array
+          default: []
+          items:
+            $ref: '#/components/schemas/CacheRefreshArtistOutcome'
+        message:
+          type: string
+          nullable: true
+
+    CacheRefreshResultItem:
+      type: object
+      description: >
+        Per-identity verdict. `sources` is null when `status == not_found`
+        (no row to dispatch against). Otherwise it is keyed by source
+        vocabulary (`discogs_release`, `discogs_master`, …); see
+        `RELEASE_SOURCE_COLUMN` on the LML side for the canonical set.
+      required:
+        - identity_id
+        - status
+      properties:
+        identity_id:
+          type: integer
+        status:
+          $ref: '#/components/schemas/CacheRefreshItemStatus'
+        sources:
+          type: object
+          nullable: true
+          additionalProperties:
+            $ref: '#/components/schemas/CacheRefreshSourceResult'
+        message:
+          type: string
+          nullable: true
+
+    BulkCacheRefreshRequest:
+      type: object
+      description: >
+        Request body. The 50-id batch cap is enforced server-side with
+        HTTP 400 on overflow (not 422 — LML's `/api/v1/lookup/bulk`
+        precedent). Downstream callers should encode 50 as a hard
+        constant or assert at startup, not expose it as an env knob —
+        the cap is bounded by Discogs rate-limit × cold-cache fan-out ≤
+        Railway's request-timeout ceiling, and recalibration must land
+        alongside any ingress change. Empty `identity_ids` returns 422
+        (Pydantic `min_length=1`). Duplicate identity_ids are allowed;
+        each runs independently and shows up as a separate result.
+      required:
+        - identity_ids
+      properties:
+        identity_ids:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+      example:
+        identity_ids: [42, 99, 12345]
+
+    BulkCacheRefreshResponse:
+      type: object
+      description: >
+        Per-identity verdicts in input order. No top-level counters —
+        callers derive them via `Counter(r.status for r in results)`,
+        matching the `BulkLookupResultItem` precedent.
+      required:
+        - results
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CacheRefreshResultItem'
+
+    # ====================================
     # LML Discogs & Metadata Service Types
     # ====================================
 
@@ -5251,6 +5401,75 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '422':
           description: Validation error (per-input field validation failed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /api/v1/cache/refresh-for-identities:
+    post:
+      summary: Warm LML's cache for a batch of release identity_ids
+      description: >
+        Source-agnostic cache warmer (LML#525). For each `identity_id` in
+        the request, resolves the per-source external IDs via
+        `entity.release_identity` and fans out the per-source release-cache
+        refresh. For each refreshed Discogs release, walks
+        `release.artists[*].artist_id` (skipping `artist_id <= 0` — the LML#525
+        sentinel guard) and refreshes the per-artist cache.
+
+        Multiplexes onto LML's fallthrough seam (LML#503's `fetched_at`
+        discriminator) — won't re-hit Discogs if the cache is already warm.
+        "Refresh" means "ensure freshness," not "bypass cache." A future
+        `force: true` flag could carry true-bypass semantics post-Discogs-
+        reshuffle invalidation.
+
+        Today only the Discogs release leg is wired. `discogs_master`,
+        `musicbrainz_release`, `spotify_album`, `apple_music_album`, and
+        `bandcamp` return `release_outcome = not_implemented`. See LML#525's
+        out-of-scope list for the unblocking dependencies on each.
+      security:
+        - LMLBearerAuth: []
+      tags:
+        - cache
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkCacheRefreshRequest'
+      responses:
+        '200':
+          description: Per-identity verdicts in input order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkCacheRefreshResponse'
+        '400':
+          description: Malformed body or batch above the 50-id cap.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid `LML_API_KEY` bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Empty `identity_ids` (Pydantic min_length=1).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '499':
+          description: Client closed connection before the batch finished.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: Entity store or Discogs service not available.
           content:
             application/json:
               schema:
