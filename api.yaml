@@ -3277,7 +3277,7 @@ components:
           items:
             type: integer
       example:
-        identity_ids: [42, 99, 12345]
+        identity_ids: [42, 99, 12345, 7]
 
     BulkCacheRefreshResponse:
       type: object
