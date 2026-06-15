@@ -30,7 +30,7 @@ jobs:
       - name: Check for breaking changes
         if: steps.base.outputs.skip != 'true'
         id: diff
-        uses: oasdiff/oasdiff-action/breaking@6147a58e5d1249a12f42fc864ab791d571a30015 # v0.0.47
+        uses: oasdiff/oasdiff-action/breaking@5fbe96ede8d0c53aeadef122d7a0abb79152d493 # v0.1.1
         with:
           base: api-base.yaml
           revision: api.yaml
