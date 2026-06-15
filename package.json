@@ -96,6 +96,6 @@
     "registry": "https://npm.pkg.github.com"
   },
   "dependencies": {
-    "date-fns": "^4.1.0"
+    "date-fns": "^4.4.0"
   }
 }
