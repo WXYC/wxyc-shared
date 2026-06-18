@@ -212,8 +212,11 @@ export const testV2TalksetEntry: FlowsheetV2TalksetEntry = {
 export const testV2BreakpointEntry: FlowsheetV2BreakpointEntry = {
   id: 106,
   show_id: 1,
+  // add_time is the logging instant (~1 min before the hour); radio_hour is the
+  // exact top-of-hour the breakpoint marks — the field clients read for the label.
   play_order: 100,
-  add_time: testV2AddTime,
+  add_time: '2024-06-15T14:58:42.000Z',
+  radio_hour: '2024-06-15T15:00:00.000Z',
   entry_type: 'breakpoint',
   message: 'Breakpoint - 3:00 PM',
 };

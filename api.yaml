@@ -791,6 +791,18 @@ components:
             entry_type:
               type: string
               enum: [breakpoint]
+            radio_hour:
+              type: string
+              format: date-time
+              nullable: true
+              description: >-
+                Exact top-of-hour this breakpoint marks (ISO 8601), sourced from
+                tubafrenzy's RADIO_HOUR. Distinct from `add_time`, which is the
+                row's logging instant (~1 min before the hour). Optional and
+                nullable: absent on servers predating the producer rollout, null
+                for breakpoint rows not yet backfilled. Clients use `radio_hour`
+                for the hour-marker label when present and fall back to `add_time`
+                otherwise.
             message:
               type: string
               nullable: true
