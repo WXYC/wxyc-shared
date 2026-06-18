@@ -684,6 +684,18 @@ components:
               description: Whether this album is available on streaming platforms. False means WXYC library exclusive. Null if unknown.
             metadata_status:
               $ref: '#/components/schemas/MetadataStatus'
+            genres:
+              type: array
+              nullable: true
+              items:
+                type: string
+              description: Discogs genre tags surfaced on the Playcut Detail card.
+            styles:
+              type: array
+              nullable: true
+              items:
+                type: string
+              description: Discogs style tags (finer-grained than genres).
 
     FlowsheetV2ShowStartEntry:
       description: V2 show start event - when a show begins
