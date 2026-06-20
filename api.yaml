@@ -2418,8 +2418,9 @@ components:
         and a non-empty `release_url` is a "Discogs identity, no catalog row"
         result — the album isn't shelved in the library, but Discogs confidently
         identifies the release, so the link, artwork, and downstream streaming
-        buttons still render. It is the shape LML's library-miss Discogs search
-        emits.
+        buttons still render. LML emits this shape both from a library-miss
+        Discogs search and from a non-library track carry-through (a
+        confidently-resolved release for a track whose album isn't shelved).
 
         This is distinct from the `artwork.release_id == 0` / `release_url == ""`
         streaming-only sentinel (BS#1185), which carries streaming URLs but no
