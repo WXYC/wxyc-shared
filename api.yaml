@@ -2202,6 +2202,12 @@ components:
       description: >
         A single item from the WXYC library catalog. Mirrors request-parser's
         LibraryItem with computed properties serialized as regular fields.
+
+        Library identity is the `id` field alone — there is deliberately no
+        `album_id`. An `id` of `0` is the "no catalog row" marker: the release
+        is not shelved in the WXYC library, but the result may still carry a
+        real Discogs identity in its `LookupResultItem.artwork`. See
+        `LookupResultItem` for that row-less shape and its discriminator.
       required:
         - id
         - call_number
@@ -2209,7 +2215,11 @@ components:
       properties:
         id:
           type: integer
-          description: Unique identifier in the library database
+          description: >
+            Unique identifier in the library database. `0` means there is no
+            WXYC catalog row for this result (a row-less / "(external)" item,
+            e.g. a Discogs-only library miss); any positive value is a real
+            shelved release.
         title:
           type: string
           description: Album/release title
@@ -2255,6 +2265,15 @@ components:
         Distinct from the raw DiscogsSearchResult which mirrors the Discogs
         API response directly. Streaming URL fields match the StreamingLinks
         schema and will be migrated to use $ref in a future version.
+
+        Two distinct states share this shape, told apart by `release_id`:
+        a real Discogs identity has `release_id > 0` with a non-empty
+        `release_url`; the streaming-only sentinel (BS#1185) has
+        `release_id == 0` and `release_url == ""`, signalling "I carry only
+        streaming URLs, there is no Discogs release to link or to fetch album
+        metadata from." A consumer keying "has Discogs identity" on
+        `release_id != 0` therefore handles both states correctly, including
+        the row-less identity described on `LookupResultItem`.
       required:
         - release_id
         - release_url
@@ -2267,10 +2286,16 @@ components:
           description: Release artist
         release_id:
           type: integer
-          description: Discogs release ID
+          description: >
+            Discogs release ID. `> 0` is a real release identity; `0` is the
+            streaming-only sentinel (paired with `release_url == ""`, BS#1185)
+            and is not a linkable Discogs release.
         release_url:
           type: string
-          description: URL to the release on Discogs
+          description: >
+            URL to the release on Discogs. Non-empty for a real release
+            identity; the empty string accompanies the `release_id == 0`
+            streaming-only sentinel.
         artwork_url:
           type: string
           description: Artwork image URL
@@ -2383,7 +2408,25 @@ components:
 
     LookupResultItem:
       type: object
-      description: A single lookup result pairing a library item with optional artwork and reconciled identity
+      description: >
+        A single lookup result pairing a library item with optional artwork and
+        reconciled identity.
+
+        `artwork` is optional and independent of `library_item`. This makes the
+        *row-less* shape valid and first-class: `library_item.id == 0` (no WXYC
+        catalog row) paired with a present `artwork` carrying `release_id > 0`
+        and a non-empty `release_url` is a "Discogs identity, no catalog row"
+        result — the album isn't shelved in the library, but Discogs confidently
+        identifies the release, so the link, artwork, and downstream streaming
+        buttons still render. It is the shape LML's library-miss Discogs search
+        emits.
+
+        This is distinct from the `artwork.release_id == 0` / `release_url == ""`
+        streaming-only sentinel (BS#1185), which carries streaming URLs but no
+        linkable Discogs release. The discriminator is
+        `artwork.release_id > 0 && library_item.id == 0`: unambiguous against the
+        sentinel and backward-compatible with any consumer keying "has Discogs
+        identity" on `release_id != 0`.
       required:
         - library_item
       properties:
