@@ -1127,6 +1127,91 @@ components:
             artist/album hits. Backward-compatible — existing consumers
             ignore the field.
 
+    CatalogExportRow:
+      type: object
+      description: >
+        One row of the WXYC library catalog as served by GET /library/catalog
+        for offline cloning (BS#1468, Epic F #1466). A query-independent snapshot
+        of the core catalog row. Deliberately NOT AlbumSearchResult: it drops the
+        search-only decoration (matched_via, matched_via_alias, album_dist,
+        artist_dist) and the fields the export omits (add_date, label_id,
+        rotation_id, album_artist, date_lost, date_found), and instead ships
+        rotation RAW (rotation_bin + rotation_kill_date) so the client evaluates
+        rotation expiry against its own clock. See the rotation_bin description
+        for the load-bearing semantic difference from AlbumSearchResult.
+      required:
+        - id
+        - artist_name
+        - album_title
+        - code_letters
+        - code_number
+        - code_artist_number
+        - genre_name
+        - format_name
+      properties:
+        id:
+          type: integer
+        artist_name:
+          type: string
+          description: >
+            Authoritative artist name. The server COALESCEs the denormalized
+            library.artist_name to artists.artist_name (NOT NULL), so this never
+            ships as null even before the denormalization backfill completes.
+        album_title:
+          type: string
+        code_letters:
+          type: string
+          description: Shelf call-number letters (e.g. "AU").
+        code_number:
+          type: integer
+          description: Shelf call-number release number.
+        code_artist_number:
+          type: integer
+          description: Shelf call-number artist number (genre-scoped).
+        label:
+          type: string
+          nullable: true
+        genre_name:
+          type: string
+        format_name:
+          type: string
+        on_streaming:
+          type: boolean
+          nullable: true
+          description: True if on >=1 streaming service; false if physical-only; null if unknown.
+        plays:
+          type: integer
+          nullable: true
+        artwork_url:
+          type: string
+          nullable: true
+          description: Album cover URL from Discogs; null if not yet fetched.
+        rotation_bin:
+          type: string
+          nullable: true
+          description: >
+            RAW current-rotation bin — the most-recently-ADDED rotation record
+            for this album — NOT the CURRENT_DATE-filtered value AlbumSearchResult
+            returns. Nominal values are H/M/L/S (see RotationBin) but it is typed
+            as a free string, NOT the RotationBin enum, so a value outside those
+            cohorts (e.g. 'N', a current server-enum member — NOT legacy) cannot
+            break a strict-enum decoder. Evaluate live rotation
+            client-side together with rotation_kill_date:
+              in rotation  ==  rotation_bin != null
+                              AND (rotation_kill_date == null
+                                   OR rotation_kill_date > today-in-client-tz)
+            The daily kill-date expiry is a clock event no DB trigger can observe,
+            which is why this endpoint ships raw and defers expiry to the client.
+        rotation_kill_date:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Date (YYYY-MM-DD; server ::text cast) the current rotation record
+            expires, or null if it has none. Used with rotation_bin to evaluate
+            live rotation client-side. Absent from AlbumSearchResult — a client
+            that reuses AlbumSearchResult for this endpoint silently loses it.
+
     AddAlbumRequest:
       type: object
       required:
@@ -4704,7 +4789,9 @@ paths:
   /library:
     get:
       summary: Search for album
-      security: []
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
       parameters:
         - name: artist_name
           in: query
@@ -4759,7 +4846,9 @@ paths:
         with exact-match via double quotes). Combines parsed conditions with
         optional catalog filters (`on_streaming`, `genre`, `format`) via `AND`.
         Returns a paginated envelope.
-      security: []
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
       parameters:
         - name: q
           in: query
@@ -4828,10 +4917,76 @@ paths:
               schema:
                 $ref: '#/components/schemas/LibraryQueryResponse'
 
+  /library/catalog:
+    get:
+      summary: Bulk catalog export for offline cloning (gzipped NDJSON)
+      description: |
+        Stream the entire WXYC library catalog as one gzipped, newline-delimited
+        JSON (NDJSON) body — one CatalogExportRow per line — so a client (the
+        iOS Spotlight clone; BS#1468 / Epic F #1466) can mirror the catalog
+        on-device in a single request instead of paging /library/query.
+
+        Conditional GET: the response carries Last-Modified, set from the
+        library_watermark (advanced by a DB statement trigger, so the discogs-etl
+        daily sync moves it too). The client echoes it back via If-Modified-Since
+        (or ?since=) and gets a cheap 304 until the catalog actually changes
+        (~daily); otherwise a 200 with the full body. Same conditionalGet
+        middleware as the flowsheet export (BS#902).
+
+        Transport (not expressible in the element schema): the body is NDJSON —
+        split on newlines and decode per line; it is NOT a JSON array. It is
+        gzip-encoded (Content-Encoding: gzip; most HTTP clients, incl. URLSession,
+        decompress transparently). See catalog-export.service.ts
+        (serializeCatalogNdjson).
+      security:
+        - BearerAuth: []   # routes enforce requirePermissions({ catalog: ['read'] })
+      parameters:
+        - name: If-Modified-Since
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            HTTP-date previously returned in Last-Modified. Yields 304 if the
+            catalog has not changed since. Echo the server's string verbatim; do
+            not round-trip it through a local date type.
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Header-free alternative to If-Modified-Since (same semantics).
+      responses:
+        '200':
+          description: Full catalog as gzipped NDJSON (one CatalogExportRow per line).
+          headers:
+            Last-Modified:
+              schema:
+                type: string
+              description: Catalog watermark as an HTTP-date; echo back as If-Modified-Since.
+            Content-Encoding:
+              schema:
+                type: string
+              description: '"gzip" on the gzip-accepting path.'
+          content:
+            application/x-ndjson:
+              # NOTE: the body is newline-delimited CatalogExportRow objects (one
+              # per line), NOT a single object or a JSON array. OpenAPI can't
+              # model NDJSON framing; this schema describes ONE line. See the
+              # path description.
+              schema:
+                $ref: '#/components/schemas/CatalogExportRow'
+        '304':
+          description: >
+            Not Modified — catalog unchanged since the client's
+            If-Modified-Since / since watermark. No body.
+
   /library/rotation:
     get:
       summary: Get rotation list
-      security: []
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
       responses:
         '200':
           description: List of rotations
