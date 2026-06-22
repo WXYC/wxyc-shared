@@ -351,8 +351,10 @@ describe('OpenAPI Specification', () => {
       expect(rotationBin).toBeDefined();
       expect(rotationBin!.type).toBe('string');
       expect(rotationBin!.nullable).toBe(true);
-      // A $ref to RotationBin ([H,M,L,S]) would make a strict decoder reject 'N'.
+      // Either a $ref to RotationBin ([H,M,L,S]) OR an inline enum would make a
+      // strict decoder reject 'N' — both forms must stay off rotation_bin.
       expect(rotationBin!.$ref).toBeUndefined();
+      expect(rotationBin!.enum).toBeUndefined();
     });
 
     it('ships rotation_kill_date as a nullable date, and keeps it off AlbumSearchResult (decision 2)', () => {
