@@ -292,6 +292,128 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  // GET /library/catalog (the gzipped-NDJSON bulk export) and its row shape
+  // shipped in Backend-Service#1468 (Epic F, parent #1466) but were never
+  // propagated to this cross-repo SSOT — only to BS's local Swagger-only
+  // app.yaml. These tests pin the reconciliation: the export row is its own
+  // schema (NOT a superset of AlbumSearchResult), rotation is raw, and all four
+  // catalog GET reads share the `catalog:read` auth the routes enforce.
+  describe('Catalog Export (BS#1468 / Epic F #1466)', () => {
+    type Schema = {
+      required?: string[];
+      properties?: Record<string, Record<string, unknown>>;
+      allOf?: unknown;
+    };
+
+    // The 14-field projection: catalog-export.service.ts:33-48 (CatalogExportRow).
+    const EXPORT_FIELDS = [
+      'id',
+      'artist_name',
+      'album_title',
+      'code_letters',
+      'code_number',
+      'code_artist_number',
+      'label',
+      'genre_name',
+      'format_name',
+      'on_streaming',
+      'plays',
+      'artwork_url',
+      'rotation_bin',
+      'rotation_kill_date',
+    ];
+
+    it('defines CatalogExportRow with exactly the 14 shipped fields', () => {
+      const schema = spec.components.schemas.CatalogExportRow as Schema;
+      expect(schema).toBeDefined();
+      expect(Object.keys(schema.properties ?? {}).sort()).toEqual([...EXPORT_FIELDS].sort());
+    });
+
+    it('marks the 8 non-null fields required (deliberate leniency: the nullable keys are omitted)', () => {
+      const schema = spec.components.schemas.CatalogExportRow as Schema;
+      expect((schema.required ?? []).sort()).toEqual(
+        [
+          'id',
+          'artist_name',
+          'album_title',
+          'code_letters',
+          'code_number',
+          'code_artist_number',
+          'genre_name',
+          'format_name',
+        ].sort()
+      );
+    });
+
+    it('types rotation_bin as a raw nullable string, NOT the RotationBin enum (admits N; decision 1)', () => {
+      const schema = spec.components.schemas.CatalogExportRow as Schema;
+      const rotationBin = schema.properties?.rotation_bin;
+      expect(rotationBin).toBeDefined();
+      expect(rotationBin!.type).toBe('string');
+      expect(rotationBin!.nullable).toBe(true);
+      // A $ref to RotationBin ([H,M,L,S]) would make a strict decoder reject 'N'.
+      expect(rotationBin!.$ref).toBeUndefined();
+    });
+
+    it('ships rotation_kill_date as a nullable date, and keeps it off AlbumSearchResult (decision 2)', () => {
+      const schema = spec.components.schemas.CatalogExportRow as Schema;
+      const killDate = schema.properties?.rotation_kill_date;
+      expect(killDate).toBeDefined();
+      expect(killDate!.type).toBe('string');
+      expect(killDate!.format).toBe('date');
+      expect(killDate!.nullable).toBe(true);
+
+      const search = spec.components.schemas.AlbumSearchResult as Schema;
+      expect(search.properties?.rotation_kill_date).toBeUndefined();
+    });
+
+    it('keeps CatalogExportRow a distinct flat schema, not a superset of AlbumSearchResult (decision 3)', () => {
+      const schema = spec.components.schemas.CatalogExportRow as Schema;
+      expect(schema.allOf).toBeUndefined();
+      // It drops the search-only decoration AlbumSearchResult carries.
+      for (const searchOnly of ['add_date', 'matched_via', 'matched_via_alias', 'album_dist', 'artist_dist']) {
+        expect(schema.properties?.[searchOnly]).toBeUndefined();
+      }
+    });
+
+    it('declares GET /library/catalog (BearerAuth; If-Modified-Since + ?since=; NDJSON 200 + 304)', () => {
+      const path = spec.paths['/library/catalog'] as {
+        get?: {
+          security?: Array<Record<string, unknown[]>>;
+          parameters?: Array<{ name: string; in: string }>;
+          responses?: Record<
+            string,
+            { headers?: Record<string, unknown>; content?: Record<string, { schema?: { $ref?: string } }> }
+          >;
+        };
+      };
+      expect(path?.get).toBeDefined();
+      expect(path.get!.security).toEqual([{ BearerAuth: [] }]);
+
+      const ifModifiedSince = path.get!.parameters?.find((p) => p.name === 'If-Modified-Since');
+      expect(ifModifiedSince?.in).toBe('header');
+      const since = path.get!.parameters?.find((p) => p.name === 'since');
+      expect(since?.in).toBe('query');
+
+      const ok = path.get!.responses?.['200'];
+      expect(ok).toBeDefined();
+      // One NDJSON line is one CatalogExportRow (the framing itself isn't expressible in OpenAPI).
+      expect(ok!.content?.['application/x-ndjson']?.schema?.$ref).toBe('#/components/schemas/CatalogExportRow');
+      expect(ok!.headers?.['Last-Modified']).toBeDefined();
+      expect(ok!.headers?.['Content-Encoding']).toBeDefined();
+      expect(path.get!.responses?.['304']).toBeDefined();
+    });
+
+    it('requires BearerAuth on all four catalog GET reads — no half-fixed SSOT (decision 4)', () => {
+      const reads = ['/library', '/library/query', '/library/rotation', '/library/catalog'];
+      for (const route of reads) {
+        const path = spec.paths[route] as { get?: { security?: unknown[] } };
+        expect(path?.get, route).toBeDefined();
+        expect(path!.get!.security, route).toEqual([{ BearerAuth: [] }]);
+      }
+    });
+  });
+
   describe('Rotation Schemas', () => {
     it('should define RotationEntry', () => {
       expect(spec.components.schemas.RotationEntry).toBeDefined();
