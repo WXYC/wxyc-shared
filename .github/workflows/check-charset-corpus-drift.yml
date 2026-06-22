@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout wxyc-shared (for the drift script)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: WXYC/wxyc-shared
           ref: ${{ inputs.wxyc-shared-ref }}
