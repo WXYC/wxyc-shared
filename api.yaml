@@ -2375,6 +2375,17 @@ components:
             Discogs release ID. `> 0` is a real release identity; `0` is the
             streaming-only sentinel (paired with `release_url == ""`, BS#1185)
             and is not a linkable Discogs release.
+        master_id:
+          type: integer
+          nullable: true
+          description: >
+            Discogs master ID for the release, when the release belongs to a
+            master. `null` when Discogs has no master for this release
+            (one-offs, self-released) or for the streaming-only sentinel
+            (`release_id == 0`). Lets a caller collapse multiple
+            pressings/formats of one logical album into a single record keyed
+            on the master. Populated from the resolved release's
+            `master_id` field on `/lookup` (single and bulk).
         release_url:
           type: string
           description: >
@@ -3565,6 +3576,14 @@ components:
       properties:
         release_id:
           type: integer
+        master_id:
+          type: integer
+          nullable: true
+          description: >
+            Discogs master ID for this release, when the release belongs to a
+            master. `null` when Discogs has no master (one-offs,
+            self-released). Lets a caller collapse multiple pressings/formats
+            of one logical album into a single record keyed on the master.
         title:
           type: string
         artist:

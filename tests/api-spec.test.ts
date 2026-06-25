@@ -764,6 +764,40 @@ describe('OpenAPI Specification', () => {
         '#/components/schemas/DiscogsResolvedToken',
       );
     });
+
+    it('should attach master_id to DiscogsMatchResult as an optional nullable integer', () => {
+      // Phase-2 catalog popularity (WXYC/Backend-Service#1486, WXYC/library-metadata-lookup#688):
+      // the release's Discogs master id, so a caller can collapse multiple
+      // pressings/formats of one logical album into a single record keyed on
+      // the master. Optional + nullable so the additive contract doesn't break
+      // existing LML/BS/iOS/Android consumers; null when Discogs has no master.
+      const schema = spec.components.schemas.DiscogsMatchResult as {
+        properties: Record<string, SchemaProp>;
+        required?: string[];
+      };
+
+      const prop = schema.properties.master_id;
+      expect(prop).toBeDefined();
+      expect(prop.type).toBe('integer');
+      expect(prop.nullable).toBe(true);
+      expect(schema.required ?? []).not.toContain('master_id');
+    });
+
+    it('should attach master_id to DiscogsReleaseMetadata as an optional nullable integer', () => {
+      // Same Phase-2 master-collapse signal on the full release-metadata schema
+      // (WXYC/library-metadata-lookup#688). Optional + nullable; null when Discogs
+      // has no master for the release.
+      const schema = spec.components.schemas.DiscogsReleaseMetadata as {
+        properties: Record<string, SchemaProp>;
+        required?: string[];
+      };
+
+      const prop = schema.properties.master_id;
+      expect(prop).toBeDefined();
+      expect(prop.type).toBe('integer');
+      expect(prop.nullable).toBe(true);
+      expect(schema.required ?? []).not.toContain('master_id');
+    });
   });
 
   describe('Lookup Hard Cap (LML#370)', () => {
