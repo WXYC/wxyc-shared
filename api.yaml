@@ -1903,6 +1903,259 @@ components:
           type: string
           format: date-time
 
+    # ===================
+    # Device Authorization (RFC 8628) — issue #195
+    # Mirrors the better-auth device-authorization plugin (1.6.20 — the version
+    # WXYC's auth-service runs, per Backend-Service#1495) PLUS WXYC's BS hooks.
+    # Wire shapes verified against
+    # node_modules/better-auth/dist/plugins/device-authorization/routes.mjs.
+    # Error enums mirror RUNTIME behavior (a superset of the plugin's declared
+    # zod enums). Casing is intentionally asymmetric: code/token/verify use
+    # snake_case; approve/deny request bodies use camelCase `userCode`.
+    # ===================
+
+    DeviceAuthCodeRequest:
+      type: object
+      required:
+        - client_id
+      properties:
+        client_id:
+          type: string
+          description: The client ID of the application requesting authorization.
+        scope:
+          type: string
+          description: Optional space-separated list of OAuth scopes.
+        user_id:
+          type: string
+          description: >
+            Optional. The user ID to which the device code should be pre-bound
+            (a better-auth 1.6.20+ plugin field). WXYC's shared-computer QR flow
+            does not send this — the DJ is identified later at
+            /auth/device/approve — but it is mirrored here for runtime fidelity.
+
+    DeviceAuthCodeResponse:
+      type: object
+      required:
+        - device_code
+        - user_code
+        - verification_uri
+        - verification_uri_complete
+        - expires_in
+        - interval
+      properties:
+        device_code:
+          type: string
+          description: The device verification code, polled at /auth/device/token.
+        user_code:
+          type: string
+          description: The short code shown to the user / encoded in the QR.
+        verification_uri:
+          type: string
+          format: uri
+          description: URL where the user verifies the code.
+        verification_uri_complete:
+          type: string
+          format: uri
+          description: verification_uri with user_code pre-filled as a query parameter.
+        expires_in:
+          type: integer
+          description: 'Lifetime of the device/user code in seconds (WXYC config: 300 = 5min).'
+        interval:
+          type: integer
+          description: 'Minimum polling interval in seconds (WXYC config: 5).'
+
+    DeviceAuthTokenRequest:
+      type: object
+      required:
+        - grant_type
+        - device_code
+        - client_id
+      properties:
+        grant_type:
+          type: string
+          enum:
+            - 'urn:ietf:params:oauth:grant-type:device_code'
+          description: RFC 8628 device-flow grant type (fixed value).
+        device_code:
+          type: string
+          description: The device_code returned by /auth/device/code.
+        client_id:
+          type: string
+          description: The client ID of the application.
+
+    DeviceAuthTokenResponse:
+      type: object
+      required:
+        - access_token
+        - token_type
+        - expires_in
+        - scope
+      properties:
+        access_token:
+          type: string
+          description: The session bearer token for the browser.
+        token_type:
+          type: string
+          enum:
+            - Bearer
+        expires_in:
+          type: integer
+          description: >
+            Token lifetime in seconds. WXYC's auth-service (Backend-Service#1495,
+            hooks.after on /device/token) rewrites the plugin's session-derived
+            value to a fixed 43200 (12h). The vanilla-plugin value would otherwise
+            be the global ~7-day session TTL.
+        scope:
+          type: string
+          description: Granted scopes (empty string when none were requested).
+
+    DeviceAuthStatus:
+      type: string
+      description: Current status of a device authorization (GET /auth/device).
+      enum:
+        - pending
+        - approved
+        - denied
+
+    DeviceAuthVerifyResponse:
+      type: object
+      required:
+        - user_code
+        - status
+      properties:
+        user_code:
+          type: string
+        status:
+          $ref: '#/components/schemas/DeviceAuthStatus'
+
+    DeviceAuthApproveRequest:
+      type: object
+      required:
+        - userCode
+      properties:
+        userCode:
+          type: string
+          description: >
+            The user code to approve. NOTE: camelCase on the wire — the plugin's
+            approve/deny bodies differ from the snake_case code/token bodies.
+
+    DeviceAuthDenyRequest:
+      type: object
+      required:
+        - userCode
+      properties:
+        userCode:
+          type: string
+          description: >
+            The user code to deny. NOTE: camelCase on the wire (see
+            DeviceAuthApproveRequest).
+
+    DeviceAuthActionResponse:
+      type: object
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+          description: Always true on success. Shared by /approve and /deny.
+
+    # --- Per-endpoint error envelopes. The shape { error, error_description } is
+    # --- modeled once per endpoint; the `error` enum is constrained per path to
+    # --- the RUNTIME superset — it includes codes the plugin emits but omits from
+    # --- its declared zod (server_error, expired_token) and excludes a declared-
+    # --- but-never-emitted code (device_code_already_processed). One enum per
+    # --- endpoint, listing every code it can emit across all its HTTP statuses,
+    # --- so a polling client switches over a single exhaustive type.
+
+    DeviceAuthCodeErrorCode:
+      type: string
+      description: Error codes for POST /auth/device/code.
+      enum:
+        - invalid_request
+        - invalid_client
+
+    DeviceAuthCodeError:
+      type: object
+      required:
+        - error
+        - error_description
+      properties:
+        error:
+          $ref: '#/components/schemas/DeviceAuthCodeErrorCode'
+        error_description:
+          type: string
+
+    DeviceAuthTokenErrorCode:
+      type: string
+      description: >
+        Error codes for POST /auth/device/token — the RFC 8628 polling vocabulary
+        the browser switches on. `server_error` is emitted at runtime (HTTP 500)
+        though it is absent from the plugin's declared zod enum.
+      enum:
+        - authorization_pending
+        - slow_down
+        - expired_token
+        - access_denied
+        - invalid_request
+        - invalid_grant
+        - server_error
+
+    DeviceAuthTokenError:
+      type: object
+      required:
+        - error
+        - error_description
+      properties:
+        error:
+          $ref: '#/components/schemas/DeviceAuthTokenErrorCode'
+        error_description:
+          type: string
+
+    DeviceAuthVerifyErrorCode:
+      type: string
+      description: >
+        Error codes for GET /auth/device. `expired_token` is emitted at runtime
+        (HTTP 400) though the plugin's declared zod enum lists only invalid_request.
+      enum:
+        - invalid_request
+        - expired_token
+
+    DeviceAuthVerifyError:
+      type: object
+      required:
+        - error
+        - error_description
+      properties:
+        error:
+          $ref: '#/components/schemas/DeviceAuthVerifyErrorCode'
+        error_description:
+          type: string
+
+    DeviceAuthActionErrorCode:
+      type: string
+      description: >
+        Error codes for POST /auth/device/approve and POST /auth/device/deny
+        (shared — both routes emit the same set). `device_code_already_processed`
+        is declared in the plugin's approve zod enum but is NEVER emitted on the
+        wire — the already-processed branch throws `invalid_request` — so it is
+        intentionally omitted here (mirror runtime).
+      enum:
+        - invalid_request
+        - expired_token
+        - unauthorized
+        - access_denied
+
+    DeviceAuthActionError:
+      type: object
+      required:
+        - error
+        - error_description
+      properties:
+        error:
+          $ref: '#/components/schemas/DeviceAuthActionErrorCode'
+        error_description:
+          type: string
+
     RateLimitInfo:
       type: object
       required:
@@ -6012,3 +6265,195 @@ paths:
                   and `subscription` envelope events.
                 oneOf:
                   - $ref: '#/components/schemas/LiveFsEvent'
+
+  # ===================
+  # Device Authorization (RFC 8628) — issue #195. Schemas live under
+  # components/schemas/DeviceAuth*. /device/code + /device/token are PUBLIC;
+  # /device/approve + /device/deny require a Better Auth session (BearerAuth);
+  # GET /device accepts an optional session (used only to claim the code).
+  # Mirrors better-auth 1.6.20 + Backend-Service#1495.
+  # ===================
+
+  /auth/device/code:
+    post:
+      summary: Request a device + user code (RFC 8628 §3.2)
+      description: >
+        Starts the QR sign-in flow. The browser POSTs this, renders
+        verification_uri_complete as a QR plus the user_code, then polls
+        /auth/device/token. Public (no session required).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceAuthCodeRequest'
+      responses:
+        '200':
+          description: Device and user codes issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthCodeResponse'
+        '400':
+          description: 'invalid_request (malformed body) or invalid_client.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthCodeError'
+
+  /auth/device/token:
+    post:
+      summary: Exchange a device_code for a session token (RFC 8628 §3.4)
+      description: >
+        The browser polls this until the DJ approves. Public (no session
+        required). RFC 8628 polling states (authorization_pending, slow_down)
+        are returned as 400 errors, not 2xx. Deliberately not rate-limited by
+        the auth-service — the plugin enforces the polling interval server-side.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceAuthTokenRequest'
+      responses:
+        '200':
+          description: Authorization granted; session token issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthTokenResponse'
+        '400':
+          description: >
+            RFC 8628 polling state or bad request: authorization_pending,
+            slow_down, expired_token, access_denied, invalid_request, invalid_grant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthTokenError'
+        '500':
+          description: 'server_error — user lookup or session creation failed.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthTokenError'
+
+  /auth/device:
+    get:
+      summary: Look up a device authorization by user_code
+      description: >
+        Returns the current status of a device authorization. A session is
+        optional: anonymous callers get the status; a signed-in DJ additionally
+        claims a pending code for their account.
+      security:
+        - {}
+        - BearerAuth: []
+      parameters:
+        - name: user_code
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The user code to look up.
+      responses:
+        '200':
+          description: Current device authorization status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthVerifyResponse'
+        '400':
+          description: 'invalid_request (unknown user_code) or expired_token.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthVerifyError'
+
+  /auth/device/approve:
+    post:
+      summary: Approve a device authorization (iOS scanner)
+      description: >
+        Called by the iOS app carrying the DJ's session. Flips the device code
+        to approved so the polling browser receives a session. The auth-service
+        gates this to roles >= dj; a member is rejected with access_denied (403).
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceAuthApproveRequest'
+      responses:
+        '200':
+          description: Device authorization approved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthActionResponse'
+        '400':
+          description: >
+            invalid_request (unknown / unclaimed / already-processed code) or
+            expired_token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthActionError'
+        '401':
+          description: 'unauthorized — no valid session.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthActionError'
+        '403':
+          description: >
+            access_denied — caller is not the claiming user, or lacks the dj
+            role (auth-service gate).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthActionError'
+
+  /auth/device/deny:
+    post:
+      summary: Deny a device authorization (iOS scanner)
+      description: >
+        Called by the iOS app carrying the DJ's session to reject a scanned QR.
+        Requires a Better Auth session. Not role-gated by the auth-service — the
+        plugin's own userId check already prevents denying someone else's code.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceAuthDenyRequest'
+      responses:
+        '200':
+          description: Device authorization denied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthActionResponse'
+        '400':
+          description: >
+            invalid_request (unknown / unclaimed / already-processed code) or
+            expired_token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthActionError'
+        '401':
+          description: 'unauthorized — no valid session.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthActionError'
+        '403':
+          description: 'access_denied — caller is not the claiming user.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceAuthActionError'
