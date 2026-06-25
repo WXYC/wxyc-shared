@@ -786,4 +786,38 @@ describe('Generated TypeScript Types', () => {
       expect(nulled.profile_tokens).toBeNull();
     });
   });
+
+  describe('DiscogsMatchResult master_id (Phase-2 catalog popularity, LML#688)', () => {
+    // Pin the consumer-facing contract: master_id is optional + nullable, so a
+    // caller can collapse pressings/formats of one logical album by the
+    // Discogs master id. WXYC/Backend-Service#1486.
+    it('accepts a result with master_id populated', () => {
+      const withMaster: DiscogsMatchResult = {
+        release_id: 12345,
+        release_url: 'https://www.discogs.com/release/12345',
+        master_id: 67890,
+      };
+
+      expect(withMaster.master_id).toBe(67890);
+    });
+
+    it('accepts a result with master_id null (release has no master)', () => {
+      const noMaster: DiscogsMatchResult = {
+        release_id: 12345,
+        release_url: 'https://www.discogs.com/release/12345',
+        master_id: null,
+      };
+
+      expect(noMaster.master_id).toBeNull();
+    });
+
+    it('accepts a result that omits master_id entirely', () => {
+      const baseline: DiscogsMatchResult = {
+        release_id: 12345,
+        release_url: 'https://www.discogs.com/release/12345',
+      };
+
+      expect(baseline.master_id).toBeUndefined();
+    });
+  });
 });
