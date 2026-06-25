@@ -1143,4 +1143,175 @@ describe('OpenAPI Specification', () => {
       expect(services?.additionalProperties?.enum).toEqual(['ok', 'unavailable', 'timeout']);
     });
   });
+
+  describe('Device Authorization (RFC 8628) — #195', () => {
+    // Field-list / enum snapshot against api.yaml (the #186 CatalogExportRow house
+    // style — NOT a live runtime diff; the plugin's per-route zod schemas are
+    // module-internal and unexported). The contract mirrors better-auth 1.6.20 +
+    // Backend-Service#1495. Error enums are the RUNTIME superset of the declared zod.
+    type Schema = {
+      type?: string;
+      required?: string[];
+      properties?: Record<string, Record<string, unknown>>;
+      enum?: string[];
+    };
+    type Operation = {
+      security?: Array<Record<string, unknown[]>>;
+      parameters?: Array<{ name: string; in: string; required?: boolean }>;
+      responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+    };
+    const getSchema = (name: string) => spec.components.schemas[name] as Schema;
+    const props = (name: string) => Object.keys(getSchema(name).properties ?? {}).sort();
+
+    it('declares all five /auth/device/* paths with the right methods', () => {
+      expect((spec.paths['/auth/device/code'] as Record<string, unknown>)?.post).toBeDefined();
+      expect((spec.paths['/auth/device/token'] as Record<string, unknown>)?.post).toBeDefined();
+      expect((spec.paths['/auth/device'] as Record<string, unknown>)?.get).toBeDefined();
+      expect((spec.paths['/auth/device/approve'] as Record<string, unknown>)?.post).toBeDefined();
+      expect((spec.paths['/auth/device/deny'] as Record<string, unknown>)?.post).toBeDefined();
+    });
+
+    // ---- Request/response field lists (snapshot vs the verified plugin wire shapes) ----
+
+    it('DeviceAuthCodeRequest = { client_id (req), scope?, user_id? } — user_id is the 1.6.20 pre-bind field', () => {
+      expect(props('DeviceAuthCodeRequest')).toEqual(['client_id', 'scope', 'user_id'].sort());
+      expect(getSchema('DeviceAuthCodeRequest').required).toEqual(['client_id']);
+    });
+
+    it('DeviceAuthCodeResponse carries all six RFC 8628 fields, all required', () => {
+      const fields = [
+        'device_code',
+        'user_code',
+        'verification_uri',
+        'verification_uri_complete',
+        'expires_in',
+        'interval',
+      ];
+      expect(props('DeviceAuthCodeResponse')).toEqual([...fields].sort());
+      expect((getSchema('DeviceAuthCodeResponse').required ?? []).sort()).toEqual([...fields].sort());
+    });
+
+    it('DeviceAuthTokenRequest preserves snake_case + a fixed grant_type literal', () => {
+      expect(props('DeviceAuthTokenRequest')).toEqual(['client_id', 'device_code', 'grant_type'].sort());
+      expect(getSchema('DeviceAuthTokenRequest').properties?.grant_type?.enum).toEqual([
+        'urn:ietf:params:oauth:grant-type:device_code',
+      ]);
+    });
+
+    it('DeviceAuthTokenResponse carries all four runtime fields INCLUDING scope (token_type fixed to Bearer)', () => {
+      const fields = ['access_token', 'token_type', 'expires_in', 'scope'];
+      expect(props('DeviceAuthTokenResponse')).toEqual([...fields].sort());
+      expect((getSchema('DeviceAuthTokenResponse').required ?? []).sort()).toEqual([...fields].sort());
+      expect(getSchema('DeviceAuthTokenResponse').properties?.token_type?.enum).toEqual(['Bearer']);
+      // expires_in stays a plain integer — BS clamps the VALUE to 43200, not the type.
+      expect(getSchema('DeviceAuthTokenResponse').properties?.expires_in?.type).toBe('integer');
+    });
+
+    it('DeviceAuthVerifyResponse = { user_code, status } with status the [pending,approved,denied] enum', () => {
+      expect(props('DeviceAuthVerifyResponse')).toEqual(['status', 'user_code']);
+      expect(getSchema('DeviceAuthVerifyResponse').properties?.status?.$ref).toBe(
+        '#/components/schemas/DeviceAuthStatus'
+      );
+      expect(getSchema('DeviceAuthStatus').enum).toEqual(['pending', 'approved', 'denied']);
+    });
+
+    it('approve + deny request bodies use camelCase userCode (NOT snake_case)', () => {
+      for (const name of ['DeviceAuthApproveRequest', 'DeviceAuthDenyRequest']) {
+        expect(props(name), name).toEqual(['userCode']);
+        expect(getSchema(name).required, name).toEqual(['userCode']);
+        expect(getSchema(name).properties?.user_code, name).toBeUndefined();
+      }
+    });
+
+    it('DeviceAuthActionResponse is a plain { success: boolean }', () => {
+      expect(props('DeviceAuthActionResponse')).toEqual(['success']);
+      expect(getSchema('DeviceAuthActionResponse').properties?.success?.type).toBe('boolean');
+    });
+
+    // ---- Per-endpoint error enums mirror RUNTIME (a superset of the declared zod) ----
+
+    it('pins each per-endpoint error enum to the runtime vocabulary', () => {
+      expect(getSchema('DeviceAuthCodeErrorCode').enum).toEqual(['invalid_request', 'invalid_client']);
+      expect(getSchema('DeviceAuthTokenErrorCode').enum).toEqual([
+        'authorization_pending',
+        'slow_down',
+        'expired_token',
+        'access_denied',
+        'invalid_request',
+        'invalid_grant',
+        'server_error',
+      ]);
+      expect(getSchema('DeviceAuthVerifyErrorCode').enum).toEqual(['invalid_request', 'expired_token']);
+      expect(getSchema('DeviceAuthActionErrorCode').enum).toEqual([
+        'invalid_request',
+        'expired_token',
+        'unauthorized',
+        'access_denied',
+      ]);
+    });
+
+    it('includes runtime-only codes the declared zod omits (server_error on token, expired_token on verify)', () => {
+      expect(getSchema('DeviceAuthTokenErrorCode').enum).toContain('server_error');
+      expect(getSchema('DeviceAuthVerifyErrorCode').enum).toContain('expired_token');
+    });
+
+    it('drops device_code_already_processed — declared in approve zod but never a wire error', () => {
+      expect(getSchema('DeviceAuthActionErrorCode').enum).not.toContain('device_code_already_processed');
+    });
+
+    // ---- security per endpoint ----
+
+    it('makes code/token public; approve/deny require BearerAuth; GET /device accepts an optional session', () => {
+      expect((spec.paths['/auth/device/code'] as { post: Operation }).post.security).toEqual([]);
+      expect((spec.paths['/auth/device/token'] as { post: Operation }).post.security).toEqual([]);
+      expect((spec.paths['/auth/device/approve'] as { post: Operation }).post.security).toEqual([
+        { BearerAuth: [] },
+      ]);
+      expect((spec.paths['/auth/device/deny'] as { post: Operation }).post.security).toEqual([{ BearerAuth: [] }]);
+      // GET /device works unauthenticated (200 + status); a session only claims the code.
+      expect((spec.paths['/auth/device'] as { get: Operation }).get.security).toEqual([{}, { BearerAuth: [] }]);
+    });
+
+    // ---- per-status error blocks reference the right envelope ----
+
+    it('models /device/token errors per status (400 + 500), both DeviceAuthTokenError', () => {
+      const r = (spec.paths['/auth/device/token'] as { post: Operation }).post.responses!;
+      expect(Object.keys(r).sort()).toEqual(['200', '400', '500']);
+      expect(r['400'].content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/DeviceAuthTokenError');
+      expect(r['500'].content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/DeviceAuthTokenError');
+    });
+
+    it('models approve/deny errors per status (400 + 401 + 403), all DeviceAuthActionError', () => {
+      for (const route of ['/auth/device/approve', '/auth/device/deny']) {
+        const r = (spec.paths[route] as { post: Operation }).post.responses!;
+        expect(Object.keys(r).sort(), route).toEqual(['200', '400', '401', '403']);
+        for (const code of ['400', '401', '403']) {
+          expect(r[code].content?.['application/json']?.schema?.$ref, `${route} ${code}`).toBe(
+            '#/components/schemas/DeviceAuthActionError'
+          );
+        }
+      }
+    });
+
+    it('GET /auth/device takes a required user_code query param', () => {
+      const op = (spec.paths['/auth/device'] as { get: Operation }).get;
+      const userCode = op.parameters?.find((p) => p.name === 'user_code');
+      expect(userCode?.in).toBe('query');
+      expect(userCode?.required).toBe(true);
+    });
+
+    // ---- version forcing-function ----
+
+    it('pins the verified better-auth version so a bump forces a conscious re-verification', () => {
+      // The contract above mirrors better-auth 1.6.20 (the version Backend-Service#1495
+      // runs; 1.6.20 added the /device/code `user_id` field over 1.6.18/.19). If this
+      // fails after a bump, re-verify routes.mjs against the new version, update the
+      // enums/fields above, then bump this string. (package.json keeps the ^1.6.18
+      // caret per the issue; package-lock.json resolves it to 1.6.20.)
+      const ba = JSON.parse(
+        readFileSync(join(__dirname, '..', 'node_modules', 'better-auth', 'package.json'), 'utf-8')
+      ) as { version: string };
+      expect(ba.version).toBe('1.6.20');
+    });
+  });
 });
