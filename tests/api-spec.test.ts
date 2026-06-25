@@ -1293,6 +1293,38 @@ describe('OpenAPI Specification', () => {
       }
     });
 
+    it('models /device/code and GET /device errors as 400-only, each its own error envelope', () => {
+      const codeR = (spec.paths['/auth/device/code'] as { post: Operation }).post.responses!;
+      expect(Object.keys(codeR).sort()).toEqual(['200', '400']);
+      expect(codeR['400'].content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/DeviceAuthCodeError'
+      );
+      const verifyR = (spec.paths['/auth/device'] as { get: Operation }).get.responses!;
+      expect(Object.keys(verifyR).sort()).toEqual(['200', '400']);
+      expect(verifyR['400'].content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/DeviceAuthVerifyError'
+      );
+    });
+
+    it('wires each endpoint 200 success response to its own response schema', () => {
+      const okRef = (op: Operation) => op.responses!['200'].content?.['application/json']?.schema?.$ref;
+      expect(okRef((spec.paths['/auth/device/code'] as { post: Operation }).post)).toBe(
+        '#/components/schemas/DeviceAuthCodeResponse'
+      );
+      expect(okRef((spec.paths['/auth/device/token'] as { post: Operation }).post)).toBe(
+        '#/components/schemas/DeviceAuthTokenResponse'
+      );
+      expect(okRef((spec.paths['/auth/device'] as { get: Operation }).get)).toBe(
+        '#/components/schemas/DeviceAuthVerifyResponse'
+      );
+      expect(okRef((spec.paths['/auth/device/approve'] as { post: Operation }).post)).toBe(
+        '#/components/schemas/DeviceAuthActionResponse'
+      );
+      expect(okRef((spec.paths['/auth/device/deny'] as { post: Operation }).post)).toBe(
+        '#/components/schemas/DeviceAuthActionResponse'
+      );
+    });
+
     it('GET /auth/device takes a required user_code query param', () => {
       const op = (spec.paths['/auth/device'] as { get: Operation }).get;
       const userCode = op.parameters?.find((p) => p.name === 'user_code');
