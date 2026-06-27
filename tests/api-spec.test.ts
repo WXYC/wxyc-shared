@@ -305,7 +305,7 @@ describe('OpenAPI Specification', () => {
       allOf?: unknown;
     };
 
-    // The 14-field projection: catalog-export.service.ts:33-48 (CatalogExportRow).
+    // The 15-field projection: catalog-export.service.ts:33-48 (CatalogExportRow).
     const EXPORT_FIELDS = [
       'id',
       'artist_name',
@@ -318,12 +318,13 @@ describe('OpenAPI Specification', () => {
       'format_name',
       'on_streaming',
       'plays',
+      'popularity',
       'artwork_url',
       'rotation_bin',
       'rotation_kill_date',
     ];
 
-    it('defines CatalogExportRow with exactly the 14 shipped fields', () => {
+    it('defines CatalogExportRow with exactly the 15 shipped fields', () => {
       const schema = spec.components.schemas.CatalogExportRow as Schema;
       expect(schema).toBeDefined();
       expect(Object.keys(schema.properties ?? {}).sort()).toEqual([...EXPORT_FIELDS].sort());
@@ -343,6 +344,19 @@ describe('OpenAPI Specification', () => {
           'format_name',
         ].sort()
       );
+    });
+
+    it('ships popularity as a nullable integer, distinct from plays (BS#1486 Phase-2 Track 3)', () => {
+      const schema = spec.components.schemas.CatalogExportRow as Schema;
+      const popularity = schema.properties?.popularity;
+      expect(popularity).toBeDefined();
+      expect(popularity!.type).toBe('integer');
+      expect(popularity!.nullable).toBe(true);
+      // popularity is the corrected logical signal, NOT a rename of the
+      // per-pressing linked `plays`: both ship, and popularity stays nullable
+      // (omitted from required) so a decoder predating it keeps working.
+      expect(schema.properties?.plays).toBeDefined();
+      expect(schema.required ?? []).not.toContain('popularity');
     });
 
     it('types rotation_bin as a raw nullable string, NOT the RotationBin enum (admits N; decision 1)', () => {
