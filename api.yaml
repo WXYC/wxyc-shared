@@ -1182,6 +1182,21 @@ components:
         plays:
           type: integer
           nullable: true
+          description: >
+            Per-pressing LINKED play count for THIS catalog row (from album_plays).
+            The honest per-release number; to rank by real popularity across all
+            pressings of a logical album, use `popularity` instead.
+        popularity:
+          type: integer
+          nullable: true
+          description: >
+            Attribution-corrected, master-collapsed popularity (BS#1486 Phase-2
+            Track 3). Collapses every pressing/format of one logical album under
+            its Discogs master AND folds in the ~43% of free-text/unlinked plays
+            that `plays` cannot see, so consumers can rank releases by real
+            listening. null when the album_popularity signal has no row for this
+            row's logical key (e.g. unresolved-and-unplayed). Distinct from
+            `plays`, which stays the per-pressing linked count.
         artwork_url:
           type: string
           nullable: true
