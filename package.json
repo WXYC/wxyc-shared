@@ -16,6 +16,11 @@
       "import": "./dist/dtos/index.js",
       "default": "./dist/dtos/index.js"
     },
+    "./auto-dj": {
+      "types": "./dist/auto-dj/index.d.ts",
+      "import": "./dist/auto-dj/index.js",
+      "default": "./dist/auto-dj/index.js"
+    },
     "./test-utils": {
       "types": "./dist/test-utils/index.d.ts",
       "import": "./dist/test-utils/index.js",

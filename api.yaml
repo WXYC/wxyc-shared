@@ -4630,6 +4630,338 @@ components:
           update: '#/components/schemas/LiveFsUpdateEvent'
           refetch: '#/components/schemas/LiveFsRefetchEvent'
 
+    # ── Auto-DJ system ─────────────────────────────────────────────────────
+    # Orchestrator <-> Arduino management channel, and the dj-site virtual
+    # switch API. Source of truth: auto-dj-arduino-switch/docs/networking-spec.md
+    # section 5.2. The `state` enum is reconciled to the re-architected
+    # firmware's 4-state vocabulary (BOOTING/CONNECTING/CONNECTED/ERROR_STATE);
+    # the Arduino is now a relay/button reporter, not a flowsheet writer.
+    AutoDJState:
+      type: string
+      enum: [BOOTING, CONNECTING, CONNECTED, ERROR_STATE]
+    AutoDJTransport:
+      type: string
+      enum: [ethernet, wifi]
+    AutoDJCommandAction:
+      type: string
+      enum: [set_config, pause, resume, end_show, restart, ping]
+    AutoDJErrorLevel:
+      type: string
+      enum: [warning, error, fatal]
+    AutoDJErrorCode:
+      type: string
+      enum:
+        - HTTP_TIMEOUT
+        - JSON_PARSE
+        - WIFI_DISCONNECT
+        - WS_DISCONNECT
+        - TLS_HANDSHAKE
+        - NTP_FAIL
+        - KVSTORE_WRITE
+        - FLOWSHEET_POST
+        - AZURACAST_POLL
+    AutoDJActivationSourceType:
+      type: string
+      enum: [virtual_switch, button, relay]
+    AutoDJRelayState:
+      type: string
+      enum: [auto_dj_active, dj_live]
+
+    AutoDJLastTrack:
+      type: object
+      required: [artist, title, posted_at]
+      properties:
+        artist:
+          type: string
+        title:
+          type: string
+        posted_at:
+          type: integer
+          description: Unix timestamp
+
+    AutoDJHeartbeat:
+      type: object
+      required:
+        - type
+        - state
+        - transport
+        - uptime_s
+        - free_ram
+        - firmware_version
+        - config_hash
+        - loop_max_ms
+        - reconnect_count
+        - tracks_detected
+        - tracks_posted
+        - errors_since_boot
+      properties:
+        type:
+          type: string
+          enum: [heartbeat]
+        state:
+          $ref: '#/components/schemas/AutoDJState'
+        transport:
+          $ref: '#/components/schemas/AutoDJTransport'
+        uptime_s:
+          type: integer
+        wifi_rssi:
+          type: integer
+          nullable: true
+        free_ram:
+          type: integer
+        radio_show_id:
+          type: integer
+          nullable: true
+          description: Always null in the reporter model; retained for schema compatibility.
+        last_track:
+          $ref: '#/components/schemas/AutoDJLastTrack'
+        last_error:
+          type: string
+          nullable: true
+        firmware_version:
+          type: string
+        config_hash:
+          type: string
+        loop_max_ms:
+          type: integer
+        reconnect_count:
+          type: integer
+        tracks_detected:
+          type: integer
+        tracks_posted:
+          type: integer
+        errors_since_boot:
+          type: integer
+        button_press_count:
+          type: integer
+          description: Button presses since last heartbeat (HTTP/WiFi fallback; orchestrator toggles if odd). 0 if none.
+        relay_auto_dj_active:
+          type: boolean
+          description: Current debounced relay level. true = relay reports auto-DJ-active (no live DJ); false = live DJ on air.
+
+    AutoDJCommand:
+      type: object
+      required: [type, id, action]
+      properties:
+        type:
+          type: string
+          enum: [command]
+        id:
+          type: string
+          description: Unique command ID for ack correlation
+        action:
+          $ref: '#/components/schemas/AutoDJCommandAction'
+        key:
+          type: string
+          description: Config key (only for set_config)
+        value:
+          type: string
+          description: Config value (only for set_config)
+
+    AutoDJAck:
+      type: object
+      required: [type, id, status]
+      properties:
+        type:
+          type: string
+          enum: [ack]
+        id:
+          type: string
+          description: The id from the command being acknowledged
+        status:
+          type: string
+          enum: [ok, error, unknown_command]
+        error:
+          type: string
+          description: Error message (only when status is error)
+        result:
+          type: object
+          description: 'Optional result data (e.g. { active: boolean } for button_toggle acks)'
+
+    AutoDJNowPlaying:
+      type: object
+      required: [type, sh_id, artist, title, album, is_live]
+      properties:
+        type:
+          type: string
+          enum: [now_playing]
+        sh_id:
+          type: integer
+          description: AzuraCast song history ID
+        artist:
+          type: string
+        title:
+          type: string
+        album:
+          type: string
+        is_live:
+          type: boolean
+          description: Whether a live DJ is streaming
+
+    AutoDJErrorReport:
+      type: object
+      required: [type, level, module, code, message, state, uptime_s, free_ram, count]
+      properties:
+        type:
+          type: string
+          enum: [error]
+        level:
+          $ref: '#/components/schemas/AutoDJErrorLevel'
+        module:
+          type: string
+          description: Source module (e.g. mgmt_client, relay_monitor)
+        code:
+          $ref: '#/components/schemas/AutoDJErrorCode'
+        message:
+          type: string
+        state:
+          $ref: '#/components/schemas/AutoDJState'
+        uptime_s:
+          type: integer
+        free_ram:
+          type: integer
+        count:
+          type: integer
+          description: Occurrences since last report
+
+    AutoDJButtonToggle:
+      type: object
+      required: [type, timestamp]
+      properties:
+        type:
+          type: string
+          enum: [button_toggle]
+        timestamp:
+          type: integer
+          description: Unix timestamp of the button press (from NTP)
+
+    AutoDJWebSocketMessage:
+      oneOf:
+        - $ref: '#/components/schemas/AutoDJHeartbeat'
+        - $ref: '#/components/schemas/AutoDJCommand'
+        - $ref: '#/components/schemas/AutoDJAck'
+        - $ref: '#/components/schemas/AutoDJNowPlaying'
+        - $ref: '#/components/schemas/AutoDJErrorReport'
+        - $ref: '#/components/schemas/AutoDJButtonToggle'
+      discriminator:
+        propertyName: type
+        mapping:
+          heartbeat: '#/components/schemas/AutoDJHeartbeat'
+          command: '#/components/schemas/AutoDJCommand'
+          ack: '#/components/schemas/AutoDJAck'
+          now_playing: '#/components/schemas/AutoDJNowPlaying'
+          error: '#/components/schemas/AutoDJErrorReport'
+          button_toggle: '#/components/schemas/AutoDJButtonToggle'
+
+    AutoDJDeviceStatus:
+      type: object
+      required: [connected, transport, last_heartbeat_at, firmware_version]
+      properties:
+        connected:
+          type: boolean
+        transport:
+          type: string
+          enum: [ethernet, wifi, none]
+        last_heartbeat_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_heartbeat:
+          $ref: '#/components/schemas/AutoDJHeartbeat'
+        pending_commands:
+          type: integer
+          description: Number of unacknowledged commands in the queue
+        firmware_version:
+          type: string
+        device_id:
+          type: string
+          description: MAC address or other unique identifier
+
+    # ── Virtual switch API (dj-site <-> orchestrator) ──────────────────────
+    AutoDJActivationSource:
+      type: object
+      required: [source]
+      properties:
+        source:
+          $ref: '#/components/schemas/AutoDJActivationSourceType'
+        userId:
+          type: string
+          description: Better Auth user ID (only for virtual_switch source)
+        userName:
+          type: string
+          description: Display name (only for virtual_switch source)
+        detail:
+          type: string
+          description: Additional context (e.g. "Live DJ detected" for relay source)
+
+    AutoDJCurrentTrack:
+      type: object
+      required: [artist, title, album, detectedAt]
+      properties:
+        artist:
+          type: string
+        title:
+          type: string
+        album:
+          type: string
+        detectedAt:
+          type: string
+          format: date-time
+
+    AutoDJDeviceSummary:
+      type: object
+      required: [online, transport, lastHeartbeat, relayState]
+      properties:
+        online:
+          type: boolean
+        transport:
+          $ref: '#/components/schemas/AutoDJTransport'
+        lastHeartbeat:
+          type: string
+          format: date-time
+        relayState:
+          $ref: '#/components/schemas/AutoDJRelayState'
+
+    AutoDJStatus:
+      type: object
+      required: [active]
+      properties:
+        active:
+          type: boolean
+        activatedBy:
+          $ref: '#/components/schemas/AutoDJActivationSource'
+        activatedAt:
+          type: string
+          format: date-time
+        showId:
+          type: integer
+        currentTrack:
+          allOf:
+            - $ref: '#/components/schemas/AutoDJCurrentTrack'
+          nullable: true
+        lastDeactivatedAt:
+          type: string
+          format: date-time
+        lastDeactivatedBy:
+          $ref: '#/components/schemas/AutoDJActivationSource'
+        device:
+          allOf:
+            - $ref: '#/components/schemas/AutoDJDeviceSummary'
+          nullable: true
+
+    AutoDJDeactivateResponse:
+      type: object
+      required: [active, deactivatedBy, deactivatedAt]
+      properties:
+        active:
+          type: boolean
+          enum: [false]
+        deactivatedBy:
+          $ref: '#/components/schemas/AutoDJActivationSource'
+        deactivatedAt:
+          type: string
+          format: date-time
+
 security:
   - BearerAuth: []
 
