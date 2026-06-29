@@ -14,6 +14,7 @@ export default defineConfig([
     entry: {
       index: 'src/index.ts',
       'dtos/index': 'src/dtos/index.ts',
+      'auto-dj/index': 'src/auto-dj/index.ts',
       'test-utils/index': 'src/test-utils/index.ts',
       'validation/index': 'src/validation/index.ts',
     },
