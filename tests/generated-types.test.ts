@@ -30,6 +30,7 @@ import {
   type LookupResultItem,
   type LookupRequest,
   type DiscogsMatchResult,
+  type DiscogsWriterCredits,
   type TrackMatchHint,
   RotationBin,
   DayOfWeek,
@@ -818,6 +819,48 @@ describe('Generated TypeScript Types', () => {
       };
 
       expect(baseline.master_id).toBeUndefined();
+    });
+  });
+
+  describe('DiscogsMatchResult writer_credits (BMI composer, LML#699)', () => {
+    // Pin the consumer-facing contract: writer_credits is optional, so a caller
+    // that omits it (no resolved composer) is unaffected. Backend reads it off
+    // the album_metadata passthrough to populate a flowsheet composer for BMI.
+    it('accepts a result with release-level writer_credits', () => {
+      const withWriters: DiscogsMatchResult = {
+        release_id: 12345,
+        release_url: 'https://www.discogs.com/release/12345',
+        writer_credits: {
+          names: ['Juana Molina'],
+          roles: ['Written-By'],
+          provenance: 'release',
+          track_position: null,
+        },
+      };
+
+      expect(withWriters.writer_credits?.names).toEqual(['Juana Molina']);
+      expect(withWriters.writer_credits?.provenance).toBe('release');
+    });
+
+    it('accepts a standalone track-scoped DiscogsWriterCredits with a position', () => {
+      const trackScoped: DiscogsWriterCredits = {
+        names: ['Duke Ellington', 'John Coltrane'],
+        roles: ['Written-By'],
+        provenance: 'track',
+        track_position: 'A1',
+      };
+
+      expect(trackScoped.provenance).toBe('track');
+      expect(trackScoped.track_position).toBe('A1');
+    });
+
+    it('accepts a result that omits writer_credits entirely', () => {
+      const baseline: DiscogsMatchResult = {
+        release_id: 12345,
+        release_url: 'https://www.discogs.com/release/12345',
+      };
+
+      expect(baseline.writer_credits).toBeUndefined();
     });
   });
 });

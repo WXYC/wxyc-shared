@@ -2773,6 +2773,8 @@ components:
             Pair with `LookupRequest.warm_cache=true` on write-path calls
             to progressively populate the cache so subsequent reads render
             richer.
+        writer_credits:
+          $ref: '#/components/schemas/DiscogsWriterCredits'
 
     LookupResultItem:
       type: object
@@ -3803,6 +3805,55 @@ components:
           type: string
           nullable: true
           description: Role for extra artists (e.g. "Producer", "Mixed By")
+
+    DiscogsWriterCredits:
+      type: object
+      description: >
+        Songwriter/composer credits for the resolved playcut, derived from the
+        Discogs writer-role credits already fetched at resolution time (the
+        `extra=1` artist credits whose `role` is a writer role — e.g.
+        "Written-By", "Composed By", "Music By", "Lyrics By", "Songwriter",
+        "Words By", including hyphen/space, bracketed, and comma-compound
+        variants). Surfaced on `DiscogsMatchResult.writer_credits` for BMI
+        performance-list reporting; populated only when `extended` is true and
+        a writer credit resolves, and omitted entirely when nothing resolves —
+        names are never fabricated. A consumer with no resolved composer falls
+        back to artist-as-proxy.
+      required:
+        - names
+        - provenance
+      properties:
+        names:
+          type: array
+          items:
+            type: string
+          description: Distinct songwriter/composer names for the resolved track.
+        roles:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: >
+            The verbatim Discogs role strings the names were drawn from (e.g.
+            "Written-By", "Words By, Music By"), for auditability of the
+            writer-role mapping.
+        provenance:
+          type: string
+          enum:
+            - track
+            - release
+          description: >
+            `track` = scoped to the resolved track's per-track credits
+            (precise); `release` = a release-level credit applied to the whole
+            release (approximate for an individual track, mirroring tubafrenzy's
+            auto-fill-from-artist fallback). Populated as `release` in the
+            initial rollout; `track` is added when per-track resolution lands.
+        track_position:
+          type: string
+          nullable: true
+          description: >
+            The resolved track's position (e.g. "A1", "5") when
+            `provenance` is `track`; null for release-level credits.
 
     DiscogsLabelCredit:
       type: object

@@ -819,6 +819,40 @@ describe('OpenAPI Specification', () => {
       expect(prop.nullable).toBe(true);
       expect(schema.required ?? []).not.toContain('master_id');
     });
+
+    it('should define DiscogsWriterCredits with names + provenance required (LML#699)', () => {
+      // Songwriter/composer credits surfaced for BMI performance-list reporting
+      // after the tubafrenzy turndown (WXYC/library-metadata-lookup#699). names +
+      // provenance are required; roles + track_position are auxiliary/optional.
+      const schema = spec.components.schemas.DiscogsWriterCredits as {
+        properties: Record<string, SchemaProp & { enum?: string[] }>;
+        required?: string[];
+      };
+
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(['names', 'provenance']);
+      expect(schema.properties.names.type).toBe('array');
+      expect(schema.properties.names.items?.type).toBe('string');
+      expect(schema.properties.provenance.enum).toEqual(['track', 'release']);
+      expect(schema.required ?? []).not.toContain('roles');
+      expect(schema.required ?? []).not.toContain('track_position');
+    });
+
+    it('should attach writer_credits to DiscogsMatchResult as an optional $ref (LML#699)', () => {
+      // writer_credits rides the album_metadata passthrough to Backend-Service; it
+      // is a bare $ref kept OUT of `required`, so codegen emits it as optional and
+      // the additive contract doesn't break existing LML/BS/iOS/Android consumers.
+      const schema = spec.components.schemas.DiscogsMatchResult as {
+        properties: Record<string, SchemaProp>;
+        required?: string[];
+      };
+
+      expect(schema.properties.writer_credits).toBeDefined();
+      expect(schema.properties.writer_credits.$ref).toBe(
+        '#/components/schemas/DiscogsWriterCredits',
+      );
+      expect(schema.required ?? []).not.toContain('writer_credits');
+    });
   });
 
   describe('Lookup Hard Cap (LML#370)', () => {
