@@ -99,14 +99,30 @@ The `.github/workflows/publish.yml` workflow handles the rest.
 
 DTOs are generated from `api.yaml`. TypeScript uses `openapi-typescript` (pure Node.js); Swift and Kotlin use the Java-based `openapi-generator-cli`:
 ```bash
-npm run generate:typescript  # TypeScript types (openapi-typescript, no JVM)
-npm run generate:swift       # iOS types (openapi-generator-cli, requires Java)
-npm run generate:kotlin      # Android types (openapi-generator-cli, requires Java)
+npm run generate:typescript  # TypeScript types (openapi-typescript, no JVM)  -> src/generated/
+npm run generate:python      # Python pydantic models (datamodel-codegen)     -> generated/python/
+npm run generate:swift       # Swift types (openapi-generator-cli, requires Java)  -> generated/swift/
+npm run generate:kotlin      # Kotlin types (openapi-generator-cli, requires Java) -> generated/kotlin/
 ```
 
-The codegen script (`scripts/generate-models.js`) produces:
+The TypeScript codegen script (`scripts/generate-models.js`) produces:
 - `src/generated/openapi-types.d.ts` -- raw openapi-typescript output
 - `src/generated/models/index.ts` -- re-export layer with const objects for enums
+
+All four output trees are **in-repo and gitignored** (`src/generated/`, `generated/`) — they're regenerated artifacts, never committed here. TypeScript is the only output consumed by this package's own build (it ships the DTOs); Python/Swift/Kotlin are produced for downstream consumers.
+
+### Output locations and consumers
+
+| Script | Output (gitignored) | Consumer(s) | How the consumer uses it today |
+|---|---|---|---|
+| `generate:typescript` | `src/generated/` | Backend-Service, dj-site (via `@wxyc/shared/dtos`) | Imported from the published package |
+| `generate:python` | `generated/python/` | request-o-matic, library-metadata-lookup | Pydantic models |
+| `generate:swift` | `generated/swift/` | wxyc-dj-ios (DJ tool / device-auth), wxyc-ios-64 (listener) | **Hand-maintained** — reference/diff aid only |
+| `generate:kotlin` | `generated/kotlin/` | WXYC-Android | **Hand-maintained** — reference/diff aid only |
+
+The Swift/Kotlin consumers **do not yet consume the generated output** — they hand-author types that mirror `api.yaml` (e.g. `wxyc-dj-ios`'s `Packages/WXYCAPI/Sources/WXYCAPI/DTOs/`). So `generated/swift` and `generated/kotlin` are a local reference a maintainer regenerates and diffs against when hand-updating a consumer after an `api.yaml` change — not a tree any consumer checks in. (`library-scanner`, formerly a Swift consumer, is now an archived/read-only repo.)
+
+Migrating each consumer onto the generated output is tracked separately, blocked by this output-path fix (#197): WXYC/wxyc-dj-ios#75, WXYC/WXYC-Android#25, WXYC/wxyc-ios-64#412 — all sub-issues of the codegen umbrella #106. Once a consumer migrates, its `-o` path (or its own build step) should point at wherever that repo checks the generated client in; until then these stay in-repo.
 
 Run `npm run check:breaking` before changing `api.yaml` to detect breaking changes.
 
