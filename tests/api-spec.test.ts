@@ -305,7 +305,10 @@ describe('OpenAPI Specification', () => {
       allOf?: unknown;
     };
 
-    // The 15-field projection: catalog-export.service.ts:33-48 (CatalogExportRow).
+    // The catalog-export projection (Backend-Service catalog-export.service.ts,
+    // CatalogExportRow). The SSOT leads the consumer: this list is 15 fields,
+    // one ahead of that private type until Backend Track 3 (#1493) adds the
+    // 15th, `popularity`.
     const EXPORT_FIELDS = [
       'id',
       'artist_name',
@@ -346,16 +349,20 @@ describe('OpenAPI Specification', () => {
       );
     });
 
-    it('ships popularity as a nullable integer, distinct from plays (BS#1486 Phase-2 Track 3)', () => {
+    it('ships popularity as a nullable integer alongside plays, not as a replacement (BS#1486 Phase-2 Track 3)', () => {
       const schema = spec.components.schemas.CatalogExportRow as Schema;
       const popularity = schema.properties?.popularity;
       expect(popularity).toBeDefined();
       expect(popularity!.type).toBe('integer');
       expect(popularity!.nullable).toBe(true);
       // popularity is the corrected logical signal, NOT a rename of the
-      // per-pressing linked `plays`: both ship, and popularity stays nullable
-      // (omitted from required) so a decoder predating it keeps working.
-      expect(schema.properties?.plays).toBeDefined();
+      // per-pressing linked `plays`: BOTH ship as distinct nullable-int fields,
+      // and popularity stays out of `required` so a decoder predating it keeps
+      // working.
+      const plays = schema.properties?.plays;
+      expect(plays).toBeDefined();
+      expect(plays!.type).toBe('integer');
+      expect(plays!.nullable).toBe(true);
       expect(schema.required ?? []).not.toContain('popularity');
     });
 

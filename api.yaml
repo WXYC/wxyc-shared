@@ -1190,13 +1190,17 @@ components:
           type: integer
           nullable: true
           description: >
-            Attribution-corrected, master-collapsed popularity (BS#1486 Phase-2
-            Track 3). Collapses every pressing/format of one logical album under
-            its Discogs master AND folds in the ~43% of free-text/unlinked plays
-            that `plays` cannot see, so consumers can rank releases by real
-            listening. null when the album_popularity signal has no row for this
-            row's logical key (e.g. unresolved-and-unplayed). Distinct from
-            `plays`, which stays the per-pressing linked count.
+            Attribution-corrected popularity (BS#1486 Phase-2 Track 3): a play
+            count for this row's LOGICAL album rather than this single pressing.
+            Pressings that resolve to the same Discogs master (~90% of RESOLVED
+            library rows) collapse into one count; release-only and unresolved
+            rows keep a per-release or per-library key, with no cross-pressing
+            collapse. It also adds the free-text/unlinked plays Track 1 has
+            resolved to the same release/master (the ~43% free-text tail is the
+            ceiling, not all of it — only the resolved subset counts), which the
+            linked-only `plays` cannot see. Rank releases by `popularity`. null
+            when the album_popularity signal has no row for this row's logical
+            key. Distinct from `plays`, which stays the per-pressing linked count.
         artwork_url:
           type: string
           nullable: true
