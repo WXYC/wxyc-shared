@@ -1,5 +1,7 @@
 # OpenAPI Generator config for Swift
-# Generates type definitions for iOS app (wxyc-ios-64-copy)
+# Models-only output written to generated/swift (gitignored, in-repo).
+# Reference/diff aid for the Swift consumers (wxyc-dj-ios, wxyc-ios-64), which
+# currently hand-maintain their DTOs; see the Code Generation section of CLAUDE.md.
 
 # Only generate models, not API clients
 generateModelTests: false

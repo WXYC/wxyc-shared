@@ -1,5 +1,7 @@
 # OpenAPI Generator config for Kotlin
-# Generates type definitions for Android app (WXYC-Android)
+# Models-only output written to generated/kotlin (gitignored, in-repo).
+# Reference/diff aid for the Android consumer (WXYC-Android), which currently
+# hand-maintains its types; see the Code Generation section of CLAUDE.md.
 
 # Only generate models, not API clients
 generateApiTests: false
