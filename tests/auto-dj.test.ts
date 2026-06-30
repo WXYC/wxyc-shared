@@ -12,6 +12,8 @@ import {
   isNowPlaying,
   isErrorReport,
   isButtonToggle,
+  AutoDJCommandAction,
+  type AutoDJAck,
   type AutoDJWebSocketMessage,
 } from '../src/auto-dj/index.js';
 
@@ -60,6 +62,16 @@ describe('auto-dj message type guards', () => {
     for (const guard of guards) {
       expect(all.filter(guard)).toHaveLength(1);
     }
+  });
+
+  it('exposes string enums as runtime values (not just types)', () => {
+    expect(AutoDJCommandAction.pause).toBe('pause');
+    expect(Object.values(AutoDJCommandAction)).toContain('resume');
+  });
+
+  it('an ack can carry a result payload (e.g. { active })', () => {
+    const ack: AutoDJAck = { type: 'ack', id: 'btn_1', status: 'ok', result: { active: true } };
+    expect(ack.result?.active).toBe(true);
   });
 
   it('narrows so discriminant-specific fields are accessible', () => {

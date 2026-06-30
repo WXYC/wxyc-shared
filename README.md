@@ -283,6 +283,14 @@ if (hasPermission(user.role, "catalog", "write")) {
 | `metadata.dto` | External metadata (Discogs, Spotify) |
 | `common.dto` | Shared types (errors, pagination, genres) |
 
+### Auto-DJ (`@wxyc/shared/auto-dj`)
+
+Type contracts for the auto-DJ system — the orchestrator <-> Arduino management-channel messages (`AutoDJHeartbeat`, `AutoDJCommand`, `AutoDJAck`, `AutoDJNowPlaying`, `AutoDJErrorReport`, `AutoDJButtonToggle`) and the dj-site <-> orchestrator virtual switch API (`AutoDJStatus`, `AutoDJDeactivateResponse`, ...). Adds a hand-written `AutoDJWebSocketMessage` discriminated union and type guards (`isHeartbeat`, `isCommand`, ...) over the generated schemas; string enums (`AutoDJCommandAction`, ...) are exported as runtime values.
+
+```ts
+import { isHeartbeat, AutoDJCommandAction, type AutoDJStatus } from '@wxyc/shared/auto-dj';
+```
+
 ### Test Utilities (`@wxyc/shared/test-utils`)
 
 | Module | Description |

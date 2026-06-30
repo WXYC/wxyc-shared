@@ -13,6 +13,7 @@ import type {
   AutoDJNowPlaying,
   AutoDJErrorReport,
   AutoDJButtonToggle,
+  AutoDJWebSocketMessage as AutoDJWebSocketMessageGenerated,
 } from '../generated/models/index.js';
 
 /** Discriminated union of every message that crosses the Arduino <-> orchestrator channel. */
@@ -23,6 +24,14 @@ export type AutoDJWebSocketMessage =
   | AutoDJNowPlaying
   | AutoDJErrorReport
   | AutoDJButtonToggle;
+
+// Compile-time tie: the hand-written union must stay mutually assignable to the
+// generated oneOf, so adding/removing a message type in api.yaml without
+// updating this union (or vice versa) fails the build instead of silently
+// drifting.
+type Mutual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+const _unionTie: Mutual<AutoDJWebSocketMessage, AutoDJWebSocketMessageGenerated> = true;
+void _unionTie;
 
 export function isHeartbeat(msg: AutoDJWebSocketMessage): msg is AutoDJHeartbeat {
   return msg.type === 'heartbeat';

@@ -4776,6 +4776,7 @@ components:
           description: Error message (only when status is error)
         result:
           type: object
+          additionalProperties: true
           description: 'Optional result data (e.g. { active: boolean } for button_toggle acks)'
 
     AutoDJNowPlaying:

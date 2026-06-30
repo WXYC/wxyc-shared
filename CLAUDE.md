@@ -67,6 +67,7 @@ Watch for the **caller-callee narrowing trap** when changing the workflow's own 
 
 This package provides:
 - **DTOs** (`@wxyc/shared/dtos`) - Generated from OpenAPI spec (`api.yaml`)
+- **Auto-DJ** (`@wxyc/shared/auto-dj`) - Auto-DJ type contracts: the orchestrator <-> Arduino management-channel messages + virtual switch API, plus a discriminated-union type and type guards
 - **Auth Client** (`@wxyc/shared/auth-client`) - Better Auth client with role/capability system
 - **Validation** (`@wxyc/shared/validation`) - Shared validation utilities
 - **Test Utilities** (`@wxyc/shared/test-utils`) - Fixtures and factories for testing

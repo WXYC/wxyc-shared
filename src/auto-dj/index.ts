@@ -12,32 +12,40 @@
  */
 
 // Generated schemas (re-exported as the curated public surface).
+// Object/interface schemas (types only).
 export type {
   // Management channel
   AutoDJHeartbeat,
   AutoDJLastTrack,
   AutoDJCommand,
-  AutoDJCommandAction,
   AutoDJAck,
   AutoDJNowPlaying,
   AutoDJErrorReport,
-  AutoDJErrorLevel,
-  AutoDJErrorCode,
   AutoDJButtonToggle,
-  AutoDJState,
-  AutoDJTransport,
   AutoDJDeviceStatus,
-  // The generated oneOf alias is exported under a distinct name; prefer the
-  // hand-written union below (it carries the discriminant for narrowing).
+  // The generated oneOf alias, exported under a distinct name. Prefer the
+  // hand-written `AutoDJWebSocketMessage` union below for `switch`/guard code;
+  // a compile-time tie in extensions.ts keeps the two from drifting apart.
   AutoDJWebSocketMessage as AutoDJWebSocketMessageSchema,
   // Virtual switch API
   AutoDJStatus,
   AutoDJActivationSource,
-  AutoDJActivationSourceType,
   AutoDJCurrentTrack,
   AutoDJDeviceSummary,
-  AutoDJRelayState,
   AutoDJDeactivateResponse,
+} from '../generated/models/index.js';
+
+// String-enum schemas are generated as a const object + type alias — re-export
+// them as VALUES so consumers can use e.g. `AutoDJCommandAction.pause` or iterate
+// `Object.values(...)`, not just the type.
+export {
+  AutoDJCommandAction,
+  AutoDJErrorLevel,
+  AutoDJErrorCode,
+  AutoDJState,
+  AutoDJTransport,
+  AutoDJActivationSourceType,
+  AutoDJRelayState,
 } from '../generated/models/index.js';
 
 // Hand-written union + type guards.
