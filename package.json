@@ -1,6 +1,6 @@
 {
   "name": "@wxyc/shared",
-  "version": "1.17.0",
+  "version": "1.17.1",
   "description": "Shared DTOs, validation, test utilities, and E2E tests for WXYC services",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -86,6 +86,11 @@
   "peerDependencies": {
     "better-auth": "^1.5.0",
     "typescript": "^5.0.0 || ^6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "better-auth": {
+      "optional": true
+    }
   },
   "keywords": [
     "wxyc",
