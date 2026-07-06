@@ -79,19 +79,24 @@ export const CONTRACTS = {
     'flowsheet.dj_name is non-NULL on entries inserted after migration 0053',
 
   /**
-   * The `liveFs:update` SSE event payload carries the full flowsheet row,
-   * not just `{id, metadata_status}`.
+   * The `liveFs:update` SSE event payload carries the client-facing flowsheet
+   * row (the `FlowsheetEntryResponse` fields), not just `{id, metadata_status}`.
    *
    * Provider: `Backend-Service/apps/backend/services/metadata-broadcast/metadata-broadcast.ts:filterMetadataUpdate`
    * Consumer: `dj-site/lib/features/flowsheet/live-updates-listener.ts`
    *
    * Status: ENFORCED once Backend-Service BS-2 lands. Before BS-2 the payload
    * was `{id, metadata_status}` and a freshly-mounted /live viewer wouldn't see
-   * the post-enrichment fields until the next full GET fired. The full-row
-   * payload is what makes cross-tab cache patching actually work.
+   * the post-enrichment fields until the next full GET fired. The rich payload
+   * is what makes cross-tab cache patching actually work. Since BS#1534 the row
+   * is projected through Backend's client-facing allow-list before it hits this
+   * anonymous stream — the payload stays sufficient to cache-patch, but internal
+   * columns (`search_doc`, `composer`, `legacy_*`, ...) are stripped. The key
+   * name is retained for continuity; "full row" now means the full client-facing
+   * row, i.e. every `FlowsheetEntryResponse` field.
    */
   LIVE_FS_UPDATE_INCLUDES_FULL_ROW:
-    'liveFs:update payload includes the full flowsheet row, not just {id, metadata_status}',
+    'liveFs:update payload includes the client-facing flowsheet row (FlowsheetEntryResponse fields), not just {id, metadata_status}',
 
   /**
    * `GET /events/stream?topics=live-fs-topic` accepts anonymous subscription.

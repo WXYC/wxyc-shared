@@ -268,6 +268,70 @@ describe('OpenAPI Specification', () => {
         expect(required).not.toContain('metadata_status');
       });
     });
+
+    describe('projection-parity fields on FlowsheetEntryResponse (BS#1513 / BS#1534)', () => {
+      // FlowsheetEntryResponse is the declared shape of the flowsheet mutation
+      // echoes (POST/DELETE/PATCH /flowsheet) and the anonymous liveFs:update
+      // SSE payload ($ref target of LiveFsUpdateEvent). Backend projects those
+      // through CLIENT_FACING_FLOWSHEET_COLUMNS, which carries entry_type,
+      // add_time, radio_hour, and dj_name — fields that rode the wire but were
+      // undeclared here, so the SSOT under-described its own payload. They are
+      // optional (absent/nullable on some rows), so none is added to `required`.
+      function getProperty(schemaName: string, prop: string): Record<string, unknown> | undefined {
+        const schema = spec.components.schemas[schemaName] as
+          | { properties?: Record<string, Record<string, unknown>>; allOf?: Array<{ properties?: Record<string, Record<string, unknown>> }> }
+          | undefined;
+        if (!schema) return undefined;
+        if (schema.properties?.[prop]) return schema.properties[prop];
+        for (const branch of schema.allOf ?? []) {
+          if (branch.properties?.[prop]) return branch.properties[prop];
+        }
+        return undefined;
+      }
+
+      function requiredKeys(schemaName: string): string[] {
+        const schema = spec.components.schemas[schemaName] as {
+          allOf?: Array<{ required?: string[] }>;
+          required?: string[];
+        };
+        return [...(schema.required ?? []), ...(schema.allOf ?? []).flatMap((b) => b.required ?? [])];
+      }
+
+      it('declares entry_type via the FlowsheetEntryType enum', () => {
+        const entryType = getProperty('FlowsheetEntryResponse', 'entry_type');
+        expect(entryType).toBeDefined();
+        expect(entryType?.$ref).toBe('#/components/schemas/FlowsheetEntryType');
+      });
+
+      it('declares add_time as a date-time string', () => {
+        const addTime = getProperty('FlowsheetEntryResponse', 'add_time');
+        expect(addTime).toBeDefined();
+        expect(addTime?.type).toBe('string');
+        expect(addTime?.format).toBe('date-time');
+      });
+
+      it('declares radio_hour as a nullable date-time string', () => {
+        const radioHour = getProperty('FlowsheetEntryResponse', 'radio_hour');
+        expect(radioHour).toBeDefined();
+        expect(radioHour?.type).toBe('string');
+        expect(radioHour?.format).toBe('date-time');
+        expect(radioHour?.nullable).toBe(true);
+      });
+
+      it('declares dj_name as a nullable string', () => {
+        const djName = getProperty('FlowsheetEntryResponse', 'dj_name');
+        expect(djName).toBeDefined();
+        expect(djName?.type).toBe('string');
+        expect(djName?.nullable).toBe(true);
+      });
+
+      it('keeps all four projection-parity fields optional', () => {
+        const required = requiredKeys('FlowsheetEntryResponse');
+        for (const field of ['entry_type', 'add_time', 'radio_hour', 'dj_name']) {
+          expect(required).not.toContain(field);
+        }
+      });
+    });
   });
 
   describe('Catalog Schemas', () => {

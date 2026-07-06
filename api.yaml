@@ -278,6 +278,31 @@ components:
                 `release_track.position`. Null for free-text entries and legacy rows.
             metadata_status:
               $ref: '#/components/schemas/MetadataStatus'
+            # Projection-parity fields (BS#1513 / BS#1534). These ride the
+            # flowsheet mutation echoes and the liveFs:update SSE payload via
+            # Backend's CLIENT_FACING_FLOWSHEET_COLUMNS allow-list, but were
+            # previously undeclared here. Optional: absent/nullable on some rows.
+            entry_type:
+              $ref: '#/components/schemas/FlowsheetEntryType'
+            add_time:
+              type: string
+              format: date-time
+              description: The instant this row was logged (ISO 8601).
+            radio_hour:
+              type: string
+              format: date-time
+              nullable: true
+              description: >-
+                Top-of-hour a breakpoint row marks (ISO 8601), sourced from
+                tubafrenzy's RADIO_HOUR. Null on non-breakpoint rows and rows
+                predating the producer rollout. Mirrors the V2 breakpoint entry.
+            dj_name:
+              type: string
+              nullable: true
+              description: >-
+                Resolved public display name of the DJ on the row's show. Nullable
+                per the PII-safe resolution chain (BS#1371): user.djName ->
+                shows.legacy_dj_name -> null; never the real-name PII column.
 
     FlowsheetSongEntry:
       description: Song entry in the flowsheet
@@ -4566,10 +4591,14 @@ components:
     LiveFsUpdateEvent:
       description: >
         SSE event emitted on the `live-fs-topic` when an enrichment-worker (BS#892)
-        finalizes the metadata for a flowsheet row. Payload carries the full
-        flowsheet row so a newly-mounted client (e.g. a /live viewer that just
-        opened the page) can surface the post-enrichment fields (`artwork_url`,
-        `release_year`, ...) without a follow-up GET. Provider:
+        finalizes the metadata for a flowsheet row. Payload carries the
+        client-facing flowsheet row (the `FlowsheetEntryResponse` fields) so a
+        newly-mounted client (e.g. a /live viewer that just opened the page) can
+        surface the post-enrichment fields (`artwork_url`, `release_year`, ...)
+        without a follow-up GET. The `live-fs-topic` is anonymous, so Backend
+        projects the raw CDC row through its client-facing allow-list (BS#1534)
+        — internal columns (`search_doc`, `composer`, `legacy_*`, ...) do not
+        ride this stream. Provider:
         Backend-Service/apps/backend/services/metadata-broadcast/metadata-broadcast.ts
         (`filterMetadataUpdate`). Consumer: dj-site `live-updates-listener.ts`.
         Contract: `CONTRACTS.LIVE_FS_UPDATE_INCLUDES_FULL_ROW`.
