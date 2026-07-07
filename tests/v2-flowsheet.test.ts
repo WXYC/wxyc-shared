@@ -346,4 +346,40 @@ describe('FlowsheetV2PaginatedResponse', () => {
     expect(response.entries).toHaveLength(0);
     expect(response.total).toBe(0);
   });
+
+  // on_air is a three-state signal: an OnAirInfo object means a named DJ is
+  // live, JSON `null` means confirmed automation ("Auto DJ"), and the field
+  // being absent means the server did not report status (unknown). The type
+  // must model all three so clients can distinguish "nobody on" from "unknown".
+  const paginationFields = { page: 0, limit: 30, total: 1, totalPages: 1 };
+
+  it('should carry an on_air DJ object when a named DJ is live', () => {
+    const response: FlowsheetV2PaginatedResponse = {
+      entries: [sampleTrack],
+      ...paginationFields,
+      on_air: { dj_name: 'DJ MONSTER' },
+    };
+
+    expect(response.on_air).toEqual({ dj_name: 'DJ MONSTER' });
+    expect(response.on_air?.dj_name).toBe('DJ MONSTER');
+  });
+
+  it('should allow on_air to be null for automation', () => {
+    const response: FlowsheetV2PaginatedResponse = {
+      entries: [sampleTrack],
+      ...paginationFields,
+      on_air: null,
+    };
+
+    expect(response.on_air).toBeNull();
+  });
+
+  it('should allow on_air to be absent for unknown on-air status', () => {
+    const response: FlowsheetV2PaginatedResponse = {
+      entries: [sampleTrack],
+      ...paginationFields,
+    };
+
+    expect(response.on_air).toBeUndefined();
+  });
 });
