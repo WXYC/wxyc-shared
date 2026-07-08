@@ -1,9 +1,10 @@
 # OpenAPI Generator config for Kotlin
-# Models-only output written to generated/kotlin (gitignored, in-repo).
+# Output written to generated/kotlin (gitignored, in-repo); includes models and API clients.
 # Reference/diff aid for the Android consumer (WXYC-Android), which currently
 # hand-maintains its types; see the Code Generation section of CLAUDE.md.
 
-# Only generate models, not API clients
+# Skip generated test stubs (models and API clients are still emitted; see followup
+# on whether this config should be models-only like swift.yaml's generateApis: false)
 generateApiTests: false
 generateModelTests: false
 
