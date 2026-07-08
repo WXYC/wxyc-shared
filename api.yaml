@@ -917,9 +917,9 @@ components:
       required:
         - dj_name
       description: >-
-        Minimal on-air DJ shape for the `on_air` field. Deliberately separate from
-        `OnAirDJ`, which requires a numeric `id` that legacy/tubafrenzy-mirrored
-        shows lack (their identity is a `legacy_dj_name` string with no user row).
+        Minimal, name-only on-air DJ shape for the `on_air` field. Deliberately
+        separate from `OnAirDJ`, which additionally carries an `id` (a nullable
+        `auth_user.id` string) that the `on_air` banner has no use for.
       properties:
         dj_name:
           type: string
@@ -932,7 +932,15 @@ components:
         - dj_name
       properties:
         id:
-          type: integer
+          type: string
+          nullable: true
+          description: >-
+            The DJ's better-auth `auth_user.id` (an opaque `varchar(255)`
+            string), or `null` for a legacy/tubafrenzy-mirrored show whose on-air
+            DJ has no Backend-Service account (their identity is `legacy_dj_name`,
+            surfaced on `/flowsheet/djs-on-air` with a null id). Historically
+            mistyped as `integer`; corrected to the nullable string it is at
+            runtime (BS#1547).
         dj_name:
           type: string
 

@@ -135,7 +135,7 @@ export const testFlowsheetSongEntry: FlowsheetSongEntry = {
 };
 
 export const testOnAirDJ: OnAirDJ = {
-  id: 1,
+  id: 'wk3n2f8s0qz1', // better-auth auth_user.id (varchar), not an integer
   dj_name: 'DJ Test',
 };
 

@@ -19,6 +19,7 @@ import {
   type FlowsheetV2BreakpointEntry,
   type FlowsheetV2MessageEntry,
   type FlowsheetV2PaginatedResponse,
+  type OnAirDJ,
   RotationBin,
 } from '../src/generated/models/index.js';
 import {
@@ -381,5 +382,22 @@ describe('FlowsheetV2PaginatedResponse', () => {
     };
 
     expect(response.on_air).toBeUndefined();
+  });
+});
+
+// OnAirDJ backs GET /flowsheet/djs-on-air. Its `id` is the better-auth
+// `auth_user.id` (a string) for account DJs, and `null` for legacy/tubafrenzy
+// shows whose on-air DJ has no user account (BS#1547). The annotations document
+// the accepted shapes; the enforced compile-time coupling lives in
+// src/test-utils/fixtures.ts (`testOnAirDJ`, which tsc type-checks under src/).
+describe('OnAirDJ.id shape (BS#1547)', () => {
+  it('accepts a string id for an account DJ', () => {
+    const dj: OnAirDJ = { id: 'wk3n2f8s0qz1', dj_name: 'DJ HOUNDSTOOTH' };
+    expect(dj.id).toBe('wk3n2f8s0qz1');
+  });
+
+  it('accepts a null id for a legacy/tubafrenzy DJ', () => {
+    const dj: OnAirDJ = { id: null, dj_name: 'DJ MONSTER' };
+    expect(dj.id).toBeNull();
   });
 });

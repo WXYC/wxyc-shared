@@ -108,6 +108,27 @@ describe('OpenAPI Specification', () => {
       expect(spec.components.schemas.OnAirStatusResponse).toBeDefined();
     });
 
+    // OnAirDJ.id is the better-auth `auth_user.id` (a varchar(255) string) at
+    // runtime, and legacy/tubafrenzy-mirrored shows have no user account at all
+    // (their DJ surfaces on /flowsheet/djs-on-air with a null id). The schema is
+    // typed accordingly: a nullable string, not the historically-wrong integer.
+    describe('OnAirDJ.id (BS#1547)', () => {
+      function onAirDjId(): Record<string, unknown> {
+        const schema = spec.components.schemas.OnAirDJ as {
+          properties: Record<string, Record<string, unknown>>;
+        };
+        return schema.properties.id;
+      }
+
+      it('is a string, not an integer', () => {
+        expect(onAirDjId().type).toBe('string');
+      });
+
+      it('is nullable (legacy DJs have no user account id)', () => {
+        expect(onAirDjId().nullable).toBe(true);
+      });
+    });
+
     describe('track_position field (catalog-track-search Track 3 / E6)', () => {
       function getProperty(schemaName: string, prop: string): Record<string, unknown> | undefined {
         const schema = spec.components.schemas[schemaName] as
