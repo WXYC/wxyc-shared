@@ -902,10 +902,24 @@ components:
             asserting automation. Not in `required` so absence stays distinct
             from an explicit `null`.
 
+
+            Codegen note: this three-way distinction (object / null / absent)
+            survives openapi-typescript (`on_air?: OnAirInfo | null`), but a
+            *synthesized* decoder in Swift (Codable `decodeIfPresent`), Kotlin
+            (kotlinx default value), or Python (pydantic `| None = None`) collapses
+            JSON `null` and an absent key into the same value. A consumer that
+            needs the third state must decode by key presence (e.g. Swift's
+            `container.contains` + `decodeNil`), as the iOS app does — do not rely
+            on a generated model to tell `null` from absent.
+
     OnAirInfo:
       type: object
       required:
         - dj_name
+      description: >-
+        Minimal on-air DJ shape for the `on_air` field. Deliberately separate from
+        `OnAirDJ`, which requires a numeric `id` that legacy/tubafrenzy-mirrored
+        shows lack (their identity is a `legacy_dj_name` string with no user row).
       properties:
         dj_name:
           type: string
