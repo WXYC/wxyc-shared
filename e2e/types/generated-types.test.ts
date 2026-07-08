@@ -211,7 +211,9 @@ describe('Generated Type Parsing (E2E)', () => {
       expect(Array.isArray(response.body)).toBe(true);
 
       for (const dj of response.body) {
-        expect(typeof dj.id).toBe('number');
+        // id is the better-auth auth_user.id string for account DJs, or null for
+        // legacy/tubafrenzy-mirrored shows with no account (BS#1547) — not a number.
+        expect(typeof dj.id === 'string' || dj.id === null).toBe(true);
         expect(typeof dj.dj_name).toBe('string');
       }
     });
