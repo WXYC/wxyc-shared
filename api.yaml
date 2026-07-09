@@ -1993,6 +1993,50 @@ components:
     # snake_case; approve/deny request bodies use camelCase `userCode`.
     # ===================
 
+    CompleteOnboardingRequest:
+      type: object
+      description: >
+        Invite mode supplies token + newPassword (+ optional profile fields).
+        Session mode supplies only realName/djName for a signed-in incomplete user.
+      properties:
+        token:
+          type: string
+          description: Setup token from the invite email (invite mode).
+        newPassword:
+          type: string
+          description: Required when token is supplied.
+        realName:
+          type: string
+        djName:
+          type: string
+
+    CompleteOnboardingResponse:
+      type: object
+      required:
+        - status
+        - userId
+        - email
+      properties:
+        status:
+          type: boolean
+          enum: [true]
+        userId:
+          type: string
+        email:
+          type: string
+        username:
+          type: string
+
+    CompleteOnboardingError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+
     DeviceAuthCodeRequest:
       type: object
       required:
@@ -6924,3 +6968,67 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceAuthActionError'
+
+  # ===================
+  # Onboarding completion — Backend-Service invite-token flow (BS#1558).
+  # Public endpoint; invite mode uses the setup token from the invite email,
+  # session mode uses the better-auth session cookie.
+  # ===================
+
+  /auth/wxyc/complete-onboarding:
+    post:
+      summary: Complete onboarding for admin-provisioned DJs
+      description: >
+        Public endpoint. Invite mode accepts the setup token from the invite
+        email plus newPassword and optional profile fields. Session mode
+        accepts profile fields only for a signed-in incomplete user.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteOnboardingRequest'
+      responses:
+        '200':
+          description: Onboarding completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteOnboardingResponse'
+        '400':
+          description: Invalid or expired token, already completed, or malformed request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteOnboardingError'
+        '401':
+          description: Session mode without a signed-in user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteOnboardingError'
+        '403':
+          description: Anonymous session cannot complete onboarding.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteOnboardingError'
+        '404':
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteOnboardingError'
+        '503':
+          description: Password set but profile update failed; client should steer to session completion.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteOnboardingError'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteOnboardingError'

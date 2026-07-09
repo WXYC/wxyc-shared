@@ -1465,4 +1465,43 @@ describe('OpenAPI Specification', () => {
       expect(ba.version).toBe('1.6.20');
     });
   });
+
+  describe('POST /auth/wxyc/complete-onboarding (BS#1558)', () => {
+    type Operation = {
+      responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+      security?: unknown;
+      requestBody?: { content?: Record<string, { schema?: { $ref?: string } }> };
+    };
+    const getSchema = (name: string) => spec.components.schemas[name] as Schema;
+    const props = (name: string) => Object.keys(getSchema(name).properties ?? {}).sort();
+
+    it('declares the public complete-onboarding path', () => {
+      expect((spec.paths['/auth/wxyc/complete-onboarding'] as Record<string, unknown>)?.post).toBeDefined();
+    });
+
+    it('CompleteOnboardingRequest carries invite + session fields', () => {
+      expect(props('CompleteOnboardingRequest')).toEqual(['djName', 'newPassword', 'realName', 'token'].sort());
+    });
+
+    it('CompleteOnboardingResponse requires status, userId, email; username optional', () => {
+      expect(props('CompleteOnboardingResponse')).toEqual(['email', 'status', 'userId', 'username'].sort());
+      expect(getSchema('CompleteOnboardingResponse').required?.sort()).toEqual(['email', 'status', 'userId'].sort());
+    });
+
+    it('is public and wires request/response/error envelopes', () => {
+      const op = (spec.paths['/auth/wxyc/complete-onboarding'] as { post: Operation }).post;
+      expect(op.security).toEqual([]);
+      expect(op.requestBody?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/CompleteOnboardingRequest'
+      );
+      expect(op.responses!['200'].content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/CompleteOnboardingResponse'
+      );
+      for (const code of ['400', '401', '403', '404', '503', '500']) {
+        expect(op.responses![code].content?.['application/json']?.schema?.$ref).toBe(
+          '#/components/schemas/CompleteOnboardingError'
+        );
+      }
+    });
+  });
 });
