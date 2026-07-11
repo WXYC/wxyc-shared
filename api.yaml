@@ -6368,6 +6368,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: >
+            Forbidden — the session is banned or the bearer token carries no
+            `sub` claim (auth middleware gate).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /metadata/album:
     get:
