@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.15.0
+  version: 1.16.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -721,6 +721,38 @@ components:
               items:
                 type: string
               description: Discogs style tags (finer-grained than genres).
+            upcoming_show:
+              allOf:
+                - $ref: '#/components/schemas/Concert'
+              nullable: true
+              description: >
+                An optional embedded upcoming Triangle-area concert whose
+                headliner is this track's resolved catalog artist, attached
+                server-side at feed-assembly time so the iOS "Touring Soon"
+                Box Office CTA renders inline with no second round-trip.
+
+
+                Match rule (mirrors `GET /concerts?curated=true`): the track's
+                resolved artist — `flowsheet.album_id → library.artist_id` — is
+                matched against `concerts.headlining_artist_id` on curated,
+                non-tombstoned, upcoming rows (`headlining_artist_id IS NOT
+                NULL`, `removed_at IS NULL`, `starts_on >= today`
+                America/New_York). When an artist has several upcoming dates
+                the **soonest** wins (`ORDER BY starts_on ASC LIMIT 1`), so at
+                most one concert rides each playcut.
+
+
+                Absent/null when the track has no resolved artist (free-form
+                entries with no `album_id`, or an `album_id` whose library row
+                has no matched artist) or when that artist has no curated
+                upcoming date. The field is additive and optional — older app
+                builds that don't decode it are unaffected. Reuses the
+                `Concert` schema verbatim so iOS decodes one type across the
+                Touring Soon tab and the playcut CTA; the
+                `BoxOfficeTicketPresenter` reads `id`, `title` /
+                `headlining_artist_raw`, `venue` (name + city), `starts_on`,
+                `doors_at`, `status`, `price_min` / `price_max`, `ticket_url`,
+                and `image_url` off it.
 
     FlowsheetV2ShowStartEntry:
       description: V2 show start event - when a show begins
