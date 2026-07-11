@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.14.0
+  version: 1.15.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1989,6 +1989,155 @@ components:
         expires_at:
           type: string
           format: date-time
+
+    # ===================
+    # Concerts / Touring Events Types (Backend-Service#1603)
+    # ===================
+
+    Venue:
+      type: object
+      description: |
+        A live-music venue whose calendar WXYC ingests (Backend-Service
+        `venues` table). Embedded whole in `Concert` — the venue set is tiny
+        (~21 rows), so clients get name/city in one call with no follow-up
+        join.
+      required:
+        - id
+        - slug
+        - name
+        - city
+        - state
+        - address
+      properties:
+        id:
+          type: integer
+        slug:
+          type: string
+          description: Stable scraper seed key (e.g. "cats-cradle").
+        name:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        address:
+          type: string
+          nullable: true
+
+    ConcertStatus:
+      type: string
+      description: >-
+        Lifecycle state of a concert as observed at the source. Listener
+        surfaces read this to grey out / strike through cancelled or
+        sold-out shows.
+      enum:
+        - on_sale
+        - sold_out
+        - cancelled
+        - rescheduled
+
+    Concert:
+      type: object
+      description: |
+        One upcoming (or recent) concert, as served by `GET /concerts`.
+
+        Date semantics: `starts_on` is the venue-local (America/New_York)
+        calendar date and is always present — clients should window and sort
+        on it. `starts_at` is the exact start instant and is null for
+        date-only events (many sources publish no start time; WXYC never
+        fabricates one).
+
+        Internal ingestion columns (`source`, `source_id`, `raw_data`,
+        `scraped_at`, `first_scraped_at`) are deliberately not exposed.
+      required:
+        - id
+        - venue
+        - starts_on
+        - starts_at
+        - doors_at
+        - headlining_artist_raw
+        - headlining_artist_id
+        - title
+        - supporting_artists_raw
+        - ticket_url
+        - image_url
+        - price_min
+        - price_max
+        - age_restriction
+        - status
+      properties:
+        id:
+          type: integer
+        venue:
+          $ref: '#/components/schemas/Venue'
+        starts_on:
+          type: string
+          format: date
+          description: Venue-local (America/New_York) calendar date.
+        starts_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Exact start instant; null for date-only events.
+        doors_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Doors-open instant, when the source publishes one.
+        headlining_artist_raw:
+          type: string
+          description: Headliner billing string exactly as the source displays it.
+        headlining_artist_id:
+          type: integer
+          nullable: true
+          description: >-
+            WXYC catalog artist id when the resolver matched the headliner;
+            null otherwise. A non-null id is what `curated=true` filters on.
+        title:
+          type: string
+          nullable: true
+          description: >-
+            Event name as the source displays it, when distinct from the
+            artist billing.
+        supporting_artists_raw:
+          type: array
+          items:
+            type: string
+          description: Supporting-act billing strings, in source order.
+        ticket_url:
+          type: string
+          nullable: true
+        image_url:
+          type: string
+          nullable: true
+        price_min:
+          type: number
+          nullable: true
+          description: Dollars. Free events carry price_min = 0.
+        price_max:
+          type: number
+          nullable: true
+          description: Dollars.
+        age_restriction:
+          type: string
+          nullable: true
+          description: Source-displayed age restriction (e.g. "18+", "All Ages").
+        status:
+          $ref: '#/components/schemas/ConcertStatus'
+
+    ConcertsResponse:
+      type: object
+      description: Paginated list of concerts, ordered by `starts_on` ascending.
+      required:
+        - concerts
+        - pagination
+      properties:
+        concerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Concert'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
 
     # ===================
     # Device Authorization (RFC 8628) — issue #195
@@ -6145,6 +6294,80 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SongRequest'
+
+  # ===================
+  # Concerts Endpoints (Backend-Service#1603)
+  # ===================
+
+  /concerts:
+    get:
+      summary: List upcoming concerts (Touring Soon feed)
+      description: |
+        Returns upcoming non-removed concerts, windowed on the venue-local
+        calendar date `starts_on` (never on the nullable `starts_at` — range
+        predicates on the instant would silently drop date-only events),
+        ordered by `starts_on` ascending, paginated.
+
+        `curated=true` narrows to concerts whose headliner resolved to a
+        WXYC catalog artist. Requires anonymous session auth, matching the
+        other iOS read surfaces.
+      parameters:
+        - name: curated
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: >-
+            When true, return only concerts whose headliner resolved to a
+            WXYC catalog artist (`headlining_artist_id` non-null).
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+          description: >-
+            Window start (inclusive) on `starts_on`. Defaults to today
+            (venue-local calendar date).
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Window end (inclusive) on `starts_on`. Defaults to unbounded.
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Page number (1-indexed, per PaginationParams).
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          description: Page size (per PaginationParams).
+      responses:
+        '200':
+          description: Paginated list of upcoming concerts ordered by starts_on.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConcertsResponse'
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /metadata/album:
     get:
