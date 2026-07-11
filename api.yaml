@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.16.0
+  version: 1.17.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2093,6 +2093,7 @@ components:
         - supporting_artists_raw
         - ticket_url
         - image_url
+        - event_url
         - price_min
         - price_max
         - age_restriction
@@ -2142,6 +2143,13 @@ components:
         image_url:
           type: string
           nullable: true
+        event_url:
+          type: string
+          nullable: true
+          description: >-
+            The venue's own event-detail page, distinct from `ticket_url`
+            (often a third-party seller like Etix/Ticketmaster). Null when no
+            venue page is known; clients fall back to `ticket_url`.
         price_min:
           type: number
           nullable: true
