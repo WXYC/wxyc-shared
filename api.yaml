@@ -3973,7 +3973,9 @@ components:
             escalation_unavailable, or an `ambiguous` verdict from
             conflicting identity-store rows within one deduplicated group
             (the store contradicting itself is doubt without a
-            measurement) — null means "not measured," never zero.
+            measurement; such verdicts also carry an empty
+            `cache_corroboration` — the cache tier was never consulted)
+            — null means "not measured," never zero.
 
     ArtistResolveBulkRequest:
       type: object
@@ -3983,29 +3985,36 @@ components:
         names:
           type: array
           description: >
-            Bare artist names to resolve, verbatim (leading/trailing
-            whitespace is trimmed for all internal work; responses echo
-            the raw string). Inputs are deduplicated internally on their
-            normalized identity-match form PLUS any trailing
-            parenthesized/bracketed qualifier, detected on the
-            NFKC-folded lowercase name so width/case variants ("（２）")
-            key with their ASCII twins: duplicate positions receive the
-            shared verdict, but a qualified name ("Popsicle (2)",
-            "Popsicle [2]") is its own work unit — a Discogs-style
-            disambiguator denotes a different artist than the bare name,
-            so it never inherits (or supplies) the bare form's verdict,
-            and it resolves only when the API candidate's own title
-            carries the same qualifier. A verified mint is keyed on the
-            first occurrence's trimmed verbatim, EXCEPT when the identity
-            read found an existing row for the name that lacks
-            `discogs_artist_id` — the mint then fills that row's stored
-            key in place rather than inserting a near-duplicate key;
-            qualified names never mint. Names that are blank, contain
-            U+0000 or unencodable code points, normalize to an empty
-            identity-match form, or consist only of a trailing qualifier
-            ("(2)") are rejected with 422 — never given an in-band
-            verdict (`not_found` means the API tier ran and measured
-            zero).
+            Bare artist names to resolve, verbatim (Unicode format
+            characters are dropped and whitespace trimmed for all
+            internal work; responses echo the raw string). Inputs are
+            deduplicated internally on their fixed-point identity-match
+            form PLUS any trailing parenthesized/bracketed qualifier.
+            Qualifier detection mirrors the normalizer: every balanced
+            trailing ()/[] group peels off the NFKC-folded lowercase name
+            (nested tails included), bare-number groups canonicalize
+            across bracket/width/spacing spellings ("[2]", "( 2 )",
+            "（２）" all key as "(2)"; zero-padded "(02)" stays distinct),
+            and multi-group tails concatenate ("(2)(uk)"). Duplicate
+            positions receive the shared verdict, but a qualified name is
+            its own work unit — a Discogs-style disambiguator denotes a
+            different artist than the bare name, so it never inherits (or
+            supplies) the bare form's verdict, and it resolves only when
+            the API candidate's own title carries the same qualifier. A
+            name whose only content IS a bracketed group ("(Smog)") is a
+            bare name, not a qualifier — the normalizer makes the same
+            refusal. A verified mint is keyed on the first occurrence's
+            sanitized verbatim, EXCEPT when the identity read found an
+            existing row for the name that lacks `discogs_artist_id` —
+            the mint then fills that row's stored key in place rather
+            than inserting a near-duplicate key (deterministically, the
+            lexicographically-least stored key when several id-less rows
+            match); qualified names never mint. Names that are blank,
+            contain U+0000 or unencodable code points, normalize to an
+            empty identity-match form, or are a bare parenthesized number
+            ("(2)" — a disambiguator whose artist name was lost upstream)
+            are rejected with 422 — never given an in-band verdict
+            (`not_found` means the API tier ran and measured zero).
           minItems: 1
           maxItems: 25
           # Codegen note: the item bounds make datamodel-codegen wrap
@@ -6954,9 +6963,10 @@ paths:
           description: >
             Validation error — per-input field validation failed, or a
             name is semantically unresolvable (blank, contains U+0000 or
-            unencodable code points, or normalizes to an empty
-            identity-match form). Garbage names are caller errors, never
-            in-band verdicts.
+            unencodable code points, normalizes to an empty
+            identity-match form, or is a bare parenthesized number like
+            "(2)"). Garbage names are caller errors, never in-band
+            verdicts.
           content:
             application/json:
               schema:
