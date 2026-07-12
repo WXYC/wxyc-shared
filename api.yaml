@@ -3929,9 +3929,14 @@ components:
           description: Verbatim echo of the input name at this index.
         discogs_artist_id:
           type: integer
-          description: The resolved Discogs artist id. Present iff resolved.
+          nullable: true
+          description: >
+            The resolved Discogs artist id. Non-null iff resolved
+            (serialized as an explicit null on unresolved verdicts — the
+            response never omits fields).
         canonical_name:
           type: string
+          nullable: true
           description: >
             The raw Discogs artist title, disambiguation suffix included
             (e.g. `Popsicle (2)`) — the true Discogs string, kept for
@@ -3941,8 +3946,10 @@ components:
         method:
           allOf:
             - $ref: '#/components/schemas/ArtistResolveMethod'
+          nullable: true
           description: >
-            What decided the resolution. Present iff resolved.
+            What decided the resolution. Non-null iff resolved
+            (serialized as an explicit null on unresolved verdicts).
         cache_corroboration:
           type: array
           uniqueItems: true
@@ -3969,8 +3976,12 @@ components:
         unresolved_reason:
           allOf:
             - $ref: '#/components/schemas/ArtistResolveUnresolvedReason'
+          nullable: true
           description: >
-            Why the name did not resolve. Present iff unresolved.
+            Why the name did not resolve. Non-null iff unresolved
+            (serialized as an explicit null on resolved verdicts). The
+            response carries every field explicitly — consumers must
+            treat null, not absence, as the "other kind" marker.
         # Not in `required`: datamodel-codegen's default flags (what LML
         # generates models with) type a required-plus-nullable field as
         # non-nullable, rejecting the null this field must carry. The
@@ -6979,7 +6990,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '401':
-          description: Missing or invalid `LML_API_KEY` bearer token.
+          description: Missing `Authorization` header.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: >
+            Present but invalid or malformed `LML_API_KEY` bearer token
+            (wrong token, non-Bearer scheme). Distinct from 401 so
+            credential-rotation failures are distinguishable from a
+            consumer that never attached auth.
           content:
             application/json:
               schema:
