@@ -3856,8 +3856,11 @@ components:
         store's resolved-at-most-once promise). `api_search` — a
         single-page live Discogs API artist search returned exactly one
         artist whose normalized identity-match form equals the input's,
-        with no equality-leg cache conflict. Cache legs never decide;
-        their evidence appears in `cache_corroboration`.
+        whose own title qualifier matches the input's (a "(N)"-titled
+        singleton answering a bare input — or vice versa — is family
+        evidence, not a resolution), and with no equality-leg cache
+        conflict. Cache legs never decide; their evidence appears in
+        `cache_corroboration`.
       enum:
         - identity_store
         - api_search
@@ -3888,15 +3891,23 @@ components:
         exists — cache legs, including `cache_exact`, may still
         show yield in `cache_corroboration`). `ambiguous` — two or
         more exact-form Discogs artists (including "(N)" disambiguation
-        families, which normalize to the same form), or an equality-leg
+        families, which normalize to the same form); an equality-leg
         cache candidate (exact / member / alias / name-variation — never a
         fuzzy `cache_trigram` neighbor) pointing at a different artist id
-        than the API's single candidate; ambiguous names never mint
-        (terminal). `escalation_unavailable` — the Discogs API tier
-        was shed (saturation breaker open, outage cool-down, 429, or 5xx
-        after retries). This is the RETRYABLE verdict: it means "couldn't
-        ask," not "asked and missed" — consumers must not apply a no-match
-        TTL to it.
+        than the API's single candidate; a lone API candidate whose own
+        title qualifier mismatches the input's; or conflicting
+        identity-store rows across one deduplicated group's spellings
+        (`candidate_count` null — nothing was measured); ambiguous names
+        never mint (terminal). `escalation_unavailable` — the Discogs API
+        tier couldn't answer: saturation breaker open, outage cool-down,
+        429 or 5xx after retries, network errors, other non-2xx
+        responses, a distrusted/unparseable page, or a deployment with no
+        Discogs credentials configured. It means "couldn't ask," not
+        "asked and missed" — consumers must not apply a no-match TTL.
+        Retry with bounded attempts and backoff: most causes are
+        transient, but a persistent `escalation_unavailable` across
+        attempts indicates a configuration or upstream condition that
+        retrying will not move.
       enum:
         - not_found
         - ambiguous
@@ -3942,10 +3953,17 @@ components:
             resolved verdicts, listed equality legs necessarily agreed
             with the deciding tier (a disagreeing equality leg forces
             `ambiguous`), while `cache_trigram` entries are fuzzy
-            near-misses that never veto. Empty when no leg produced
-            candidates, and always empty on `identity_store`
-            short-circuits — the store decides before cache evidence is
-            consulted, and implementations report an empty array there.
+            near-misses that never veto (`cache_trigram` is measured
+            against the group's probe string — its lexicographically
+            least raw spelling — where the equality legs bind the
+            identity-match form). Empty when no leg produced candidates,
+            and ALWAYS empty — the cache was never consulted, which is
+            not a measured zero-yield — on (a) `identity_store`
+            short-circuits (the store decides before cache evidence is
+            consulted), (b) qualifier-bearing inputs (stripped-form
+            evidence cannot distinguish family members, so the cache
+            tier is skipped), and (c) store-conflict `ambiguous`
+            verdicts.
           items:
             $ref: '#/components/schemas/ArtistResolveCacheLeg'
         unresolved_reason:
@@ -3995,7 +4013,9 @@ components:
             (nested tails included), bare-number groups canonicalize
             across bracket/width/spacing spellings ("[2]", "( 2 )",
             "（２）" all key as "(2)"; zero-padded "(02)" stays distinct),
-            and multi-group tails concatenate ("(2)(uk)"). Duplicate
+            and multi-group tails concatenate ("(2)(uk)"); non-numeric
+            groups drop internal whitespace, so "(Chk Chk Chk)" and
+            "(ChkChkChk)" share a key. Duplicate
             positions receive the shared verdict, but a qualified name is
             its own work unit — a Discogs-style disambiguator denotes a
             different artist than the bare name, so it never inherits (or
@@ -4003,18 +4023,24 @@ components:
             the API candidate's own title carries the same qualifier. A
             name whose only content IS a bracketed group ("(Smog)") is a
             bare name, not a qualifier — the normalizer makes the same
-            refusal. A verified mint is keyed on the first occurrence's
-            sanitized verbatim, EXCEPT when the identity read found an
+            refusal. A verified mint is keyed on the group's
+            lexicographically-least sanitized spelling (deterministic in
+            batch content — the same representative the API probe uses;
+            the store's read legs are case-insensitive, so any spelling
+            stays findable), EXCEPT when the identity read found an
             existing row for the name that lacks `discogs_artist_id` —
             the mint then fills that row's stored key in place rather
             than inserting a near-duplicate key (deterministically, the
             lexicographically-least stored key when several id-less rows
             match); qualified names never mint. Names that are blank,
             contain U+0000 or unencodable code points, normalize to an
-            empty identity-match form, or are a bare parenthesized number
-            ("(2)" — a disambiguator whose artist name was lost upstream)
-            are rejected with 422 — never given an in-band verdict
-            (`not_found` means the API tier ran and measured zero).
+            empty identity-match form, or whose entire identity content
+            is a bare parenthesized ASCII number ("(2)", "[2]", "(2)(3)"
+            — a Discogs disambiguator whose artist name was lost
+            upstream; a fully-bracketed NON-numeric name like "(Smog)"
+            stays resolvable) are rejected with 422 — never given an
+            in-band verdict (`not_found` means the API tier ran and
+            measured zero).
           minItems: 1
           maxItems: 25
           # Codegen note: the item bounds make datamodel-codegen wrap
@@ -6964,9 +6990,9 @@ paths:
             Validation error — per-input field validation failed, or a
             name is semantically unresolvable (blank, contains U+0000 or
             unencodable code points, normalizes to an empty
-            identity-match form, or is a bare parenthesized number like
-            "(2)"). Garbage names are caller errors, never in-band
-            verdicts.
+            identity-match form, or its entire identity content is a
+            bare parenthesized ASCII number like "(2)" or "(2)(3)").
+            Garbage names are caller errors, never in-band verdicts.
           content:
             application/json:
               schema:
