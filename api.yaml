@@ -3855,7 +3855,7 @@ components:
         `entity.identity` row short-circuited resolution (unverified: the
         store's resolved-at-most-once promise). `api_search` — a
         single-page live Discogs API artist search returned exactly one
-        artist whose normalized identity-match form equals the input's,
+        artist whose fixed-point identity-match form equals the input's,
         whose own title qualifier matches the input's (a "(N)"-titled
         singleton answering a bare input — or vice versa — is family
         evidence, not a resolution), and with no equality-leg cache
@@ -3955,7 +3955,7 @@ components:
             `ambiguous`), while `cache_trigram` entries are fuzzy
             near-misses that never veto (`cache_trigram` is measured
             against the group's probe string — its lexicographically
-            least raw spelling — where the equality legs bind the
+            least sanitized spelling — where the equality legs bind the
             identity-match form). Empty when no leg produced candidates,
             and ALWAYS empty — the cache was never consulted, which is
             not a measured zero-yield — on (a) `identity_store`
@@ -6922,15 +6922,18 @@ paths:
         candidate generation (corroboration only — the cache is a
         pair-wise-filtered sample of Discogs, so a cache hit is not
         evidence of global uniqueness), (3) a single-page live Discogs API
-        artist search (per_page=100) filtered to results whose normalized
-        identity-match form equals the input's. Exactly one exact-form API
-        candidate — whose own title qualifier matches the input's — with
-        no equality-leg cache conflict resolves and mints
-        (`discogs_artist_id` only; keyed on the trimmed verbatim input
-        name, or on the stored key of a Discogs-id-less row the identity
-        read found — see `ArtistResolveBulkRequest.names`; the upsert
-        never overwrites a populated column with NULL, and LML#766 tracks
-        hardening the no-overwrite guarantee against concurrent writers).
+        artist search (per_page=100) filtered to results whose FIXED-POINT
+        identity-match form equals the input's (single-pass normalization
+        is a materially different algorithm: it would exclude
+        multi-qualified family members like "Sault (2) (UK)" from the
+        "sault" family). Exactly one exact-form API candidate — whose own
+        title qualifier matches the input's — with no equality-leg cache
+        conflict resolves and mints (`discogs_artist_id` only; keyed on
+        the group's lexicographically-least sanitized spelling, or on the
+        stored key of a Discogs-id-less row the identity read found — see
+        `ArtistResolveBulkRequest.names`; the upsert never overwrites a
+        populated column with NULL, and LML#766 tracks hardening the
+        no-overwrite guarantee against concurrent writers).
         Qualifier-bearing inputs ("Popsicle (2)") resolve but never mint,
         and skip the cache-evidence tier (stripped-form evidence cannot
         distinguish family members). Two or more exact-form candidates,
@@ -6938,13 +6941,15 @@ paths:
         rows within one group, or an
         equality-leg cache conflict, return `ambiguous` and mint nothing —
         no guessing. The PG tiers run as a batched pre-pass for the whole
-        request before the serial API leg, so when the API tier is shed
-        (LML#755 saturation breaker open, outage cool-down, 429, 5xx after
-        retries) only names still awaiting API verification return the
-        retryable `escalation_unavailable` instead of `not_found` —
-        identity-store resolutions and cache evidence are unaffected by a
-        mid-batch trip, and shed positions need not be a contiguous suffix
-        of `results`. The 25-name cap keeps a fully-escalating batch
+        request before the serial API leg. When a probe couldn't be
+        answered (see `ArtistResolveUnresolvedReason`), that name returns
+        the retryable `escalation_unavailable` instead of `not_found`;
+        only an LML#755 breaker trip additionally short-circuits the
+        REST of the batch's pending probes (a per-name 429/network
+        failure does not — the batch continues). Identity-store
+        resolutions and cache evidence are unaffected by a mid-batch
+        trip, and shed positions need not be a contiguous suffix of
+        `results`. The 25-name cap keeps a fully-escalating batch
         within the shared Discogs API budget (~25 live calls, ~30s at
         50/min); callers page. `dry_run: true` runs every tier identically
         but skips the write-back. Mirrors `bulk-resolve-libraries` /
