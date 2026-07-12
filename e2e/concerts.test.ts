@@ -37,6 +37,11 @@ import { ConcertStatus, type Concert, type ConcertsResponse } from '../src/gener
 const SOURCE_ID_PREFIX = 'wxyc-shared-e2e:';
 const VENUE_SLUG = 'wxyc-shared-e2e-room';
 const ARTIST_NAME = 'WXYC Shared E2E Headliner';
+// The tombstoned row carries a DISTINCT billing so its absence is unambiguous:
+// if it shared ARTIST_NAME, a silently-failed seed would look identical to
+// correct exclusion. A backend that stops filtering removed rows makes this
+// name appear.
+const REMOVED_NAME = 'WXYC Shared E2E Tombstoned Act';
 
 const config = getE2EConfig();
 const hasDb = Boolean(config.dbUrl);
@@ -74,6 +79,10 @@ const INTERNAL_COLUMNS = [
   'first_scraped_at',
   'removed_at',
   'venue_id',
+  // `last_modified` is a real column on both concerts and venues (the writers
+  // stamp it) that api.yaml deliberately omits — guard it explicitly so a
+  // `select *`-style regression that projected it would be caught here.
+  'last_modified',
 ] as const;
 
 function expectString(value: unknown, label: string): void {
@@ -275,12 +284,14 @@ describe('Concerts E2E', () => {
       title: 'Date-Only Billing with special guests',
     });
 
-    // Tombstoned — must never appear.
+    // Tombstoned — must never appear. Distinct billing (REMOVED_NAME) so a
+    // leak is unambiguous; headlining_artist_id is set so it would show up
+    // under curated=true too if the removed_at filter regressed.
     await seedConcert({
       key: 'removed',
       venue_id: venueId,
       starts_on: IN_25,
-      headlining_artist_raw: ARTIST_NAME,
+      headlining_artist_raw: REMOVED_NAME,
       headlining_artist_id: artistId,
       removed_at: new Date().toISOString(),
     });
@@ -300,14 +311,26 @@ describe('Concerts E2E', () => {
       const res = await unauth.get('/concerts');
       expect(res.status).toBe(401);
     });
+
+    it('rejects a present-but-invalid bearer token with 401', async () => {
+      // Proves the gate verifies the JWT (against JWKS), not merely that an
+      // Authorization header is present — a middleware that degraded to
+      // header-presence-only auth would pass the missing-header test above.
+      const bad = createE2EClient();
+      bad.setAuthToken('not-a-valid-jwt');
+      const res = await bad.get('/concerts');
+      expect(res.status).toBe(401);
+    });
   });
 
   describe('wire contract (generated types)', () => {
     it('returns a ConcertsResponse whose every concert matches the generated Concert shape', async () => {
       const res = await client.get<ConcertsResponse>('/concerts?limit=100');
       expect(res.status).toBe(200);
-      // Validates envelope + every row against the codegen SSOT, and that no
-      // internal ingestion column leaks. Runs even with an empty feed.
+      // Best-effort black-box check of the envelope + whatever rows the live
+      // feed returns (this is the only assertion that runs without a DB). The
+      // per-row generated-type contract is exercised deterministically over the
+      // seeded rows below; against an empty feed this validates the envelope only.
       expectMatchesConcertsResponseShape(res.body);
     });
   });
@@ -322,6 +345,15 @@ describe('Concerts E2E', () => {
         const rows = seeded(res.body);
         const billings = rows.map((c) => c.headlining_artist_raw);
 
+        // Deterministic generated-type contract: every seeded row conforms to
+        // the codegen shape (no leaked internal column, status in enum, nullable
+        // keys present). This is the row-level coverage the always-on wire test
+        // can't guarantee — it runs against known-present rows, not a maybe-empty
+        // live feed.
+        for (const c of rows) {
+          expectMatchesConcertShape(c as unknown as Record<string, unknown>);
+        }
+
         // The date-only (NULL starts_at) row survives the window — regression guard.
         const dateOnly = rows.find((c) => c.headlining_artist_raw === 'Date-Only Billing');
         expect(dateOnly).toBeDefined();
@@ -329,8 +361,10 @@ describe('Concerts E2E', () => {
         expect(dateOnly!.starts_on).toBe(IN_20);
         expect(dateOnly!.event_url).toBeNull();
 
-        // Past and removed rows are absent.
+        // Past and removed rows are absent (REMOVED_NAME is distinct, so its
+        // absence proves the removed_at filter, not a missing seed).
         expect(billings).not.toContain('Long Gone Act');
+        expect(billings).not.toContain(REMOVED_NAME);
         expect(rows.filter((c) => c.headlining_artist_raw === ARTIST_NAME)).toHaveLength(1);
 
         // Ordered by starts_on ascending.
@@ -371,6 +405,9 @@ describe('Concerts E2E', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0].headlining_artist_raw).toBe(ARTIST_NAME);
       expect(typeof rows[0].headlining_artist_id).toBe('number');
+      // The removed row also has a non-null headlining_artist_id — its absence
+      // here proves curated still ANDs in removed_at IS NULL.
+      expect(rows.map((c) => c.headlining_artist_raw)).not.toContain(REMOVED_NAME);
     });
   });
 });
