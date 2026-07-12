@@ -3978,9 +3978,20 @@ components:
           type: array
           description: >
             Bare artist names to resolve, verbatim. Inputs are deduplicated
-            internally on their normalized identity-match form: duplicate
-            positions receive the shared verdict, and only the first
-            occurrence's verbatim string mints.
+            internally on their normalized identity-match form PLUS any raw
+            trailing "(N)" disambiguator: duplicate positions receive the
+            shared verdict, but a Discogs-style suffixed name ("Popsicle
+            (2)") is its own work unit — it denotes a different artist than
+            the bare name and never inherits (or supplies) the bare form's
+            verdict. A verified mint is keyed on the first occurrence's
+            verbatim string, EXCEPT when the identity read found an
+            existing row for the name that lacks `discogs_artist_id` — the
+            mint then fills that row's stored key in place rather than
+            inserting a near-duplicate key; suffixed names never mint.
+            Names that are blank, contain U+0000 or unencodable code
+            points, or normalize to an empty identity-match form are
+            rejected with 422 — never given an in-band verdict (`not_found`
+            means the API tier ran and measured zero).
           minItems: 1
           maxItems: 25
           # Codegen note: the item bounds make datamodel-codegen wrap
@@ -6865,8 +6876,13 @@ paths:
         artist search (per_page=100) filtered to results whose normalized
         identity-match form equals the input's. Exactly one exact-form API
         candidate with no equality-leg cache conflict resolves and mints
-        (keyed on the verbatim input name, `discogs_artist_id` only,
-        never-clobber). Two or more exact-form candidates, or an
+        (`discogs_artist_id` only; keyed on the verbatim input name, or on
+        the stored key of a Discogs-id-less row the identity read found —
+        see `ArtistResolveBulkRequest.names`; the upsert never overwrites
+        a populated column with NULL, and LML#766 tracks hardening the
+        no-overwrite guarantee against concurrent writers). Raw
+        "(N)"-suffixed inputs resolve but never mint. Two or more
+        exact-form candidates, or an
         equality-leg cache conflict, return `ambiguous` and mint nothing —
         no guessing. The PG tiers run as a batched pre-pass for the whole
         request before the serial API leg, so when the API tier is shed
@@ -6917,7 +6933,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '422':
-          description: Validation error (per-input field validation failed).
+          description: >
+            Validation error — per-input field validation failed, or a
+            name is semantically unresolvable (blank, contains U+0000 or
+            unencodable code points, or normalizes to an empty
+            identity-match form). Garbage names are caller errors, never
+            in-band verdicts.
           content:
             application/json:
               schema:
