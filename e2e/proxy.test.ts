@@ -7,38 +7,13 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { createE2EClient, type E2EClient, waitForService, getE2EConfig } from './setup.js';
+import { createE2EClient, type E2EClient, waitForService, getE2EConfig, getAnonymousToken } from './setup.js';
 import type {
   AlbumMetadataResponse,
   ArtistMetadataResponse,
   EntityResolveResponse,
   SpotifyTrackResponse,
 } from '../src/dtos/index.js';
-
-/**
- * Sign in anonymously via better-auth and return a session token.
- * This is the auth mechanism used by mobile app clients.
- */
-async function getAnonymousToken(authUrl: string): Promise<string> {
-  const response = await fetch(`${authUrl}/sign-in/anonymous`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Anonymous sign-in failed: ${response.status} ${text}`);
-  }
-
-  // Token may be in set-auth-token header or response body
-  const headerToken = response.headers.get('set-auth-token');
-  if (headerToken) return headerToken;
-
-  const body = await response.json();
-  if (body.token) return body.token;
-
-  throw new Error('No session token received from anonymous sign-in');
-}
 
 describe('Proxy E2E', () => {
   let client: E2EClient;
