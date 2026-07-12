@@ -48,6 +48,13 @@ npm run test:e2e -- e2e/flowsheet.test.ts
 - Rotation queries
 - Verifies 401 for unauthenticated requests
 
+### Concerts E2E (`concerts.test.ts`)
+- The cross-repo wire-contract gate for `GET /concerts` (touring events)
+- Anonymous-session auth exchanged for a JWT (the mobile-app mechanism); verifies 401 unauthenticated
+- Decodes the live payload through the **generated** `Concert` / `ConcertsResponse` types and asserts every field matches the codegen shape (nullable keys present, no internal ingestion columns leaked, `status` within `ConcertStatus`) — the contract iOS/Android/dj-site consume
+- Self-seeds a deterministic row set (timed+curated, date-only, past, removed) directly into the stack DB, then asserts windowing, ordering, the `event_url` fallback field, and `curated=true`
+- The seeded assertions require `E2E_DB_URL` (a Postgres connection string for the stack DB); they self-skip when it is unset. The auth gate and the envelope/shape contract run regardless.
+
 ### Contract Tests (`contract/openapi-compliance.test.ts`)
 - Validates API responses match OpenAPI schema definitions
 
@@ -64,6 +71,8 @@ E2E_AUTH_URL=http://localhost:8081/auth   # Better-auth service
 E2E_TUBAFRENZY_URL=http://localhost:8080  # Tubafrenzy (mirror target)
 E2E_TEST_DJ_EMAIL=test@wxyc.org          # Test DJ account email
 E2E_TEST_DJ_PASSWORD=testpassword        # Test DJ account password
+E2E_DB_URL=postgres://user:pw@host:5432/db  # Stack DB, for suites that seed rows (concerts)
+E2E_SCHEMA_NAME=wxyc_schema              # Postgres schema the backend reads (default wxyc_schema)
 ```
 
 Tests that require authentication use `it.skipIf(!hasCredentials)` and will
@@ -88,3 +97,4 @@ be skipped when `E2E_TEST_DJ_EMAIL` / `E2E_TEST_DJ_PASSWORD` are not set.
 | `GET /djs/bin` | Yes | `bin:read` |
 | `POST /djs/bin` | Yes | `bin:write` |
 | `GET /schedule` | No | Public |
+| `GET /concerts` | Yes | Anonymous session → JWT |

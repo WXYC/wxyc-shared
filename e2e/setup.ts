@@ -11,6 +11,16 @@ export interface E2EConfig {
   tubafrenzyUrl: string;
   testDjEmail?: string;
   testDjPassword?: string;
+  /**
+   * Full Postgres connection string for the stack's database, used by tests
+   * that must seed rows for endpoints with no create-via-API path (e.g.
+   * `/concerts`, whose rows are produced by scraper/ETL jobs). Unset in
+   * environments without direct DB reach — those tests self-skip their
+   * seed-dependent assertions.
+   */
+  dbUrl?: string;
+  /** Postgres schema the backend reads (per-worker in CI; `wxyc_schema` by default). */
+  schemaName: string;
 }
 
 /**
@@ -23,6 +33,8 @@ export function getE2EConfig(): E2EConfig {
     tubafrenzyUrl: process.env.E2E_TUBAFRENZY_URL || 'http://localhost:8080',
     testDjEmail: process.env.E2E_TEST_DJ_EMAIL,
     testDjPassword: process.env.E2E_TEST_DJ_PASSWORD,
+    dbUrl: process.env.E2E_DB_URL,
+    schemaName: process.env.E2E_SCHEMA_NAME || process.env.WXYC_SCHEMA_NAME || 'wxyc_schema',
   };
 }
 
@@ -292,6 +304,55 @@ function extractSetCookieHeaders(headers: Headers): string[] {
 export function createE2EAuthHelper(config?: Partial<E2EConfig>): E2EAuthHelper {
   const merged = { ...getE2EConfig(), ...config };
   return new E2EAuthHelper(merged.authUrl);
+}
+
+/**
+ * Sign in anonymously via better-auth and return a session token.
+ *
+ * This is the auth mechanism the iOS and Android apps use for endpoints
+ * gated on an anonymous session rather than a DJ login (`/proxy/*`). The
+ * token arrives either in the `set-auth-token` response header or the JSON
+ * body, depending on the better-auth plugin config.
+ */
+export async function getAnonymousToken(authUrl: string): Promise<string> {
+  const response = await fetch(`${authUrl}/sign-in/anonymous`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Anonymous sign-in failed: ${response.status} ${text}`);
+  }
+
+  const headerToken = response.headers.get('set-auth-token');
+  if (headerToken) return headerToken;
+
+  const body = (await response.json().catch(() => ({}))) as { token?: string };
+  if (body.token) return body.token;
+
+  throw new Error('No session token received from anonymous sign-in');
+}
+
+/**
+ * Anonymous session -> JWT. Endpoints gated by `requirePermissions` (e.g.
+ * `/concerts`) verify a JWT against JWKS rather than accepting the
+ * better-auth session token directly (which the `/proxy` session middleware
+ * does). Exchange the anonymous session token at `/token` for the JWT the
+ * backend will honour.
+ */
+export async function getAnonymousJwt(authUrl: string): Promise<string> {
+  const sessionToken = await getAnonymousToken(authUrl);
+  const response = await fetch(`${authUrl}/token`, {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Token exchange failed: ${response.status} ${text}`);
+  }
+  const body = (await response.json()) as { token?: string };
+  if (!body.token) throw new Error('No JWT returned from /token');
+  return body.token;
 }
 
 /**
