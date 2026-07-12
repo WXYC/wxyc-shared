@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.17.0
+  version: 1.18.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3842,6 +3842,178 @@ components:
           $ref: '#/components/schemas/CacheStats'
 
     # ====================================
+    # Bulk bare-name artist resolution (LML#759)
+    # ====================================
+    # Schemas for `POST /api/v1/artists/resolve/bulk` (consumer:
+    # WXYC/Backend-Service#1614 concerts pipeline). The verify-before-mint
+    # resolution model is documented once, on the path description.
+
+    ArtistResolveMethod:
+      type: string
+      description: >
+        What decided a resolved verdict. `identity_store` — a pre-existing
+        `entity.identity` row short-circuited resolution (unverified: the
+        store's resolved-at-most-once promise). `api_search` — a
+        single-page live Discogs API artist search returned exactly one
+        artist whose normalized identity-match form equals the input's,
+        with no equality-leg cache conflict. Cache legs never decide;
+        their evidence appears in `cache_corroboration`.
+      enum:
+        - identity_store
+        - api_search
+
+    ArtistResolveCacheLeg:
+      type: string
+      description: >
+        A discogs-cache candidate-generation leg that produced at least
+        one candidate for the input name. Mirrors the entity-resolution
+        reconciler cascade's legs (exact / member / alias / name-variation
+        / trigram — the cascade subset of `IdentityMethod`), but as
+        candidate sets used for corroboration and conflict detection —
+        never as verdicts. The four equality legs can veto a mint into
+        `ambiguous`; fuzzy `cache_trigram` neighbors never veto.
+      enum:
+        - cache_exact
+        - cache_member
+        - cache_alias
+        - cache_name_variation
+        - cache_trigram
+
+    ArtistResolveUnresolvedReason:
+      type: string
+      description: >
+        Why a name did not resolve. `not_found` — the API tier ran and
+        observed zero exact-form candidates on its single search page
+        (terminal in v1; a search observation, not proof no such artist
+        exists — cache legs, including `cache_exact`, may still
+        show yield in `cache_corroboration`). `ambiguous` — two or
+        more exact-form Discogs artists (including "(N)" disambiguation
+        families, which normalize to the same form), or an equality-leg
+        cache candidate (exact / member / alias / name-variation — never a
+        fuzzy `cache_trigram` neighbor) pointing at a different artist id
+        than the API's single candidate; ambiguous names never mint
+        (terminal). `escalation_unavailable` — the Discogs API tier
+        was shed (saturation breaker open, outage cool-down, 429, or 5xx
+        after retries). This is the RETRYABLE verdict: it means "couldn't
+        ask," not "asked and missed" — consumers must not apply a no-match
+        TTL to it.
+      enum:
+        - not_found
+        - ambiguous
+        - escalation_unavailable
+
+    ArtistResolveResult:
+      type: object
+      description: >
+        Verdict for one input name, index-aligned with
+        `ArtistResolveBulkRequest.names`. Exactly one of
+        `discogs_artist_id` (resolved, with `method`) or
+        `unresolved_reason` is present.
+      required:
+        - name
+        - cache_corroboration
+      properties:
+        name:
+          type: string
+          description: Verbatim echo of the input name at this index.
+        discogs_artist_id:
+          type: integer
+          description: The resolved Discogs artist id. Present iff resolved.
+        canonical_name:
+          type: string
+          description: >
+            The raw Discogs artist title, disambiguation suffix included
+            (e.g. `Popsicle (2)`) — the true Discogs string, kept for
+            provenance; callers render their own input name. Present iff
+            resolved via `api_search`: `entity.identity` rows store no
+            Discogs title, so `identity_store` resolutions omit it.
+        method:
+          allOf:
+            - $ref: '#/components/schemas/ArtistResolveMethod'
+          description: >
+            What decided the resolution. Present iff resolved.
+        cache_corroboration:
+          type: array
+          uniqueItems: true
+          description: >
+            Cache legs that produced at least one candidate for this
+            name's identity-match form, on BOTH verdict kinds — the
+            per-leg yield telemetry sizing a possible v2 alias arm. On
+            resolved verdicts, listed equality legs necessarily agreed
+            with the deciding tier (a disagreeing equality leg forces
+            `ambiguous`), while `cache_trigram` entries are fuzzy
+            near-misses that never veto. Empty when no leg produced
+            candidates, and always empty on `identity_store`
+            short-circuits — the store decides before cache evidence is
+            consulted, and implementations report an empty array there.
+          items:
+            $ref: '#/components/schemas/ArtistResolveCacheLeg'
+        unresolved_reason:
+          allOf:
+            - $ref: '#/components/schemas/ArtistResolveUnresolvedReason'
+          description: >
+            Why the name did not resolve. Present iff unresolved.
+        # Not in `required`: datamodel-codegen's default flags (what LML
+        # generates models with) type a required-plus-nullable field as
+        # non-nullable, rejecting the null this field must carry. The
+        # description pins the always-serialized wire promise instead.
+        candidate_count:
+          type: integer
+          nullable: true
+          description: >
+            Exact-form candidates the API tier observed: 1 on resolved via
+            `api_search`, 0 on not_found; on ambiguous, >= 2 for an
+            overloaded family, or exactly 1 when the ambiguity is an
+            equality-leg cache conflict.
+            Always serialized — never omitted; null when the API tier did
+            not run (identity_store short-circuit, escalation_unavailable)
+            — null means "not measured," never zero.
+
+    ArtistResolveBulkRequest:
+      type: object
+      required:
+        - names
+      properties:
+        names:
+          type: array
+          description: >
+            Bare artist names to resolve, verbatim. Inputs are deduplicated
+            internally on their normalized identity-match form: duplicate
+            positions receive the shared verdict, and only the first
+            occurrence's verbatim string mints.
+          minItems: 1
+          maxItems: 25
+          # Codegen note: the item bounds make datamodel-codegen wrap
+          # items in a `Name` RootModel (`names: list[Name]`, not
+          # `list[str]`) — LML must unwrap `.root` at the route boundary;
+          # a naive str() renders "root='...'" and would mint garbage
+          # entity.identity keys.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 255
+        dry_run:
+          type: boolean
+          default: false
+          description: >
+            Run every tier identically — including live Discogs API
+            verification — but skip the `entity.identity` write-back. No
+            partial-write mode.
+
+    ArtistResolveBulkResponse:
+      type: object
+      description: >
+        Response to `POST /api/v1/artists/resolve/bulk`. `results` is
+        index-aligned with the request's `names`.
+      required:
+        - results
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistResolveResult'
+
+    # ====================================
     # Cache refresh for identities (LML#525)
     # ====================================
     # `POST /api/v1/cache/refresh-for-identities` is the source-agnostic
@@ -6673,6 +6845,90 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '422':
           description: Validation error (per-input field validation failed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /api/v1/artists/resolve/bulk:
+    post:
+      summary: Bulk-resolve bare artist names to Discogs artist identities.
+      description: >
+        Resolves bare artist names — typically touring artists absent from
+        the WXYC library (consumer: WXYC/Backend-Service#1614 concerts
+        pipeline) — to Discogs artist identities, minting `entity.identity`
+        rows for verified matches. Verify-before-mint (LML#759): per name,
+        (1) `entity.identity` read (true short-circuit), (2) discogs-cache
+        candidate generation (corroboration only — the cache is a
+        pair-wise-filtered sample of Discogs, so a cache hit is not
+        evidence of global uniqueness), (3) a single-page live Discogs API
+        artist search (per_page=100) filtered to results whose normalized
+        identity-match form equals the input's. Exactly one exact-form API
+        candidate with no equality-leg cache conflict resolves and mints
+        (keyed on the verbatim input name, `discogs_artist_id` only,
+        never-clobber). Two or more exact-form candidates, or an
+        equality-leg cache conflict, return `ambiguous` and mint nothing —
+        no guessing. The PG tiers run as a batched pre-pass for the whole
+        request before the serial API leg, so when the API tier is shed
+        (LML#755 saturation breaker open, outage cool-down, 429, 5xx after
+        retries) only names still awaiting API verification return the
+        retryable `escalation_unavailable` instead of `not_found` —
+        identity-store resolutions and cache evidence are unaffected by a
+        mid-batch trip, and shed positions need not be a contiguous suffix
+        of `results`. The 25-name cap keeps a fully-escalating batch
+        within the shared Discogs API budget (~25 live calls, ~30s at
+        50/min); callers page. `dry_run: true` runs every tier identically
+        but skips the write-back. Mirrors `bulk-resolve-libraries` /
+        `search-aliases/bulk` for auth + 413 semantics.
+      operationId: artistResolveBulk
+      security:
+        - LMLBearerAuth: []
+      tags:
+        - lookup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArtistResolveBulkRequest'
+      responses:
+        '200':
+          description: One verdict per input name, in input order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistResolveBulkResponse'
+        '400':
+          description: Malformed request body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing or invalid `LML_API_KEY` bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '413':
+          description: Batch exceeded the 25-name cap.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Validation error (per-input field validation failed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: >
+            The backing discogs-cache PostgreSQL is unavailable —
+            `DATABASE_URL_DISCOGS` unset, connection failure, or a
+            required probe (entity store or cache tables) failed. Never
+            caused by Discogs API saturation, which sheds per-name as
+            `escalation_unavailable`.
           content:
             application/json:
               schema:

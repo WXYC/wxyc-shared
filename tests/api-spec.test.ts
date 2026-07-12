@@ -1230,6 +1230,164 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  describe('Bulk Artist Resolution Schemas (LML#759)', () => {
+    it('should define ArtistResolveMethod with the two deciding tiers only', () => {
+      // Cache legs never decide a resolution — they corroborate. The enum
+      // therefore has exactly two values; cache evidence lives in
+      // cache_corroboration instead.
+      const schema = spec.components.schemas.ArtistResolveMethod as { enum?: string[] };
+      expect(schema).toBeDefined();
+      expect(schema.enum).toEqual(['identity_store', 'api_search']);
+    });
+
+    it('should define ArtistResolveCacheLeg mirroring the reconciler cascade legs', () => {
+      const schema = spec.components.schemas.ArtistResolveCacheLeg as { enum?: string[] };
+      expect(schema).toBeDefined();
+      expect(schema.enum).toEqual([
+        'cache_exact',
+        'cache_member',
+        'cache_alias',
+        'cache_name_variation',
+        'cache_trigram',
+      ]);
+    });
+
+    it('should define ArtistResolveUnresolvedReason with a retryable escalation_unavailable', () => {
+      // escalation_unavailable means "couldn't ask," not "asked and missed" —
+      // consumers must not apply a no-match TTL to it (BS#1614's writer).
+      const schema = spec.components.schemas.ArtistResolveUnresolvedReason as { enum?: string[] };
+      expect(schema).toBeDefined();
+      expect(schema.enum).toEqual(['not_found', 'ambiguous', 'escalation_unavailable']);
+    });
+
+    it('should define ArtistResolveResult requiring name + cache_corroboration', () => {
+      const schema = spec.components.schemas.ArtistResolveResult as {
+        type: string;
+        required: string[];
+        properties: Record<
+          string,
+          {
+            type?: string;
+            allOf?: Array<{ $ref?: string }>;
+            nullable?: boolean;
+            uniqueItems?: boolean;
+            items?: { $ref?: string };
+          }
+        >;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.type).toBe('object');
+      expect(schema.required).toEqual(['name', 'cache_corroboration']);
+      expect(schema.properties.name.type).toBe('string');
+      // Verdict fields are optional: exactly one of discogs_artist_id
+      // (resolved) or unresolved_reason (unresolved) appears per result.
+      // method and unresolved_reason are allOf-wrapped so their presence
+      // rules survive codegen ($ref sibling keys are dropped in 3.0).
+      expect(schema.properties.discogs_artist_id.type).toBe('integer');
+      expect(schema.properties.canonical_name.type).toBe('string');
+      expect(schema.properties.method.allOf?.[0]?.$ref).toBe(
+        '#/components/schemas/ArtistResolveMethod',
+      );
+      expect(schema.properties.unresolved_reason.allOf?.[0]?.$ref).toBe(
+        '#/components/schemas/ArtistResolveUnresolvedReason',
+      );
+      // cache_corroboration is present on BOTH verdict kinds (per-leg yield
+      // telemetry), so it is required — empty array when no leg matched. A
+      // leg either yielded or didn't, so entries are unique (and adding
+      // uniqueItems later would flip swift5 codegen Array→Set, a breaking
+      // change that is free to avoid now).
+      expect(schema.properties.cache_corroboration.type).toBe('array');
+      expect(schema.properties.cache_corroboration.uniqueItems).toBe(true);
+      expect(schema.properties.cache_corroboration.items?.$ref).toBe(
+        '#/components/schemas/ArtistResolveCacheLeg',
+      );
+      // candidate_count: always serialized per the description's wire pin;
+      // null means "API tier did not run," never zero. Optional-in-schema
+      // only because datamodel-codegen's default flags (LML's generator)
+      // would type required+nullable as non-nullable int, rejecting null.
+      expect(schema.properties.candidate_count.type).toBe('integer');
+      expect(schema.properties.candidate_count.nullable).toBe(true);
+    });
+
+    it('should define ArtistResolveBulkRequest with the 25-name cap and optional dry_run', () => {
+      const schema = spec.components.schemas.ArtistResolveBulkRequest as {
+        required: string[];
+        properties: Record<
+          string,
+          {
+            type?: string;
+            minItems?: number;
+            maxItems?: number;
+            items?: { type?: string; minLength?: number; maxLength?: number };
+            default?: boolean;
+          }
+        >;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(['names']);
+      expect(schema.properties.names.type).toBe('array');
+      expect(schema.properties.names.minItems).toBe(1);
+      // 25, not 1000: a fully-escalating batch costs ~25 live Discogs API
+      // calls (~30s at the shared 50/min budget); callers page.
+      expect(schema.properties.names.maxItems).toBe(25);
+      // Per-item bounds: names feed live Discogs querystrings and verbatim
+      // entity.identity mint keys, so empty and unbounded strings are
+      // rejected at the contract.
+      expect(schema.properties.names.items?.type).toBe('string');
+      expect(schema.properties.names.items?.minLength).toBe(1);
+      expect(schema.properties.names.items?.maxLength).toBe(255);
+      expect(schema.properties.dry_run.type).toBe('boolean');
+      expect(schema.properties.dry_run.default).toBe(false);
+    });
+
+    it('should define ArtistResolveBulkResponse requiring index-aligned results', () => {
+      const schema = spec.components.schemas.ArtistResolveBulkResponse as {
+        required: string[];
+        properties: Record<string, { type?: string; items?: { $ref?: string } }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(['results']);
+      expect(schema.properties.results.type).toBe('array');
+      expect(schema.properties.results.items?.$ref).toBe(
+        '#/components/schemas/ArtistResolveResult',
+      );
+    });
+
+    it('should define POST /api/v1/artists/resolve/bulk under LMLBearerAuth', () => {
+      const path = spec.paths['/api/v1/artists/resolve/bulk'] as {
+        post?: {
+          operationId?: string;
+          security?: Array<Record<string, unknown[]>>;
+          requestBody?: {
+            required?: boolean;
+            content?: Record<string, { schema?: { $ref?: string } }>;
+          };
+          responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+        };
+      };
+      expect(path).toBeDefined();
+      expect(path.post).toBeDefined();
+      expect(path.post!.operationId).toBe('artistResolveBulk');
+      expect(path.post!.security).toEqual([{ LMLBearerAuth: [] }]);
+      expect(path.post!.requestBody?.required).toBe(true);
+      expect(path.post!.requestBody?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ArtistResolveBulkRequest',
+      );
+      expect(path.post!.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ArtistResolveBulkResponse',
+      );
+      // Full error contract: 400/401/413/422 mirror the sibling bulk
+      // endpoints; 503 means the backing discogs-cache PG is unavailable
+      // (Discogs saturation sheds per-name as escalation_unavailable,
+      // never a batch 503). Every error status carries ApiErrorResponse.
+      for (const status of ['400', '401', '413', '422', '503']) {
+        expect(path.post!.responses?.[status]?.content?.['application/json']?.schema?.$ref).toBe(
+          '#/components/schemas/ApiErrorResponse',
+        );
+      }
+    });
+  });
+
   describe('Security', () => {
     it('should define BearerAuth security scheme', () => {
       expect(spec.components.securitySchemes?.BearerAuth).toBeDefined();
