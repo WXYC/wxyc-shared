@@ -49,7 +49,7 @@ npm run test:e2e -- e2e/flowsheet.test.ts
 - Verifies 401 for unauthenticated requests
 
 ### Concerts E2E (`concerts.test.ts`)
-- The cross-repo wire-contract gate for `GET /concerts` (touring events)
+- The cross-repo wire-contract gate for `GET /concerts` (On Tour)
 - Anonymous-session auth exchanged for a JWT (the mobile-app mechanism); verifies 401 unauthenticated
 - Decodes the live payload through the **generated** `Concert` / `ConcertsResponse` types and asserts every field matches the codegen shape (nullable keys present, no internal ingestion columns leaked, `status` within `ConcertStatus`) — the contract iOS/Android/dj-site consume
 - Self-seeds a deterministic row set (timed+curated, date-only, past, removed) directly into the stack DB, then asserts windowing, ordering, the `event_url` fallback field, and `curated=true`

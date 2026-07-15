@@ -728,7 +728,7 @@ components:
               description: >
                 An optional embedded upcoming Triangle-area concert whose
                 headliner is this track's resolved catalog artist, attached
-                server-side at feed-assembly time so the iOS "Touring Soon"
+                server-side at feed-assembly time so the iOS "On Tour"
                 Box Office CTA renders inline with no second round-trip.
 
 
@@ -748,7 +748,7 @@ components:
                 upcoming date. The field is additive and optional — older app
                 builds that don't decode it are unaffected. Reuses the
                 `Concert` schema verbatim so iOS decodes one type across the
-                Touring Soon tab and the playcut CTA; the
+                On Tour tab and the playcut CTA; the
                 `BoxOfficeTicketPresenter` reads `id`, `title` /
                 `headlining_artist_raw`, `venue` (name + city), `starts_on`,
                 `doors_at`, `status`, `price_min` / `price_max`, `ticket_url`,
@@ -2023,7 +2023,7 @@ components:
           format: date-time
 
     # ===================
-    # Concerts / Touring Events Types (Backend-Service#1603)
+    # Concerts / On Tour Types (Backend-Service#1603)
     # ===================
 
     Venue:
@@ -6634,7 +6634,7 @@ paths:
 
   /concerts:
     get:
-      summary: List upcoming concerts (Touring Soon feed)
+      summary: List upcoming concerts (On Tour feed)
       description: |
         Returns upcoming non-removed concerts, windowed on the venue-local
         calendar date `starts_on` (never on the nullable `starts_at` — range
