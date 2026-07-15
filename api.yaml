@@ -2164,6 +2164,20 @@ components:
           description: Source-displayed age restriction (e.g. "18+", "All Ages").
         status:
           $ref: '#/components/schemas/ConcertStatus'
+        genres:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: >-
+            Discogs genre tags for the resolved headlining artist,
+            aggregated across their releases (LML discogs-cache,
+            majority-take). Null when the headliner is unresolved or
+            enrichment has not run. Optional (not in `required`) so the
+            field can land ahead of the Backend-Service emitter and older
+            clients decode forward-compatibly — same discipline as
+            `FlowsheetV2TrackEntry.upcoming_show`. Same taxonomy as
+            `FlowsheetV2TrackEntry.genres`.
 
     ConcertsResponse:
       type: object
