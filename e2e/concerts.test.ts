@@ -1,8 +1,8 @@
 /**
- * Concerts (Touring Events) E2E Tests
+ * Concerts (On Tour) E2E Tests
  *
  * The cross-repo wire-contract gate for `GET /concerts` (Backend-Service
- * #1603 / touring-events Phase 2). Where `tests/concerts.test.ts` pins the
+ * #1603 / on-tour Phase 2). Where `tests/concerts.test.ts` pins the
  * `api.yaml` shape statically, this suite hits a *running* backend and
  * asserts the live payload decodes through the **generated** `Concert` /
  * `ConcertsResponse` / `Venue` / `ConcertStatus` types — the same codegen

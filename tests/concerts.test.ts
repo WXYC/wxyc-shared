@@ -1,5 +1,5 @@
 /**
- * Tests for Concerts / Touring Events Types (Backend-Service#1603)
+ * Tests for Concerts / On Tour Types (Backend-Service#1603)
  *
  * Validates:
  * - api.yaml defines the Venue / Concert / ConcertStatus / ConcertsResponse
