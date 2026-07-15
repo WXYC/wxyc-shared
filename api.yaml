@@ -2068,6 +2068,29 @@ components:
         - cancelled
         - rescheduled
 
+    SimilarArtist:
+      type: object
+      description: >-
+        One affinity neighbor of a resolved concert headliner, drawn from
+        the semantic-index graph. `artist_id` shares the WXYC catalog
+        artist-id keyspace with `Concert.headlining_artist_id` (and the
+        planned `FlowsheetV2TrackEntry.artist_id`), so on-device For You
+        matching can intersect it against liked-artist ids in one id space.
+      required:
+        - artist_id
+        - weight
+      properties:
+        artist_id:
+          type: integer
+          description: >-
+            WXYC catalog artist id, same keyspace as
+            `Concert.headlining_artist_id`.
+        weight:
+          type: number
+          description: >-
+            semantic-index affinity score, used for client-side ranking and
+            the similar-tier noise cap. Higher is closer.
+
     Concert:
       type: object
       description: |
@@ -2178,6 +2201,19 @@ components:
             clients decode forward-compatibly — same discipline as
             `FlowsheetV2TrackEntry.upcoming_show`. Same taxonomy as
             `FlowsheetV2TrackEntry.genres`.
+        similar_artists:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/SimilarArtist'
+          description: >-
+            Top-K affinity neighbors of the resolved headliner, computed
+            nightly from the semantic-index graph and ordered by `weight`
+            descending. Null when the headliner is unresolved or enrichment
+            has not run. Powers on-device For You matching (set intersection
+            against liked-artist ids). Optional (not in `required`) so it can
+            land ahead of the Backend-Service emitter and older clients
+            decode forward-compatibly — same discipline as `Concert.genres`.
 
     ConcertsResponse:
       type: object
