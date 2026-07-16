@@ -20,6 +20,13 @@ updates:
         exclude-patterns:
           - "better-auth"
           - "@better-auth/*"
+    ignore:
+      # Hold TypeScript at v6: openapi-typescript (peers ^5.x) has no TS7-compatible
+      # release yet (checked 2026-07-16). A grouped major bump to typescript@7 fails
+      # `npm ci` with ERESOLVE before tests run. Lift this and upgrade TypeScript as a
+      # tracked change once the toolchain supports TS7.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
