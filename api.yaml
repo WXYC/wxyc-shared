@@ -2229,6 +2229,10 @@ components:
         pagination:
           $ref: '#/components/schemas/PaginationInfo'
 
+    # ===================
+    # Album Reviews (issue #229)
+    # ===================
+
     AlbumReview:
       type: object
       description: |
@@ -2308,7 +2312,7 @@ components:
           nullable: true
           description: >-
             Raw multi-select of "Rotation", "New DJ Assignment", "Album in
-            the Library".
+            the Library"; comma-joined when multiple were selected.
         rotated:
           type: boolean
           nullable: true
