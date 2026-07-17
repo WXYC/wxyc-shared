@@ -4261,6 +4261,127 @@ components:
             $ref: '#/components/schemas/ArtistResolveResult'
 
     # ====================================
+    # Bulk artist-level genre/style aggregation (LML#781)
+    # ====================================
+    # Schemas for `POST /api/v1/artists/genres/bulk` (consumer:
+    # WXYC/Backend-Service#1624 nightly concerts genre-enrichment). Aggregates
+    # per-artist Discogs *genres* (coarse, top 1-2) and *styles* (fine, full
+    # ranked list) from the discogs-cache `release_genre` / `release_style`
+    # rows, with a self-healing Discogs API fallback on a cache miss. WXYC's
+    # internal library genre taxonomy is deliberately never surfaced here.
+
+    ArtistGenresSource:
+      type: string
+      description: >
+        Where an artist's genre/style answer came from, so the caller can
+        distinguish a genuine "Discogs has no genre data for this artist"
+        (safe to negative-cache) from a transient "couldn't ask Discogs"
+        (retry). `cache` — served from the discogs-cache `release_genre`
+        rows. `discogs_api` — cache miss; the Discogs API fallback produced
+        genres. `not_found` — cache miss; the API answered but the artist has
+        no release/genre data (safe to negative-cache). `unavailable` — cache
+        miss and the API could not be consulted (no Discogs token, saturation
+        breaker open, or a transient fetch failure); retry, do NOT
+        negative-cache.
+      enum:
+        - cache
+        - discogs_api
+        - not_found
+        - unavailable
+
+    ArtistGenresInput:
+      type: object
+      description: One artist to aggregate genres/styles for.
+      required:
+        - artist_name
+      properties:
+        artist_name:
+          type: string
+          minLength: 1
+          description: Artist display name.
+        discogs_artist_id:
+          type: integer
+          nullable: true
+          description: >
+            Discogs artist ID. Optional but strongly preferred: when present
+            the cache aggregation keys on it (stable Discogs artist entity,
+            homonym-safe); when absent it falls back to a case-insensitive
+            exact `artist_name` match. Backend-Service resolves it via
+            `POST /api/v1/artists/resolve/bulk` (LML#759) before calling this
+            endpoint, so it is usually present.
+
+    BulkArtistGenresRequest:
+      type: object
+      description: >
+        Request body for `POST /api/v1/artists/genres/bulk`. The per-request
+        artist cap is enforced at the router (413, before validation); an
+        empty batch returns 422.
+      required:
+        - artists
+      properties:
+        artists:
+          type: array
+          minItems: 1
+          maxItems: 25
+          items:
+            $ref: '#/components/schemas/ArtistGenresInput'
+
+    ArtistGenresResultItem:
+      type: object
+      description: >
+        Per-artist aggregation, index-aligned with the request `artists` list.
+      required:
+        - artist_name
+        - genres
+        - styles
+        - source
+      properties:
+        artist_name:
+          type: string
+          description: Echoed from the request for index alignment.
+        discogs_artist_id:
+          type: integer
+          nullable: true
+          description: >
+            Echoed from the request (explicit null when not supplied). Kept
+            out of `required` deliberately: datamodel-codegen (LML's
+            generator) types a required-plus-nullable field as non-nullable
+            and would reject the null this field must carry — the same
+            treatment as `ArtistResolveResult.discogs_artist_id`.
+        genres:
+          type: array
+          description: >
+            Top coarse Discogs genres (majority-take, frequency-ranked,
+            truncated to the top-K). Empty when unknown. The ~15-value Discogs
+            genre taxonomy the iOS On Tour filter chips render.
+          items:
+            type: string
+        styles:
+          type: array
+          description: >
+            Frequency-ranked Discogs styles (full list, untruncated). Empty
+            when unknown. The finer Discogs style taxonomy; the iOS filter
+            ignores it — it is a detail-view treatment.
+          items:
+            type: string
+        source:
+          $ref: '#/components/schemas/ArtistGenresSource'
+
+    BulkArtistGenresResponse:
+      type: object
+      description: >
+        Response to `POST /api/v1/artists/genres/bulk`. `results` is
+        index-aligned with the request's `artists`. No top-level counters —
+        the caller derives them via `Counter(r.source for r in results)`.
+      required:
+        - results
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistGenresResultItem'
+
+    # ====================================
     # Cache refresh for identities (LML#525)
     # ====================================
     # `POST /api/v1/cache/refresh-for-identities` is the source-agnostic
@@ -7277,6 +7398,88 @@ paths:
             required probe (entity store or cache tables) failed. Never
             caused by Discogs API saturation, which sheds per-name as
             `escalation_unavailable`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /api/v1/artists/genres/bulk:
+    post:
+      summary: Bulk artist-level Discogs genre/style aggregation.
+      description: >
+        Aggregates per-artist Discogs *genres* (coarse, top 1-2) and *styles*
+        (fine, full ranked list) from the discogs-cache `release_genre` /
+        `release_style` rows, keyed on `discogs_artist_id` when supplied else
+        a case-insensitive `artist_name` match. On a cache miss the Discogs
+        API fallback discovers the artist's releases and fetches each through
+        the cached write-back (persisting genre/style rows so the next call
+        hits the cache), degrading a per-artist miss to `source: unavailable`
+        — never a batch-level 503 — when the API can't be consulted. Server-
+        to-server; consumed by Backend-Service's nightly concerts enrichment
+        (WXYC/Backend-Service#1624) for the iOS On Tour genre filter
+        (WXYC/wxyc-ios-64#474). WXYC's internal library genre taxonomy is
+        deliberately never surfaced here. Mirrors `resolve/bulk` /
+        `bulk-resolve-libraries` for auth + 413 semantics; the 25-artist cap
+        keeps a fully-escalating batch within the shared Discogs API budget,
+        and callers page.
+      operationId: artistGenresBulk
+      security:
+        - LMLBearerAuth: []
+      tags:
+        - lookup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkArtistGenresRequest'
+      responses:
+        '200':
+          description: Per-artist genre/style aggregations, in input order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkArtistGenresResponse'
+        '400':
+          description: Malformed request body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Missing `Authorization` header.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: >
+            Present but invalid or malformed `LML_API_KEY` bearer token
+            (wrong token, non-Bearer scheme). Distinct from 401 so
+            credential-rotation failures are distinguishable from a
+            consumer that never attached auth.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '413':
+          description: Batch exceeded the 25-artist cap.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: Validation error — request body failed validation (e.g. an empty batch).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: >
+            The backing discogs-cache PostgreSQL is unavailable —
+            `DATABASE_URL_DISCOGS` unset, connection failure, or a required
+            probe failed. Never caused by Discogs API saturation, which sheds
+            per-artist as `source: unavailable`.
           content:
             application/json:
               schema:
