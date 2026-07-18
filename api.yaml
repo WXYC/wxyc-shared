@@ -6957,6 +6957,51 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
 
+  /concerts/{id}:
+    get:
+      summary: Get a single concert by id (public share/deep-link read)
+      description: |
+        Returns one concert by its serial `id`, regardless of date. Unlike
+        `GET /concerts`, this endpoint is deliberately public and
+        windowless — it exists to serve the `wxyc.org/shows/<id>` share
+        page (a Cloudflare Worker with no sane path to minting anonymous
+        sessions) and the iOS universal-link fallback, both of which may
+        reference a show outside the list window, including one that
+        already happened.
+
+        Contract semantics (WXYC/wxyc-shared#236):
+        - **No authentication.** `security: []` — anonymous-session auth
+          is not required, matching the public flowsheet read.
+        - **No date window.** Past concerts and concerts delisted at the
+          source (tombstoned upstream via the internal `removed_at`
+          column — never deleted, and not exposed on `Concert`) are
+          served with whatever `status` they last carried; clients
+          derive "this show has passed" from `starts_on`/`starts_at`.
+        - **Publicly cacheable.** Responses carry no per-session data;
+          servers should emit `Cache-Control: public` with an edge TTL of
+          roughly five minutes.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The concert's serial `Concert.id`.
+      responses:
+        '200':
+          description: The concert.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Concert'
+        '404':
+          description: No concert with this id exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
   /album-reviews:
     get:
       summary: List archived DJ album-review submissions
