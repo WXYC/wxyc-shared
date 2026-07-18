@@ -6973,8 +6973,9 @@ paths:
         - **No authentication.** `security: []` — anonymous-session auth
           is not required, matching the public flowsheet read.
         - **No date window.** Past concerts and concerts delisted at the
-          source (tombstoned upstream via `removed_at`, never deleted)
-          are served with whatever `status` they last carried; clients
+          source (tombstoned upstream via the internal `removed_at`
+          column — never deleted, and not exposed on `Concert`) are
+          served with whatever `status` they last carried; clients
           derive "this show has passed" from `starts_on`/`starts_at`.
         - **Publicly cacheable.** Responses carry no per-session data;
           servers should emit `Cache-Control: public` with an edge TTL of
