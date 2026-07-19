@@ -2235,11 +2235,14 @@ components:
           type: integer
           nullable: true
           description: >-
-            All-time WXYC flowsheet play count of the resolved (in-library) headliner,
-            from the semantic-index graph; null when the headliner is not in the library
-            or has no play count. Identical for every listener — the station-affinity
-            signal behind the On Tour "For You" shelf. Not personalized; carries no
-            listener data.
+            All-time WXYC flowsheet play count of the resolved (in-library)
+            headliner, computed nightly from the semantic-index graph; null
+            when the headliner is not in the library or has no play count.
+            Identical for every listener — the station-affinity signal behind
+            the On Tour "For You" shelf. Not personalized; carries no listener
+            data. Optional (not in `required`) so it can land ahead of the
+            Backend-Service emitter and older clients decode
+            forward-compatibly — same discipline as `Concert.similar_artists`.
 
     ConcertsResponse:
       type: object
