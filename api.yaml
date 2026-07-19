@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.18.0
+  version: 1.19.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -645,6 +645,23 @@ components:
             rotation_id:
               type: integer
               nullable: true
+            artist_id:
+              type: integer
+              nullable: true
+              description: >
+                The played release's resolved WXYC catalog artist id
+                (`flowsheet.album_id → library.artist_id`), computed
+                server-side on the same join that powers `upcoming_show`.
+                Shares the catalog artist-id keyspace with
+                `Concert.headlining_artist_id` and `SimilarArtist.artist_id`,
+                so on-device features — the On Tour likes match — can
+                intersect a liked playcut's artist against concert headliners
+                and their affinity neighbors in one id space.
+
+
+                Null for free-form entries (no `album_id`) and for library
+                rows whose album has no linked artist. Additive and optional:
+                older app builds that don't decode it are unaffected.
             artist_name:
               type: string
               nullable: true
@@ -2073,8 +2090,8 @@ components:
       description: >-
         One affinity neighbor of a resolved concert headliner, drawn from
         the semantic-index graph. `artist_id` shares the WXYC catalog
-        artist-id keyspace with `Concert.headlining_artist_id` (and the
-        planned `FlowsheetV2TrackEntry.artist_id`), so on-device For You
+        artist-id keyspace with `Concert.headlining_artist_id` (and
+        `FlowsheetV2TrackEntry.artist_id`), so on-device For You
         matching can intersect it against liked-artist ids in one id space.
       required:
         - artist_id
