@@ -72,7 +72,7 @@
     "src/test-utils/charset-torture.json"
   ],
   "devDependencies": {
-    "@openapitools/openapi-generator-cli": "^2.39.1",
+    "@openapitools/openapi-generator-cli": "^2.40.0",
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
     "bats": "^1.11.0",
