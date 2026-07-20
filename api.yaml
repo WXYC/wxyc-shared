@@ -5260,6 +5260,32 @@ components:
           type: string
           description: Track duration (e.g. "5:23")
 
+    CriticReviewItem:
+      type: object
+      required:
+        - source
+        - url
+        - snippet
+      properties:
+        source:
+          type: string
+          description: Publication name (e.g. "The Quietus")
+        url:
+          type: string
+          description: Link to the original review on the publisher's site (mandatory link-out)
+        snippet:
+          type: string
+          description: Short attributed excerpt (<= ~300 chars); never the full review body
+        author:
+          type: string
+          description: Review author, when available
+        publishedDate:
+          type: string
+          description: Review publication date when available (e.g. "2024-03-15")
+        rating:
+          type: string
+          description: Source-native rating string when available (e.g. "8.0")
+
     AlbumMetadataResponse:
       type: object
       properties:
@@ -5299,6 +5325,11 @@ components:
           items:
             $ref: '#/components/schemas/TrackListItem'
           description: Release tracklist
+        criticReviews:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriticReviewItem'
+          description: Attributed external critic-review snippets, each linking out to the original
         spotifyUrl:
           type: string
           description: Spotify URL for the album or track
