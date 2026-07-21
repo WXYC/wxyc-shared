@@ -40,6 +40,7 @@ const sampleVenue: Venue = {
 };
 
 // Timed event: starts_at present, starts_on derived from it by the DB trigger.
+// Library-resolved headliner, so the rotation-membership signal is carried.
 const sampleTimedConcert: Concert = {
   id: 101,
   venue: sampleVenue,
@@ -56,6 +57,7 @@ const sampleTimedConcert: Concert = {
   price_max: 28,
   age_restriction: 'All Ages',
   status: 'on_sale',
+  station_recommended: true,
 };
 
 // Date-only event: starts_at is null; only the calendar date is known.
@@ -97,6 +99,12 @@ describe('Concert generated types', () => {
     expect(Object.values(ConcertStatus).sort()).toEqual(
       ['cancelled', 'on_sale', 'rescheduled', 'sold_out'].sort()
     );
+  });
+
+  it('carries station_recommended on a library-resolved headliner and allows omitting it', () => {
+    expect(sampleTimedConcert.station_recommended).toBe(true);
+    // No library-resolved headliner (headlining_artist_id: null) — the field is simply omitted.
+    expect(sampleDateOnlyConcert.station_recommended).toBeUndefined();
   });
 
   it('composes ConcertsResponse from concerts + PaginationInfo', () => {
@@ -146,6 +154,25 @@ describe('Concerts in api.yaml', () => {
     for (const internal of ['raw_data', 'source', 'source_id', 'scraped_at', 'first_scraped_at']) {
       expect(concert.properties[internal], `internal column ${internal}`).toBeUndefined();
     }
+  });
+
+  it('defines station_recommended as an optional boolean carrying rotation-membership semantics', () => {
+    const concert = spec.components.schemas.Concert;
+    const field = concert.properties.station_recommended;
+    expect(field, 'Concert.station_recommended').toBeDefined();
+    expect(field.type).toBe('boolean');
+    expect(concert.required).not.toContain('station_recommended');
+    // The description is the authoritative semantics text the Backend emitter
+    // and iOS consumer both defer to (wxyc-ios-64#576 decision record).
+    expect(field.description).toContain('has been in rotation');
+    expect(field.description).toContain('headlining_artist_id');
+  });
+
+  it('deprecates station_plays and points at station_recommended', () => {
+    const field = spec.components.schemas.Concert.properties.station_plays;
+    expect(field, 'Concert.station_plays must stay on the wire').toBeDefined();
+    expect(field.deprecated).toBe(true);
+    expect(field.description).toContain('station_recommended');
   });
 
   it('defines GET /concerts with curated, from/to window, and page/limit params', () => {
