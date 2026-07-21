@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.19.0
+  version: 1.20.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2261,6 +2261,19 @@ components:
             deprecated `station_plays`. Identical for every listener; carries
             no listener data. Optional (not in `required`) so it can land
             ahead of the Backend-Service emitter and older clients decode
+            forward-compatibly — same discipline as `Concert.similar_artists`.
+        artist_bio:
+          type: string
+          nullable: true
+          description: >-
+            Artist biography from the resolved headliner's Discogs profile
+            (raw Discogs markup, parsed client-side), keyed on the effective
+            Discogs artist id and cached nightly on `artist_metadata`. Null
+            when the headliner is unresolved, has no Discogs profile, or
+            enrichment has not run. Identical for every listener; carries no
+            listener data. Renders the On Tour concert-detail "About the
+            Artist" card. Optional (not in `required`) so it can land ahead of
+            the Backend-Service emitter and older clients decode
             forward-compatibly — same discipline as `Concert.similar_artists`.
 
     ConcertsResponse:
