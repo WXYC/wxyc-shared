@@ -58,6 +58,7 @@ const sampleTimedConcert: Concert = {
   age_restriction: 'All Ages',
   status: 'on_sale',
   station_recommended: true,
+  station_recommended_rank: 3,
 };
 
 // Date-only event: starts_at is null; only the calendar date is known.
@@ -105,6 +106,17 @@ describe('Concert generated types', () => {
     expect(sampleTimedConcert.station_recommended).toBe(true);
     // No library-resolved headliner (headlining_artist_id: null) — the field is simply omitted.
     expect(sampleDateOnlyConcert.station_recommended).toBeUndefined();
+  });
+
+  it('carries station_recommended_rank as the plays-ordered selection within the station_recommended gate, and allows omitting it', () => {
+    expect(sampleTimedConcert.station_recommended_rank).toBe(3);
+    // Not in the "WXYC recommends" set — the field is simply omitted.
+    expect(sampleDateOnlyConcert.station_recommended_rank).toBeUndefined();
+  });
+
+  it('allows station_recommended_rank: null (rotation-gated headliner outside the ranked set)', () => {
+    const rankedOutOfSet: Concert = { ...sampleTimedConcert, station_recommended_rank: null };
+    expect(rankedOutOfSet.station_recommended_rank).toBeNull();
   });
 
   it('composes ConcertsResponse from concerts + PaginationInfo', () => {
@@ -173,6 +185,22 @@ describe('Concerts in api.yaml', () => {
     expect(field, 'Concert.station_plays must stay on the wire').toBeDefined();
     expect(field.deprecated).toBe(true);
     expect(field.description).toContain('station_recommended');
+  });
+
+  it('documents station_recommended as the gate, distinct from the station_recommended_rank selection', () => {
+    const field = spec.components.schemas.Concert.properties.station_recommended;
+    expect(field.description).toContain('station_recommended_rank');
+  });
+
+  it('defines station_recommended_rank as an optional nullable integer carrying the plays-ordered selection rank', () => {
+    const concert = spec.components.schemas.Concert;
+    const field = concert.properties.station_recommended_rank;
+    expect(field, 'Concert.station_recommended_rank').toBeDefined();
+    expect(field.type).toBe('integer');
+    expect(field.nullable).toBe(true);
+    expect(concert.required).not.toContain('station_recommended_rank');
+    expect(field.description).toContain('1-based');
+    expect(field.description).toContain('rotation');
   });
 
   it('defines GET /concerts with curated, from/to window, and page/limit params', () => {
