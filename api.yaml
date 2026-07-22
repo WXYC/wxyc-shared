@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.20.0
+  version: 1.21.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2258,10 +2258,28 @@ components:
             have no library releases to hold rotation membership. The
             rotation-membership signal behind the On Tour "For You" station
             tier ("WXYC recommends", WXYC/wxyc-ios-64#576); replaces the
-            deprecated `station_plays`. Identical for every listener; carries
-            no listener data. Optional (not in `required`) so it can land
-            ahead of the Backend-Service emitter and older clients decode
-            forward-compatibly — same discipline as `Concert.similar_artists`.
+            deprecated `station_plays`. This is the GATE (rotation
+            membership) — see `station_recommended_rank` for the
+            plays-ordered selection rank within that gate. Identical for
+            every listener; carries no listener data. Optional (not in
+            `required`) so it can land ahead of the Backend-Service emitter
+            and older clients decode forward-compatibly — same discipline as
+            `Concert.similar_artists`.
+        station_recommended_rank:
+          type: integer
+          nullable: true
+          description: >-
+            1-based rank of this concert within the station's "WXYC recommends"
+            set — among upcoming concerts whose resolved headliner is in rotation
+            (station_recommended = true), ordered by the station's ranking signal
+            (all-time WXYC plays), rank 1 = strongest. Null when the concert is
+            not in the set (headliner not rotation-gated). This is the field the
+            client sorts the station tier by; station_recommended is the gate
+            (rotation membership), this is the plays-ordered selection rank within
+            that gate. Identical for every listener; carries no listener data.
+            Optional (not in `required`) and nullable so it can land ahead of the
+            Backend-Service emitter and older clients decode forward-compatibly —
+            same discipline as `Concert.station_plays`.
         artist_bio:
           type: string
           nullable: true
