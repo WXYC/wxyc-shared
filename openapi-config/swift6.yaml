@@ -1,0 +1,22 @@
+# OpenAPI Generator config for Swift (swift6 generator)
+# Models-only output written to generated/swift (gitignored, in-repo).
+# Reference/diff aid for the Swift consumers (wxyc-dj-ios, wxyc-ios-64), which
+# currently hand-maintain their DTOs; see the Code Generation section of CLAUDE.md.
+#
+# NOTE: generateApis: false does NOT suppress the APIs/ dir under the swift6
+# generator -- it still emits DefaultAPI.swift etc. Fine for this in-repo
+# reference tree, but downstream consumers must drop APIs/ when vendoring.
+
+generateApis: false
+generateModelTests: false
+generateApiTests: false
+projectName: WXYCAPI
+library: urlsession
+useSPMFileStructure: true
+responseAs: AsyncAwait
+useClasses: false
+useBacktickEscapes: true
+hashableModels: true
+identifiableModels: false      # REQUIRED -- see gotcha 1
+enumUnknownDefaultCase: true   # forward-compatible enums (unknownDefault case)
+oneOfUnknownDefaultCase: true

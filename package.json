@@ -60,7 +60,7 @@
     "clean": "rm -rf dist",
     "generate": "npm run generate:typescript && npm run generate:python && npm run generate:swift && npm run generate:kotlin",
     "generate:typescript": "node scripts/generate-models.js",
-    "generate:swift": "openapi-generator-cli generate -i api.yaml -g swift5 -o generated/swift -c openapi-config/swift.yaml --skip-validate-spec",
+    "generate:swift": "openapi-generator-cli generate -i api.yaml -g swift6 -o generated/swift -c openapi-config/swift6.yaml --skip-validate-spec",
     "generate:python": "datamodel-codegen --input api.yaml --input-file-type openapi --output generated/python/models.py --output-model-type pydantic_v2.BaseModel --target-python-version 3.12 --use-standard-collections --use-union-operator",
     "generate:kotlin": "openapi-generator-cli generate -i api.yaml -g kotlin -o generated/kotlin -c openapi-config/kotlin.yaml --skip-validate-spec",
     "check:breaking": "bash scripts/check-breaking-changes.sh"
