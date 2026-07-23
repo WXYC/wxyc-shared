@@ -269,6 +269,47 @@ describe('Generated TypeScript Types', () => {
 
       expect(response.imageUrl).toBeUndefined();
     });
+
+    // Pin the consumer-facing contract for bioTokens (#251): optional +
+    // nullable array of DiscogsResolvedToken, pass-through of
+    // DiscogsArtistDetails.profile_tokens at the proxy boundary.
+    it('should accept bioTokens as an array of DiscogsResolvedToken', () => {
+      const response: ArtistMetadataResponse = {
+        discogsArtistId: 67890,
+        bio: 'Autechre are an English electronic music duo...',
+        bioTokens: [
+          { type: 'plainText', text: 'Autechre are an English electronic music duo from ' },
+          {
+            type: 'artistLink',
+            name: 'Autechre',
+            display_name: 'Autechre',
+            url: 'https://www.discogs.com/artist/97545',
+          },
+        ],
+      };
+
+      expect(response.bioTokens).toHaveLength(2);
+      expect(response.bioTokens?.[0].type).toBe('plainText');
+      expect(response.bioTokens?.[1].type).toBe('artistLink');
+    });
+
+    it('should accept null bioTokens (the backend emits an explicit `?? null`)', () => {
+      const response: ArtistMetadataResponse = {
+        discogsArtistId: 67890,
+        bioTokens: null,
+      };
+
+      expect(response.bioTokens).toBeNull();
+    });
+
+    it('should allow omitting bioTokens', () => {
+      const response: ArtistMetadataResponse = {
+        discogsArtistId: 67890,
+        bio: 'Autechre are an English electronic music duo...',
+      };
+
+      expect(response.bioTokens).toBeUndefined();
+    });
   });
 
   describe('TrackListItem', () => {

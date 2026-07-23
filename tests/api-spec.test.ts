@@ -983,6 +983,24 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties.imageUrl).toBeDefined();
       expect(schema.properties.imageUrl.type).toBe('string');
     });
+
+    it('should define ArtistMetadataResponse.bioTokens as a nullable array of DiscogsResolvedToken (#251)', () => {
+      const schema = spec.components.schemas.ArtistMetadataResponse as {
+        properties: Record<string, { type?: string; nullable?: boolean; items?: { $ref?: string } }>;
+        required?: string[];
+      };
+      expect(schema.properties.bioTokens).toBeDefined();
+      expect(schema.properties.bioTokens.type).toBe('array');
+      // The backend emits an explicit `?? null` for this field.
+      expect(schema.properties.bioTokens.nullable).toBe(true);
+      // Reuses the existing token schema (pass-through of
+      // DiscogsArtistDetails.profile_tokens) — no parallel token shape.
+      expect(schema.properties.bioTokens.items?.$ref).toBe(
+        '#/components/schemas/DiscogsResolvedToken'
+      );
+      // Not required — additive/optional, existing consumers are unaffected.
+      expect(schema.required ?? []).not.toContain('bioTokens');
+    });
   });
 
   describe('API Endpoints', () => {
