@@ -125,6 +125,15 @@ The Swift/Kotlin consumers **do not yet consume the generated output** — they 
 
 Migrating each consumer onto the generated output is tracked separately, blocked by this output-path fix (#197): WXYC/wxyc-dj-ios#75, WXYC/WXYC-Android#25, WXYC/wxyc-ios-64#412 — all sub-issues of the codegen umbrella #106. Once a consumer migrates, its `-o` path (or its own build step) should point at wherever that repo checks the generated client in; until then these stay in-repo.
 
+### Swift codegen uses the `swift6` generator
+
+`generate:swift` runs `openapi-generator-cli` with `-g swift6` against `openapi-config/swift6.yaml` (the `swift5` generator and its `openapi-config/swift.yaml` are retired — `swift5` doesn't emit `Sendable`, which is a hard requirement for Swift 6 strict-concurrency consumers like `wxyc-ios-64`). The `swift6` templates bake `Sendable, Codable, Hashable` onto every generated model unconditionally — there's no `sendable` flag to toggle. `swift6.yaml` also sets `enumUnknownDefaultCase`/`oneOfUnknownDefaultCase` so unrecognized enum/oneOf values decode into an `unknownDefault` case instead of throwing, matching the degrade-don't-throw discipline the mobile consumers rely on.
+
+Two gotchas, both verified against the current `api.yaml`:
+
+1. **`identifiableModels: false` is required, not cosmetic.** Its swift6 default is `true`. Left on, the synthesized oneOf catch-all (e.g. `V2FlowsheetLatestGet200Response`) gets an `extension … : Identifiable {}` with no `id` conformance, and the generated package fails to compile. `swift6.yaml` sets it to `false`, which drops every `Identifiable` extension — verify with `grep -rl ": Identifiable" generated/swift | wc -l` (should be `0`).
+2. **`generateApis: false` does not suppress the `APIs/` directory under `swift6`.** It still emits `Sources/WXYCAPI/APIs/DefaultAPI.swift` (~148KB) and friends even though this repo only wants models. That's harmless for the in-repo reference tree, but any consumer that vendors `generated/swift` (WXYC/wxyc-ios-64#598 and future Swift consumers) must drop `APIs/` themselves — don't rely on the config to keep it out.
+
 Run `npm run check:breaking` before changing `api.yaml` to detect breaking changes.
 
 ## Testing

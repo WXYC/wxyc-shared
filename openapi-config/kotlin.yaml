@@ -4,7 +4,7 @@
 # hand-maintains its types; see the Code Generation section of CLAUDE.md.
 
 # Skip generated test stubs (models and API clients are still emitted; see followup
-# on whether this config should be models-only like swift.yaml's generateApis: false)
+# on whether this config should be models-only like swift6.yaml's generateApis: false)
 generateApiTests: false
 generateModelTests: false
 
