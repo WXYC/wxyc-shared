@@ -76,7 +76,7 @@
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
     "bats": "^1.11.0",
-    "better-auth": "^1.6.18",
+    "better-auth": "^1.6.23",
     "openapi-typescript": "^7.13.0",
     "postgres": "^3.4.9",
     "tsup": "^8.4.0",
