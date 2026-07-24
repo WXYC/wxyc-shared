@@ -7,6 +7,8 @@ export const RESOURCES = {
   bin: ["read", "write"],
   flowsheet: ["read", "write"],
   roster: ["read", "write"],
+  giveaways: ["read", "write"],
+  venues: ["read", "write"],
 } as const;
 
 export type Resource = keyof typeof RESOURCES;

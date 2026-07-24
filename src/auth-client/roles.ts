@@ -23,16 +23,23 @@ export const ROLE_PERMISSIONS: Record<WXYCRole, Permission> = {
     bin: ["read", "write"],
     flowsheet: ["read", "write"],
     roster: ["read", "write"],
+    giveaways: ["read", "write"],
+    venues: ["read", "write"],
   },
   musicDirector: {
     catalog: ["read", "write"],
     bin: ["read", "write"],
     flowsheet: ["read", "write"],
+    giveaways: ["read", "write"],
+    venues: ["read", "write"],
   },
   dj: {
     catalog: ["read"],
     bin: ["read", "write"],
     flowsheet: ["read", "write"],
+    // DJs run giveaways (claim winners + report), and read venue report preferences
+    giveaways: ["read", "write"],
+    venues: ["read"],
   },
   member: {
     catalog: ["read"],

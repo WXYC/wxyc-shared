@@ -55,6 +55,23 @@ describe("hasPermission", () => {
     { role: "member", resource: "flowsheet", action: "read", expected: true },
     { role: "member", resource: "flowsheet", action: "write", expected: false },
 
+    // Giveaways: DJ tier (dj/MD/SM) can run giveaways (claim + report); members cannot
+    { role: "stationManager", resource: "giveaways", action: "read", expected: true },
+    { role: "stationManager", resource: "giveaways", action: "write", expected: true },
+    { role: "musicDirector", resource: "giveaways", action: "write", expected: true },
+    { role: "dj", resource: "giveaways", action: "read", expected: true },
+    { role: "dj", resource: "giveaways", action: "write", expected: true },
+    { role: "member", resource: "giveaways", action: "read", expected: false },
+    { role: "member", resource: "giveaways", action: "write", expected: false },
+
+    // Venues: admin tier (MD/SM) manages venue contacts + creates venues;
+    // DJs read venue report preferences; members have no access
+    { role: "stationManager", resource: "venues", action: "write", expected: true },
+    { role: "musicDirector", resource: "venues", action: "write", expected: true },
+    { role: "dj", resource: "venues", action: "read", expected: true },
+    { role: "dj", resource: "venues", action: "write", expected: false },
+    { role: "member", resource: "venues", action: "read", expected: false },
+
     // Edge cases
     { role: null, resource: "catalog", action: "read", expected: false },
     { role: undefined, resource: "catalog", action: "read", expected: false },
