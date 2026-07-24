@@ -2072,6 +2072,21 @@ components:
         address:
           type: string
           nullable: true
+        phone:
+          type: string
+          nullable: true
+          description: >-
+            Box-office phone for ticket-giveaway winner reporting. Null until an
+            admin fills it in — venues are scraper-seeded without contact info.
+        report_emails:
+          type: array
+          items:
+            type: string
+          description: >-
+            Venue addresses that receive the ticket-giveaway winner report.
+            Empty until an admin fills it in.
+        report_preference:
+          $ref: '#/components/schemas/VenueReportPreference'
 
     ConcertStatus:
       type: string
@@ -2307,6 +2322,298 @@ components:
             $ref: '#/components/schemas/Concert'
         pagination:
           $ref: '#/components/schemas/PaginationInfo'
+
+    # ===================
+    # Ticket Giveaways (epic #254)
+    # ===================
+
+    VenueReportPreference:
+      type: string
+      description: How a venue wants ticket-giveaway winners reported to it.
+      enum:
+        - phone
+        - email
+
+    GiveawayPoolKind:
+      type: string
+      description: Whether each slot in a ticket pool is a single ticket or a pair.
+      enum:
+        - single
+        - pair
+
+    GiveawayReportStatus:
+      type: string
+      description: >-
+        Reporting lifecycle of a giveaway. `pending` giveaways are still active
+        in the DJ list; `reported` (called in, or emailed to the venue) and
+        `busy` (phone venue, line busy / no answer) drop out of it.
+      enum:
+        - pending
+        - reported
+        - busy
+
+    WinnerType:
+      type: string
+      description: Which ticket pool a winner drew from — DJ tickets or listener tickets.
+      enum:
+        - dj
+        - public
+
+    GiveawayWinner:
+      type: object
+      description: One claimed giveaway slot, recorded by the DJ who gave it away.
+      required:
+        - id
+        - giveaway_id
+        - winner_type
+        - winner_name
+        - winner_phone
+        - winner_email
+        - num_tix
+        - dj_id
+        - created_at
+      properties:
+        id:
+          type: integer
+        giveaway_id:
+          type: integer
+        winner_type:
+          $ref: '#/components/schemas/WinnerType'
+        winner_name:
+          type: string
+        winner_phone:
+          type: string
+          nullable: true
+        winner_email:
+          type: string
+          nullable: true
+        num_tix:
+          type: integer
+          description: Tickets in this slot — 1 (single) or 2 (pair), from the pool kind.
+        dj_id:
+          type: string
+          description: Better Auth user id of the DJ who awarded this slot.
+        created_at:
+          type: string
+          format: date-time
+
+    Giveaway:
+      type: object
+      description: |
+        A ticket giveaway for one show. Either links to a scraped concert via
+        `concert_id`, or stands alone (venue/date/description carried inline)
+        for a show not in the On Tour feed. Carries two independent ticket pools
+        (DJ + listener), each a count and a single/pair kind, with the remaining
+        count per pool and the current winners.
+      required:
+        - id
+        - concert_id
+        - venue
+        - description
+        - starts_on
+        - dj_ticket_count
+        - dj_pool_kind
+        - dj_tickets_remaining
+        - public_ticket_count
+        - public_pool_kind
+        - public_tickets_remaining
+        - report_status
+        - winners
+      properties:
+        id:
+          type: integer
+        concert_id:
+          type: integer
+          nullable: true
+          description: Linked scraped concert id, or null for a standalone giveaway.
+        concert:
+          allOf:
+            - $ref: '#/components/schemas/Concert'
+          nullable: true
+          description: The linked concert, present only when `concert_id` is set.
+        venue:
+          $ref: '#/components/schemas/Venue'
+        description:
+          type: string
+          description: Effective show name (from the linked concert or the standalone value).
+        starts_on:
+          type: string
+          format: date
+          description: Effective venue-local show date (from the concert or standalone value).
+        dj_ticket_count:
+          type: integer
+        dj_pool_kind:
+          $ref: '#/components/schemas/GiveawayPoolKind'
+        dj_tickets_remaining:
+          type: integer
+        public_ticket_count:
+          type: integer
+        public_pool_kind:
+          $ref: '#/components/schemas/GiveawayPoolKind'
+        public_tickets_remaining:
+          type: integer
+        report_status:
+          $ref: '#/components/schemas/GiveawayReportStatus'
+        winners:
+          type: array
+          items:
+            $ref: '#/components/schemas/GiveawayWinner'
+
+    GiveawaysResponse:
+      type: object
+      description: A list of ticket giveaways.
+      required:
+        - giveaways
+      properties:
+        giveaways:
+          type: array
+          items:
+            $ref: '#/components/schemas/Giveaway'
+
+    CreateGiveawayRequest:
+      type: object
+      description: |
+        Create a giveaway. Provide `concert_id` to attach to a scraped concert,
+        OR `venue_id` + `starts_on` + `description` for a standalone show.
+      required:
+        - dj_ticket_count
+        - dj_pool_kind
+        - public_ticket_count
+        - public_pool_kind
+      properties:
+        concert_id:
+          type: integer
+          nullable: true
+        venue_id:
+          type: integer
+          nullable: true
+        starts_on:
+          type: string
+          format: date
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        dj_ticket_count:
+          type: integer
+          minimum: 0
+        dj_pool_kind:
+          $ref: '#/components/schemas/GiveawayPoolKind'
+        public_ticket_count:
+          type: integer
+          minimum: 0
+        public_pool_kind:
+          $ref: '#/components/schemas/GiveawayPoolKind'
+
+    UpdateGiveawayRequest:
+      type: object
+      description: Update a giveaway's ticket pools. All fields optional.
+      properties:
+        dj_ticket_count:
+          type: integer
+          minimum: 0
+        dj_pool_kind:
+          $ref: '#/components/schemas/GiveawayPoolKind'
+        public_ticket_count:
+          type: integer
+          minimum: 0
+        public_pool_kind:
+          $ref: '#/components/schemas/GiveawayPoolKind'
+
+    ClaimWinnerRequest:
+      type: object
+      description: >-
+        Record a giveaway winner. The awarding DJ is taken from the session, not
+        this payload.
+      required:
+        - winner_type
+        - winner_name
+      properties:
+        winner_type:
+          $ref: '#/components/schemas/WinnerType'
+        winner_name:
+          type: string
+        winner_phone:
+          type: string
+          nullable: true
+        winner_email:
+          type: string
+          nullable: true
+
+    ReportGiveawayItem:
+      type: object
+      required:
+        - giveaway_id
+        - status
+      properties:
+        giveaway_id:
+          type: integer
+        status:
+          $ref: '#/components/schemas/GiveawayReportStatus'
+
+    ReportGiveawaysRequest:
+      type: object
+      description: |
+        Submit end-of-show reporting. For phone-preference venues each item's
+        status is recorded; for email-preference venues the winner list is
+        emailed to the venue and the giveaway is locked.
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportGiveawayItem'
+
+    CreateVenueRequest:
+      type: object
+      description: Create a venue (for a standalone show not in the scraped feed).
+      required:
+        - name
+        - city
+        - state
+      properties:
+        name:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        report_emails:
+          type: array
+          items:
+            type: string
+        report_preference:
+          $ref: '#/components/schemas/VenueReportPreference'
+
+    UpdateVenueRequest:
+      type: object
+      description: Update venue contact/report fields. All fields optional.
+      properties:
+        name:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        report_emails:
+          type: array
+          items:
+            type: string
+        report_preference:
+          $ref: '#/components/schemas/VenueReportPreference'
 
     # ===================
     # Album Reviews (issue #229)
@@ -7116,6 +7423,329 @@ paths:
                 $ref: '#/components/schemas/Concert'
         '404':
           description: No concert with this id exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /giveaways:
+    get:
+      summary: List upcoming ticket giveaways
+      description: |
+        Returns giveaways whose effective show date falls within the upcoming
+        window and whose `report_status` is `pending`, with per-pool remaining
+        counts. Requires `giveaways:read` (DJ and above).
+      responses:
+        '200':
+          description: Upcoming giveaways.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GiveawaysResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Insufficient permissions (requires giveaways:read).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    post:
+      summary: Create a giveaway (admin)
+      description: |
+        Create a giveaway for a scraped concert (`concert_id`) or a standalone
+        show (`venue_id` + `starts_on` + `description`). Requires `venues:write`
+        (Music Director / Station Manager).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGiveawayRequest'
+      responses:
+        '201':
+          description: The created giveaway.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Giveaway'
+        '400':
+          description: Invalid body (e.g. neither concert_id nor venue+date given).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Insufficient permissions (requires venues:write).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /giveaways/reporting:
+    get:
+      summary: Today's giveaways for end-of-show reporting
+      description: |
+        Returns today's giveaways with their winners and each venue's report
+        preference, for the DJ end-of-show call-in / reporting screen. Requires
+        `giveaways:read`.
+      responses:
+        '200':
+          description: Today's giveaways with winners and venue report info.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GiveawaysResponse'
+        '403':
+          description: Insufficient permissions (requires giveaways:read).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    post:
+      summary: Submit end-of-show reporting
+      description: |
+        For phone-preference venues, records each giveaway's call-in status.
+        For email-preference venues, emails the winner list to the venue and
+        locks the giveaway. Requires `giveaways:write`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportGiveawaysRequest'
+      responses:
+        '200':
+          description: Updated giveaways after reporting.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GiveawaysResponse'
+        '403':
+          description: Insufficient permissions (requires giveaways:write).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /giveaways/{id}:
+    get:
+      summary: Get a giveaway by id
+      description: >-
+        Returns one giveaway with its winners and remaining counts. Requires
+        `giveaways:read`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: The giveaway.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Giveaway'
+        '404':
+          description: No giveaway with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    patch:
+      summary: Update a giveaway (admin)
+      description: Update a giveaway's ticket pools. Requires `venues:write`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGiveawayRequest'
+      responses:
+        '200':
+          description: The updated giveaway.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Giveaway'
+        '404':
+          description: No giveaway with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    delete:
+      summary: Delete a giveaway (admin)
+      description: Requires `venues:write`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted.
+        '404':
+          description: No giveaway with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /giveaways/{id}/winners:
+    post:
+      summary: Record a giveaway winner
+      description: >-
+        Claim a slot from the DJ or listener pool. The server re-checks
+        remaining room and attributes the winner to the authenticated DJ.
+        Requires `giveaways:write`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimWinnerRequest'
+      responses:
+        '201':
+          description: The recorded winner.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GiveawayWinner'
+        '400':
+          description: No tickets remaining in the requested pool, or invalid body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Insufficient permissions (requires giveaways:write).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No giveaway with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /giveaways/winners/{winnerId}:
+    delete:
+      summary: Delete a giveaway winner (admin)
+      description: Remove a winner recorded by mistake. Requires `venues:write`.
+      parameters:
+        - name: winnerId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted.
+        '404':
+          description: No winner with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /venues:
+    get:
+      summary: List venues
+      description: >-
+        Returns all venues with contact/report fields. Requires `venues:read`
+        (DJ and above).
+      responses:
+        '200':
+          description: All venues.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Venue'
+        '403':
+          description: Insufficient permissions (requires venues:read).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    post:
+      summary: Create a venue (admin)
+      description: Requires `venues:write`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVenueRequest'
+      responses:
+        '201':
+          description: The created venue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Venue'
+        '400':
+          description: Invalid body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: Insufficient permissions (requires venues:write).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /venues/{id}:
+    patch:
+      summary: Update a venue (admin)
+      description: >-
+        Update contact/report fields on an existing venue. Requires
+        `venues:write`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVenueRequest'
+      responses:
+        '200':
+          description: The updated venue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Venue'
+        '404':
+          description: No venue with this id.
           content:
             application/json:
               schema:
