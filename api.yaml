@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.21.0
+  version: 1.22.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3456,6 +3456,41 @@ components:
             LML reads them (LML#928 for `X-Caller-Class`-driven lane
             routing, LML#931 for `X-Caller-Reason` caller telemetry) — see
             BS#1843.
+        degraded:
+          type: boolean
+          default: false
+          description: >
+            True when LML returned partial or cache-only data because it
+            intentionally shed the enrichment tail — under a caller deadline,
+            admission-control pressure, or an unavailable upstream (LML#930).
+            Distinguishes a degraded/cache-only result from a full success
+            (`degraded: false`) and from a genuine no-match (empty `results`,
+            `degraded: false`, `timeout: false`). Distinct from `timeout`,
+            which signals the internal hard cap fired and the pipeline was
+            abandoned mid-execution; `degraded` is a deliberate shed-the-tail
+            outcome where the returned data is trustworthy but incomplete.
+            Default false, so existing consumers see a byte-identical response.
+        degraded_reason:
+          type: string
+          enum:
+            - deadline_exceeded
+            - cache_only
+            - upstream_unavailable
+          description: >
+            Why the response was degraded. Present only when `degraded: true`;
+            omitted otherwise. Non-exhaustive — LML may add reasons in a later
+            minor version. The Swift and Kotlin codegen decode an unknown value
+            into an `unknownDefault` case and TypeScript consumers see a widened
+            string-literal union, but the Python (datamodel-codegen → pydantic)
+            consumers use strict enums and must regenerate against the new
+            `@wxyc/shared` minor before LML emits a newly added reason.
+            `deadline_exceeded` — the caller's budget or
+            LML's spine deadline elapsed and the enrichment tail was skipped;
+            `cache_only` — LML served cached data without refreshing from
+            upstream; `upstream_unavailable` — an upstream (Discogs, streaming
+            providers) was rate limited or down and its contribution was
+            omitted. Set by LML#930's caller-deadline / admission path; read by
+            LML#931 (`degraded-mode-result` telemetry) and wxyc-canary#82.
 
     # ====================================
     # Identity Block (§3.2.2 / §3.2.5 cascade)

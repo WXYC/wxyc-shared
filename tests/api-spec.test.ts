@@ -954,6 +954,35 @@ describe('OpenAPI Specification', () => {
       // time" on the LML hard-cap path.
       expect(schema.required ?? []).not.toContain('timeout');
     });
+
+    it('should add LookupResponse.degraded as an optional boolean defaulting to false', () => {
+      const schema = spec.components.schemas.LookupResponse as {
+        properties: Record<string, { type?: string; default?: unknown }>;
+        required?: string[];
+      };
+      expect(schema.properties.degraded).toBeDefined();
+      expect(schema.properties.degraded.type).toBe('boolean');
+      expect(schema.properties.degraded.default).toBe(false);
+      // Not required — existing consumers ignore it; new consumers distinguish a
+      // deliberately shed-the-tail cache-only/partial result from both success
+      // and a genuine no-match. Distinct from timeout (hard-cap abandonment).
+      expect(schema.required ?? []).not.toContain('degraded');
+    });
+
+    it('should add LookupResponse.degraded_reason as an optional non-required reason enum', () => {
+      const schema = spec.components.schemas.LookupResponse as {
+        properties: Record<string, { type?: string; enum?: string[] }>;
+        required?: string[];
+      };
+      expect(schema.properties.degraded_reason).toBeDefined();
+      expect(schema.properties.degraded_reason.type).toBe('string');
+      expect(schema.properties.degraded_reason.enum).toEqual([
+        'deadline_exceeded',
+        'cache_only',
+        'upstream_unavailable',
+      ]);
+      expect(schema.required ?? []).not.toContain('degraded_reason');
+    });
   });
 
   describe('Proxy Response Schemas', () => {
