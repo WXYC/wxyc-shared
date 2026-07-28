@@ -5383,6 +5383,27 @@ components:
           type: string
           description: Source-native rating string when available (e.g. "8.0")
 
+    WxycReviewItem:
+      type: object
+      required:
+        - review
+      properties:
+        review:
+          type: string
+          description: The DJ review body
+        artistBlurb:
+          type: string
+          description: Reviewer-written artist background, when provided
+        recommendedTracks:
+          type: string
+          description: Raw recommended-tracks text, including the form's "!"-rating notation
+        buzzwords:
+          type: string
+          description: Comma-separated descriptors chosen by the reviewer
+        submittedDate:
+          type: string
+          description: Form submission date when available (e.g. "2024-03-15")
+
     AlbumMetadataResponse:
       type: object
       properties:
@@ -5427,6 +5448,11 @@ components:
           items:
             $ref: '#/components/schemas/CriticReviewItem'
           description: Attributed external critic-review snippets, each linking out to the original
+        wxycReviews:
+          type: array
+          items:
+            $ref: '#/components/schemas/WxycReviewItem'
+          description: Consented WXYC DJ album reviews (social_consent = true) for this album. Reviewer identity is never included.
         spotifyUrl:
           type: string
           description: Spotify URL for the album or track
