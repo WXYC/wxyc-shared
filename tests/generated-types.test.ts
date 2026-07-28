@@ -29,6 +29,7 @@ import {
   type LibrarySearchItem,
   type LookupResultItem,
   type LookupRequest,
+  type LookupResponse,
   type DiscogsMatchResult,
   type DiscogsWriterCredits,
   type TrackMatchHint,
@@ -902,6 +903,33 @@ describe('Generated TypeScript Types', () => {
       };
 
       expect(baseline.writer_credits).toBeUndefined();
+    });
+  });
+
+  describe('LookupResponse degraded/cache-only discriminator (BS#943)', () => {
+    it('degraded is a boolean and degraded_reason is an optional closed reason union', () => {
+      const full: LookupResponse = { results: [], degraded: false };
+      const shed: LookupResponse = {
+        results: [],
+        degraded: true,
+        degraded_reason: 'deadline_exceeded',
+      };
+
+      expect(full.degraded).toBe(false);
+      expect(shed.degraded_reason).toBe('deadline_exceeded');
+
+      // degraded_reason is a closed string-literal union in the generated type.
+      const reasons: NonNullable<LookupResponse['degraded_reason']>[] = [
+        'deadline_exceeded',
+        'cache_only',
+        'upstream_unavailable',
+      ];
+      expect(reasons).toHaveLength(3);
+    });
+
+    it('omits degraded_reason on a non-degraded response', () => {
+      const ok: LookupResponse = { results: [], degraded: false };
+      expect(ok.degraded_reason).toBeUndefined();
     });
   });
 });
