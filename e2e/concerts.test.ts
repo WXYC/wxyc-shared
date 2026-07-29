@@ -162,12 +162,40 @@ function expectMatchesConcertsResponseShape(body: unknown): asserts body is Conc
 
 // ---------------------------------------------------------------------------
 
+/**
+ * A row to seed into the `concerts` table. `key`, `venue_id`, `starts_on`, and
+ * `headlining_artist_raw` identify every seeded concert and are always supplied
+ * by the caller; the rest carry a default in `seedConcert`. Declared explicitly
+ * because the defaults object omits the four required fields, so TS could not
+ * infer them from the `...overrides` spread — the latent gap #266 surfaced.
+ */
+interface ConcertSeed {
+  key: string;
+  venue_id: number;
+  starts_on: string;
+  headlining_artist_raw: string;
+  source?: string;
+  starts_at?: string | null;
+  doors_at?: string | null;
+  headlining_artist_id?: number | null;
+  title?: string | null;
+  supporting_artists?: string[];
+  ticket_url?: string | null;
+  image_url?: string | null;
+  event_url?: string | null;
+  price_min?: string | null;
+  price_max?: string | null;
+  age_restriction?: string | null;
+  status?: string;
+  removed_at?: string | null;
+}
+
 describe('Concerts E2E', () => {
   let client: E2EClient;
   let sql: ReturnType<typeof postgres> | undefined;
   const SCHEMA = config.schemaName;
 
-  const seedConcert = async (overrides: Record<string, unknown>): Promise<void> => {
+  const seedConcert = async (overrides: ConcertSeed): Promise<void> => {
     const row = {
       source: 'triangle_shows',
       starts_at: null,
@@ -232,20 +260,22 @@ describe('Concerts E2E', () => {
     sql = postgres(config.dbUrl!, { max: 1, onnotice: () => {} });
     await cleanup(); // idempotent across re-runs on the shared schema
 
-    const [venue] = await sql.unsafe(
+    const [venue] = await sql.unsafe<{ id: number }[]>(
       `INSERT INTO "${SCHEMA}".venues (slug, name, city, state, address)
        VALUES ($1, 'WXYC Shared E2E Room', 'Carrboro', 'NC', '300 E Main St')
        RETURNING id`,
       [VENUE_SLUG]
     );
-    const venueId = (venue as { id: number }).id;
+    if (!venue) throw new Error('failed to seed venue');
+    const venueId = venue.id;
 
-    const [artist] = await sql.unsafe(
+    const [artist] = await sql.unsafe<{ id: number }[]>(
       `INSERT INTO "${SCHEMA}".artists (artist_name, alphabetical_name, code_letters)
        VALUES ($1, $1, 'ZZ') RETURNING id`,
       [ARTIST_NAME]
     );
-    const artistId = (artist as { id: number }).id;
+    if (!artist) throw new Error('failed to seed artist');
+    const artistId = artist.id;
 
     // Past — excluded by the default "today forward" window.
     await seedConcert({
@@ -403,8 +433,10 @@ describe('Concerts E2E', () => {
       expect(res.status).toBe(200);
       const rows = seeded(res.body);
       expect(rows).toHaveLength(1);
-      expect(rows[0].headlining_artist_raw).toBe(ARTIST_NAME);
-      expect(typeof rows[0].headlining_artist_id).toBe('number');
+      const [only] = rows;
+      expect(only).toBeDefined();
+      expect(only!.headlining_artist_raw).toBe(ARTIST_NAME);
+      expect(typeof only!.headlining_artist_id).toBe('number');
       // The removed row also has a non-null headlining_artist_id — its absence
       // here proves curated still ANDs in removed_at IS NULL.
       expect(rows.map((c) => c.headlining_artist_raw)).not.toContain(REMOVED_NAME);

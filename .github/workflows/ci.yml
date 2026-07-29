@@ -45,6 +45,13 @@ jobs:
       - name: Type check
         run: npm run lint
 
+      # Typecheck the e2e/ suite too. It's excluded from `lint` (base tsconfig
+      # excludes e2e/) and from `npm test` (vitest excludes e2e/**), so without
+      # this step a broken e2e file merges green here and first surfaces as a
+      # bs-lml-gate failure that blocks BS/LML prod promotion. See #266.
+      - name: Type check (e2e)
+        run: npm run lint:e2e
+
       - name: Test
         run: npm test
 

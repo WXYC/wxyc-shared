@@ -46,7 +46,11 @@ let schemas: Record<string, SchemaObject>;
  */
 function resolveRef(ref: string, schemas: Record<string, SchemaObject>): SchemaObject {
   const name = ref.replace('#/components/schemas/', '');
-  return schemas[name];
+  const schema = schemas[name];
+  if (!schema) {
+    throw new Error(`Unresolved $ref: ${ref}`);
+  }
+  return schema;
 }
 
 /**

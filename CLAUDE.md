@@ -140,8 +140,11 @@ Run `npm run check:breaking` before changing `api.yaml` to detect breaking chang
 
 ```bash
 npm test              # Unit tests
+npm run lint:e2e      # Typecheck the e2e/ suite (no live stack needed)
 npm run test:e2e      # E2E tests (requires running services)
 ```
+
+The `e2e/` directory is excluded from both `lint` (base `tsconfig.json` excludes `e2e`) and `npm test` (vitest excludes `e2e/**`), and the live suite (`npm run test:e2e`) only runs from another repo's deploy gate (`bs-lml-gate.yml`). To keep a broken `e2e/` file from merging green and first surfacing as a `bs-lml-gate` failure that blocks BS/LML prod promotion, PR CI runs `lint:e2e` — `tsc -p tsconfig.e2e.json`, a typecheck-only pass over `e2e/**` with `rootDir: "."` so the e2e files aren't flagged as outside the base `rootDir: "./src"`. It does not run the stack; it's cheap and dependency-free. See #266.
 
 ## Testing Standards
 
