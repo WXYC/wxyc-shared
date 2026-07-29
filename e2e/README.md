@@ -35,12 +35,13 @@ npm run test:e2e -- e2e/flowsheet.test.ts
 - Pagination and filtering
 - On-air status
 
-### Mirror E2E (`mirror.test.ts`)
-- Verifies the full mirror round-trip: entry added via Backend-Service appears on tubafrenzy's public JSON API
-- Tests POST mirroring (freeform track entry appears on tubafrenzy `/playlists/recentEntries`)
-- Tests PATCH mirroring (updated entry reflects on tubafrenzy)
-- Requires Backend-Service, Auth, and tubafrenzy all running
-- Additional env var: `E2E_TUBAFRENZY_URL` (default: `http://localhost:8080`)
+### Recent Entries E2E (`recent-entries.test.ts`)
+- Verifies Backend-Service is the flowsheet source-of-truth after the tubafrenzy turndown (WXYC/wiki#88): a write made through Backend surfaces on Backend's **own** `GET /playlists/recentEntries` (served from Postgres, BS#1860), not tubafrenzy
+- Guards the v=1 flat array wire format + `X-Last-Modified` header (the Android contract, BS#1866) — this case runs without DJ credentials
+- Tests POST (freeform track entry surfaces on recentEntries) and PATCH (updated entry reflects)
+- Doubles as the automated guardrail for wiki#88's acceptance criterion: "mirror off; dj-site writes still land in Postgres and surface within the polling window"
+- Requires Backend-Service and Auth running; the write-path cases need a test DJ account
+- Replaces the former `mirror.test.ts` (which asserted the now-retired Backend→tubafrenzy mirror direction)
 
 ### Catalog E2E (`catalog.test.ts`)
 - Album and artist search (requires `catalog:read` auth)
@@ -68,7 +69,6 @@ E2E tests use environment variables:
 ```env
 E2E_BASE_URL=http://localhost:8080       # Backend API
 E2E_AUTH_URL=http://localhost:8081/auth   # Better-auth service
-E2E_TUBAFRENZY_URL=http://localhost:8080  # Tubafrenzy (mirror target)
 E2E_TEST_DJ_EMAIL=test@wxyc.org          # Test DJ account email
 E2E_TEST_DJ_PASSWORD=testpassword        # Test DJ account password
 E2E_DB_URL=postgres://user:pw@host:5432/db  # Stack DB, for suites that seed rows (concerts)

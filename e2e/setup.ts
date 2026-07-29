@@ -8,7 +8,6 @@
 export interface E2EConfig {
   baseUrl: string;
   authUrl: string;
-  tubafrenzyUrl: string;
   testDjEmail?: string;
   testDjPassword?: string;
   /**
@@ -30,7 +29,6 @@ export function getE2EConfig(): E2EConfig {
   return {
     baseUrl: process.env.E2E_BASE_URL || 'http://localhost:8080',
     authUrl: process.env.E2E_AUTH_URL || 'http://localhost:8081/auth',
-    tubafrenzyUrl: process.env.E2E_TUBAFRENZY_URL || 'http://localhost:8080',
     testDjEmail: process.env.E2E_TEST_DJ_EMAIL,
     testDjPassword: process.env.E2E_TEST_DJ_PASSWORD,
     dbUrl: process.env.E2E_DB_URL,
