@@ -252,6 +252,9 @@ export class E2EAuthHelper {
 
     // Decode JWT payload (no verification — the backend does that)
     const payloadB64 = token.split('.')[1];
+    if (!payloadB64) {
+      return null;
+    }
     const payload = JSON.parse(
       Buffer.from(payloadB64, 'base64url').toString('utf-8')
     );

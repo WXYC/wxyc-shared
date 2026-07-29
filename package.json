@@ -57,6 +57,7 @@
     "test:drift-guard": "bats scripts/__tests__/check-corpus-drift.test.sh",
     "test:bs-lml-gate": "bats scripts/__tests__/bs-lml-gate/*.test.sh",
     "lint": "tsc --noEmit --declaration false --declarationMap false",
+    "lint:e2e": "tsc -p tsconfig.e2e.json",
     "clean": "rm -rf dist",
     "generate": "npm run generate:typescript && npm run generate:python && npm run generate:swift && npm run generate:kotlin",
     "generate:typescript": "node scripts/generate-models.js",
