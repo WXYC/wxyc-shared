@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.22.0
+  version: 1.23.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -770,6 +770,31 @@ components:
                 `headlining_artist_raw`, `venue` (name + city), `starts_on`,
                 `doors_at`, `status`, `price_min` / `price_max`, `ticket_url`,
                 and `image_url` off it.
+            critic_reviews:
+              type: array
+              items:
+                $ref: '#/components/schemas/CriticReviewItem'
+              description: >
+                An optional array of attributed external critic-review
+                snippets for this track's resolved album, attached
+                server-side at feed-assembly time so the iOS Reviews card can
+                render inline for enriched playcuts with no second
+                round-trip — iOS skips the `/proxy/metadata/album` fetch for
+                terminal rows (wxyc-ios-64#685/#691).
+
+
+                Populated only on `track` entries whose linked `album_id` has
+                rows in Backend-Service's `album_critic_reviews` table;
+                attached via one batched query per page (no per-row
+                lookups). Capped at 5 items (`CRITIC_REVIEWS_LIMIT`), ordered
+                `published_at DESC NULLS LAST`. Absent — never `null` or
+                empty — when the track has no matching album, when the
+                attach is skipped, or on servers where Backend's
+                `CRITIC_REVIEWS_ENABLED` env flag (ADR 0012) is off,
+                including older servers that predate this field. Reuses the
+                `CriticReviewItem` schema verbatim — the same shape
+                `AlbumMetadataResponse.criticReviews` already serves — so
+                clients decode one type across both surfaces.
 
     FlowsheetV2ShowStartEntry:
       description: V2 show start event - when a show begins
