@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createE2EClient, type E2EClient, waitForService, getE2EConfig } from './setup.js';
-import type { FlowsheetEntryResponse, FlowsheetQueryParams } from '../src/dtos/flowsheet.dto.js';
+import type { FlowsheetEntryResponse, FlowsheetQueryParams } from '../src/dtos/index.js';
 
 describe('Flowsheet E2E', () => {
   let client: E2EClient;

@@ -75,13 +75,12 @@ The starter set above is deliberately small (4 items). Candidates for follow-ups
 
 - **Sentry filters statusCode<500** -- ops contract; clients reading Sentry to diagnose 4xx-class symptoms get burned (see #691). Belongs in INVARIANTS but is asserted by Sentry config, not E2E.
 - **dj-site auths via same-origin proxy, not directly to api.wxyc.org** -- the canary debugging on 2026-04-30 surfaced this. Add a test that POSTs to `/api/...` from a same-origin context and verifies the cookie round-trip.
-- **Tubafrenzy webhook -> Backend-Service mirror is at-least-once delivery** -- the existing `e2e/mirror.test.ts` covers happy-path round-trip; an explicit invariant for "POST eventually appears on tubafrenzy" with idempotency should be lifted out.
+- **Backend-Service serves `/playlists/recentEntries` from its own store, not by proxying tubafrenzy** -- the flowsheet source-of-truth flip ([WXYC/wiki#88](https://github.com/WXYC/wiki/issues/88)); covered today as a plain E2E test in `e2e/recent-entries.test.ts`, worth lifting to a CONTRACT so the source-of-truth is grep-discoverable. Supersedes the former Backend-Service -> tubafrenzy mirror candidates, retired with the mirror-off.
 - **`/auth/token` returns a JWT with `role` set to a value in `WXYCRoles`** -- partially covered by `e2e/auth.test.ts`; lift it to a CONTRACT so it's grep-discoverable.
 - **`/healthcheck` is the canonical health path on Backend-Service (not `/health`)** -- already documented in MEMORY.md; this is the kind of cheap, easy-to-violate invariant that bit a deploy.
 - **LML calls use `Authorization: Bearer <LML_API_KEY>`** -- as of 2026-05-01 LML prod enforces auth; all 3 consumers (rom, BS, tubafrenzy) wire the bearer. Asserting via E2E requires LML reachable from CI.
 - **Rotation `add_date` is set to today (UTC) on POST when omitted** -- mentioned in API spec; not asserted.
 - **`flowsheet.show_id` is set on every row produced by `/flowsheet/join`** -- 2026-05-01 incident showed this can drift via tubafrenzy.
-- **Backend-Service mirrors PATCH and DELETE to tubafrenzy within 15s** -- existing `mirror.test.ts` covers POST and PATCH; DELETE missing.
 
 When adding a new contract:
 
