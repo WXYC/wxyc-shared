@@ -23,7 +23,7 @@ import {
   waitForService,
   getE2EConfig,
 } from './setup.js';
-import type { AlbumSearchResult, FormatEntry, GenreEntry } from '../src/dtos/catalog.dto.js';
+import type { AlbumSearchResult, FormatEntry, GenreEntry } from '../src/dtos/index.js';
 
 describe('Catalog E2E', () => {
   let client: E2EClient;
