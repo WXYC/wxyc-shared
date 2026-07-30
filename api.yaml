@@ -3147,7 +3147,11 @@ components:
             and release_call_number.
         library_url:
           type: string
-          description: URL to view this release in the WXYC library
+          description: >
+            Per-release dj.wxyc.org permalink for this release. Points at the dj-site
+            legacy front door `/dashboard/album/legacy/{id}`, which resolves the legacy
+            library `id` to the canonical release route server-side and 308-redirects.
+            Empty string for a row-less result (`id == 0`).
         on_streaming:
           type: boolean
           description: True if this release is available on at least one streaming service. False means only available in the WXYC physical library. Null if unknown.
@@ -5230,7 +5234,11 @@ components:
           description: Computed call number (e.g. "Rock CD S 1/1")
         library_url:
           type: string
-          description: URL to the release on wxyc.info
+          description: >
+            Per-release dj.wxyc.org permalink for this release. Points at the dj-site
+            legacy front door `/dashboard/album/legacy/{id}`, which resolves the legacy
+            library `id` to the canonical release route server-side and 308-redirects.
+            Null when unavailable.
         matched_via:
           type: array
           items:
