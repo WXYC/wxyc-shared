@@ -377,6 +377,146 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  // BS#1281 (Not-on-Discogs 1a) read fields + BS#1154 PATCH /library/:id
+  // contract catch-up (wxyc-shared#156). BS#1154 shipped the endpoint and its
+  // wire-level request type in Backend-Service code without ever propagating
+  // the schema here — this closes that gap, matching the SHIPPED server
+  // (apps/backend/controllers/library.controller.ts `UpdateAlbumRequest` +
+  // `UPDATABLE_ALBUM_FIELDS`) exactly, not an idealized/renamed shape.
+  describe('Discogs-Unavailable Album fields + UpdateAlbumRequest (BS#1281 / BS#1154 / #156)', () => {
+    type SchemaProp = {
+      type?: string;
+      nullable?: boolean;
+      format?: string;
+      maxLength?: number;
+      default?: unknown;
+    };
+    type Schema = {
+      properties?: Record<string, SchemaProp>;
+      required?: string[];
+    };
+
+    it('Album gains discogsUnavailable as a boolean', () => {
+      const schema = spec.components.schemas.Album as Schema;
+      const prop = schema.properties?.discogsUnavailable;
+      expect(prop).toBeDefined();
+      expect(prop?.type).toBe('boolean');
+      expect(schema.required ?? []).not.toContain('discogsUnavailable');
+    });
+
+    it('Album gains discogsUnavailableNote as a nullable string capped at 500 chars', () => {
+      const schema = spec.components.schemas.Album as Schema;
+      const prop = schema.properties?.discogsUnavailableNote;
+      expect(prop).toBeDefined();
+      expect(prop?.type).toBe('string');
+      expect(prop?.nullable).toBe(true);
+      expect(prop?.maxLength).toBe(500);
+      expect(schema.required ?? []).not.toContain('discogsUnavailableNote');
+    });
+
+    it('Album gains lastDiscogsRecheckAt as a nullable date-time string (server-write-only)', () => {
+      const schema = spec.components.schemas.Album as Schema;
+      const prop = schema.properties?.lastDiscogsRecheckAt;
+      expect(prop).toBeDefined();
+      expect(prop?.type).toBe('string');
+      expect(prop?.format).toBe('date-time');
+      expect(prop?.nullable).toBe(true);
+      expect(schema.required ?? []).not.toContain('lastDiscogsRecheckAt');
+    });
+
+    it('defines UpdateAlbumRequest matching BS wire format exactly: 10 fields, all optional, no `required` list', () => {
+      const schema = spec.components.schemas.UpdateAlbumRequest as Schema;
+      expect(schema).toBeDefined();
+      expect(schema.required ?? []).toEqual([]);
+      expect(Object.keys(schema.properties ?? {}).sort()).toEqual(
+        [
+          'album_title',
+          'label',
+          'label_id',
+          'genre_id',
+          'format_id',
+          'artist_id',
+          'alternate_artist_name',
+          'disc_quantity',
+          'discogsUnavailable',
+          'discogsUnavailableNote',
+        ].sort(),
+      );
+    });
+
+    it('UpdateAlbumRequest keeps the 8 legacy fields snake_case, matching AddAlbumRequest / BS wire keys', () => {
+      const schema = spec.components.schemas.UpdateAlbumRequest as Schema;
+      const props = schema.properties ?? {};
+      expect(props.album_title?.type).toBe('string');
+      expect(props.label?.type).toBe('string');
+      // BS wire type: `label?: string` — NOT nullable, unlike Album.label's DB column.
+      expect(props.label?.nullable).toBeUndefined();
+      expect(props.label_id?.type).toBe('integer');
+      expect(props.label_id?.nullable).toBe(true);
+      expect(props.genre_id?.type).toBe('integer');
+      expect(props.format_id?.type).toBe('integer');
+      expect(props.artist_id?.type).toBe('integer');
+      expect(props.alternate_artist_name?.type).toBe('string');
+      expect(props.alternate_artist_name?.nullable).toBe(true);
+      expect(props.disc_quantity?.type).toBe('integer');
+    });
+
+    it('UpdateAlbumRequest carries the two discogs fields camelCase, matching the whitelist BS actually reads', () => {
+      const schema = spec.components.schemas.UpdateAlbumRequest as Schema;
+      const props = schema.properties ?? {};
+      expect(props.discogsUnavailable?.type).toBe('boolean');
+      expect(props.discogsUnavailableNote?.type).toBe('string');
+      expect(props.discogsUnavailableNote?.nullable).toBe(true);
+      expect(props.discogsUnavailableNote?.maxLength).toBe(500);
+    });
+
+    it('UpdateAlbumRequest omits lastDiscogsRecheckAt (server-write-only, never client-supplied)', () => {
+      const schema = spec.components.schemas.UpdateAlbumRequest as Schema;
+      expect(schema.properties?.lastDiscogsRecheckAt).toBeUndefined();
+    });
+
+    it('UpdateAlbumRequest omits artist_name and code_number (server-derived; UPDATABLE_ALBUM_FIELDS never reads them from the body)', () => {
+      const schema = spec.components.schemas.UpdateAlbumRequest as Schema;
+      expect(schema.properties?.artist_name).toBeUndefined();
+      expect(schema.properties?.code_number).toBeUndefined();
+    });
+
+    it('declares PATCH /library/{id} under BearerAuth, referencing UpdateAlbumRequest and returning AlbumSearchResult', () => {
+      const path = spec.paths['/library/{id}'] as {
+        patch?: {
+          security?: Array<Record<string, unknown[]>>;
+          parameters?: Array<{ name: string; in: string; schema?: { type?: string } }>;
+          requestBody?: { content?: Record<string, { schema?: { $ref?: string } }> };
+          responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+        };
+      };
+      expect(path).toBeDefined();
+      expect(path.patch).toBeDefined();
+      expect(path.patch!.security).toEqual([{ BearerAuth: [] }]);
+
+      const idParam = path.patch!.parameters?.find((p) => p.name === 'id');
+      expect(idParam?.in).toBe('path');
+      expect(idParam?.schema?.type).toBe('integer');
+
+      expect(path.patch!.requestBody?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/UpdateAlbumRequest',
+      );
+      // Matches libraryController.updateAlbum, which returns
+      // libraryService.getAlbumFromDB() — the same call markMissing/markFound
+      // use, already documented as AlbumSearchResult on the sibling paths.
+      expect(path.patch!.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/AlbumSearchResult',
+      );
+      expect(path.patch!.responses?.['404']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ApiErrorResponse',
+      );
+    });
+
+    it('bumps info.version to 1.24.0', () => {
+      expect(spec.info.version).toBe('1.24.0');
+    });
+  });
+
   // GET /library/catalog (the gzipped-NDJSON bulk export) and its row shape
   // shipped in Backend-Service#1468 (Epic F, parent #1466) but were never
   // propagated to this cross-repo SSOT — only to BS's local Swagger-only

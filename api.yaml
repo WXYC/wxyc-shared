@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.23.0
+  version: 1.24.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1180,6 +1180,67 @@ components:
         album_artist:
           type: string
           description: Credited album artist for compilations (e.g., "Kruder & Dorfmeister" on a DJ-Kicks release filed under Various Artists).
+        discogsUnavailable:
+          type: boolean
+          description: |
+            MD-set marker indicating this release is intentionally not on
+            Discogs (embargoed promo, audience-segment release, etc.). When
+            true, the LML runtime-lookup chokepoint does not attempt Discogs
+            resolution for this release. See WXYC/wiki plans/rotation-discogs-unavailable.md.
+        discogsUnavailableNote:
+          type: string
+          nullable: true
+          maxLength: 500
+          description: Optional free-text reason for `discogsUnavailable`.
+        lastDiscogsRecheckAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Stamped on every recheck attempt by the
+            `library-discogs-unavailable-recheck` cron. Read-only from the
+            client side.
+
+    UpdateAlbumRequest:
+      type: object
+      description: |
+        Partial-update payload for `PATCH /library/{id}` (BS#1154). Mirrors
+        Backend-Service's wire-level `UpdateAlbumRequest` type
+        (apps/backend/controllers/library.controller.ts) exactly: only fields
+        present in the body are validated and written. The 8 legacy fields
+        are snake_case (matching AddAlbumRequest / the DB columns); the two
+        BS#1281 discogs fields are camelCase, per the whitelist BS's
+        `UPDATABLE_ALBUM_FIELDS` actually reads from `req.body`.
+        `artist_name` and `code_number` are deliberately absent — they are
+        server-derived (re-attribution side effects of an `artist_id`
+        change), never read from the client body. `lastDiscogsRecheckAt` is
+        also absent — it is server-write-only (the recheck cron writes it
+        directly).
+      properties:
+        album_title:
+          type: string
+        label:
+          type: string
+        label_id:
+          type: integer
+          nullable: true
+        genre_id:
+          type: integer
+        format_id:
+          type: integer
+        artist_id:
+          type: integer
+        alternate_artist_name:
+          type: string
+          nullable: true
+        disc_quantity:
+          type: integer
+        discogsUnavailable:
+          type: boolean
+        discogsUnavailableNote:
+          type: string
+          nullable: true
+          maxLength: 500
 
     AlbumSearchResult:
       type: object
@@ -7003,6 +7064,43 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/TrackSearchResult'
+
+  /library/{id}:
+    patch:
+      summary: Update catalog album (partial)
+      description: |
+        True partial-update semantics (BS#1154): only fields present in the
+        body are validated and written. See `UpdateAlbumRequest` for the
+        exact wire shape BS reads.
+      tags:
+        - Library
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAlbumRequest'
+      responses:
+        '200':
+          description: Successfully updated album
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumSearchResult'
+        '404':
+          description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /library/{id}/missing:
     patch:
