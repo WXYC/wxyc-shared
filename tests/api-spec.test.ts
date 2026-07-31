@@ -1713,7 +1713,7 @@ describe('OpenAPI Specification', () => {
   describe('Device Authorization (RFC 8628) — #195', () => {
     // Field-list / enum snapshot against api.yaml (the #186 CatalogExportRow house
     // style — NOT a live runtime diff; the plugin's per-route zod schemas are
-    // module-internal and unexported). The contract mirrors better-auth 1.6.20 +
+    // module-internal and unexported). The contract mirrors better-auth 1.6.25 +
     // Backend-Service#1495. Error enums are the RUNTIME superset of the declared zod.
     type Schema = {
       type?: string;
@@ -1901,15 +1901,17 @@ describe('OpenAPI Specification', () => {
     // ---- version forcing-function ----
 
     it('pins the verified better-auth version so a bump forces a conscious re-verification', () => {
-      // The contract above mirrors better-auth 1.6.20 (the version Backend-Service#1495
-      // runs; 1.6.20 added the /device/code `user_id` field over 1.6.18/.19). If this
-      // fails after a bump, re-verify routes.mjs against the new version, update the
-      // enums/fields above, then bump this string. (package.json keeps the ^1.6.18
-      // caret per the issue; package-lock.json resolves it to 1.6.20.)
+      // The contract above mirrors better-auth 1.6.25. Re-verified 2026-07-31 for the
+      // 1.6.20→1.6.25 bump: no device-auth wire changes across 1.6.21–1.6.25 (only a
+      // 1.6.21 Zod-v4 compat fix), so the field/enum/security snapshots above still hold.
+      // (1.6.24 also regressed jwtClient()'s CLIENT type — better-auth#10515 — which is
+      // suppressed in src/auth-client/index.ts and unrelated to the wire contract here.)
+      // If this fails after a bump, re-verify routes.mjs against the new version, update
+      // the enums/fields above, then bump this string.
       const ba = JSON.parse(
         readFileSync(join(__dirname, '..', 'node_modules', 'better-auth', 'package.json'), 'utf-8')
       ) as { version: string };
-      expect(ba.version).toBe('1.6.20');
+      expect(ba.version).toBe('1.6.25');
     });
   });
 });
