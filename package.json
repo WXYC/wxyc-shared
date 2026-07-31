@@ -87,7 +87,7 @@
   },
   "peerDependencies": {
     "better-auth": "^1.5.0",
-    "typescript": "^5.0.0 || ^6.0.0"
+    "typescript": "^5.0.0 || ^6.0.0 || ^7.0.0"
   },
   "peerDependenciesMeta": {
     "better-auth": {
