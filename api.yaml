@@ -3420,9 +3420,10 @@ components:
             union (LML#1018/#1019/#1022) for every other WXYC shelf location
             carrying the same track (V/A compilations, soundtracks) — those rows
             are folded directly into `results` alongside the primary, tagged with
-            `source: discogs_release` since the recall index is Discogs-release-
-            derived. Empty or absent when the release matched via artist/album
-            strategies. Backward-compatible — existing consumers ignore the field.
+            `source: discogs_release` since the recall index is
+            Discogs-release-derived. Empty or absent when the release matched via
+            artist/album strategies. Backward-compatible — existing consumers
+            ignore the field.
         matched_via_alias:
           type: array
           items:
