@@ -985,6 +985,68 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  describe('Lookup Multi-Location Union (LML#1018/#1022)', () => {
+    it('should define LookupRequest.include_locations as an optional boolean defaulting to false', () => {
+      const schema = spec.components.schemas.LookupRequest as {
+        properties: Record<string, { type?: string; default?: unknown }>;
+        required?: string[];
+      };
+      expect(schema.properties.include_locations).toBeDefined();
+      expect(schema.properties.include_locations.type).toBe('boolean');
+      expect(schema.properties.include_locations.default).toBe(false);
+      // Not required — existing consumers continue to omit it and see the
+      // byte-identical v1 response shape.
+      expect(schema.required ?? []).not.toContain('include_locations');
+    });
+
+    it('should attach optional also_available_on array of LibraryLocation to LookupResponse', () => {
+      const schema = spec.components.schemas.LookupResponse as {
+        properties: Record<string, { type?: string; items?: { $ref?: string } }>;
+        required?: string[];
+      };
+      expect(schema.properties.also_available_on).toBeDefined();
+      expect(schema.properties.also_available_on.type).toBe('array');
+      expect(schema.properties.also_available_on.items?.$ref).toBe(
+        '#/components/schemas/LibraryLocation',
+      );
+      // Not required — present only when include_locations: true.
+      expect(schema.required ?? []).not.toContain('also_available_on');
+    });
+
+    it('should define LibraryLocation as a lean location entry, distinct from LookupResultItem', () => {
+      const schema = spec.components.schemas.LibraryLocation as {
+        required: string[];
+        properties: Record<
+          string,
+          { type?: string; nullable?: boolean; description?: string; enum?: string[] }
+        >;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(['library_id', 'track_artist', 'track_title']);
+
+      expect(schema.properties.library_id.type).toBe('integer');
+      expect(schema.properties.artist.type).toBe('string');
+      expect(schema.properties.album_title.type).toBe('string');
+      expect(schema.properties.track_title.type).toBe('string');
+
+      expect(schema.properties.track_position.type).toBe('string');
+      expect(schema.properties.track_position.nullable).toBe(true);
+
+      expect(schema.properties.track_artist.type).toBe('string');
+
+      expect(schema.properties.credit_role.type).toBe('string');
+      expect(schema.properties.credit_role.enum ?? undefined).toEqual(
+        expect.arrayContaining(['primary', 'featured', 'extra']),
+      );
+
+      expect(schema.properties.discogs_release_id.type).toBe('integer');
+      expect(schema.properties.discogs_release_id.nullable).toBe(true);
+
+      expect(schema.properties.artwork_url.type).toBe('string');
+      expect(schema.properties.artwork_url.nullable).toBe(true);
+    });
+  });
+
   describe('Proxy Response Schemas', () => {
     it('should define AlbumMetadataResponse with enriched fields', () => {
       const schema = spec.components.schemas.AlbumMetadataResponse as {
