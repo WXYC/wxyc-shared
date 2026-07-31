@@ -511,10 +511,6 @@ describe('OpenAPI Specification', () => {
         '#/components/schemas/ApiErrorResponse',
       );
     });
-
-    it('bumps info.version to 1.24.0', () => {
-      expect(spec.info.version).toBe('1.24.0');
-    });
   });
 
   // GET /library/catalog (the gzipped-NDJSON bulk export) and its row shape
@@ -1302,16 +1298,39 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties.type.enum).toEqual(['refetch']);
     });
 
+    it('should define LiveFsInsertEvent with the {type, payload, timestamp} envelope', () => {
+      const schema = spec.components.schemas.LiveFsInsertEvent as {
+        type: string;
+        required: string[];
+        properties: Record<string, { enum?: string[]; $ref?: string }>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.type).toBe('object');
+      expect(schema.required).toEqual(['type', 'payload', 'timestamp']);
+      expect(schema.properties.type.enum).toEqual(['insert']);
+      // Carries the full newly-inserted flowsheet row — same payload shape as
+      // LiveFsUpdateEvent, valid pre-enrichment (metadata_status 'pending',
+      // enrichment fields nullable on FlowsheetEntryResponse).
+      expect(schema.properties.payload.$ref).toBe('#/components/schemas/FlowsheetEntryResponse');
+    });
+
     it('should define LiveFsEvent as a discriminated union over `type`', () => {
       const schema = spec.components.schemas.LiveFsEvent as {
         oneOf: Array<{ $ref: string }>;
         discriminator: { propertyName: string; mapping: Record<string, string> };
       };
       expect(schema).toBeDefined();
-      expect(schema.oneOf).toHaveLength(2);
+      expect(schema.oneOf).toHaveLength(3);
       expect(schema.discriminator.propertyName).toBe('type');
       expect(schema.discriminator.mapping.update).toContain('LiveFsUpdateEvent');
       expect(schema.discriminator.mapping.refetch).toContain('LiveFsRefetchEvent');
+      expect(schema.discriminator.mapping.insert).toContain('LiveFsInsertEvent');
+    });
+
+    // The "current version" sentinel lives with the most recent api.yaml change;
+    // adding LiveFsInsertEvent to the LiveFsEvent union bumped the minor.
+    it('bumps info.version to 1.25.0', () => {
+      expect(spec.info.version).toBe('1.25.0');
     });
   });
 
