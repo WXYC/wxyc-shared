@@ -1121,65 +1121,51 @@ describe('OpenAPI Specification', () => {
     });
   });
 
-  describe('Lookup Multi-Location Union (LML#1018/#1022)', () => {
-    it('should define LookupRequest.include_locations as an optional boolean defaulting to false', () => {
+  describe('Lookup Multi-Location Union (transparent fold, supersedes LML#1018/#1022)', () => {
+    it('should not define LookupRequest.include_locations — the union runs server-side, no opt-in', () => {
       const schema = spec.components.schemas.LookupRequest as {
-        properties: Record<string, { type?: string; default?: unknown }>;
-        required?: string[];
+        properties: Record<string, unknown>;
       };
-      expect(schema.properties.include_locations).toBeDefined();
-      expect(schema.properties.include_locations.type).toBe('boolean');
-      expect(schema.properties.include_locations.default).toBe(false);
-      // Not required — existing consumers continue to omit it and see the
-      // byte-identical v1 response shape.
-      expect(schema.required ?? []).not.toContain('include_locations');
+      expect(schema.properties.include_locations).toBeUndefined();
     });
 
-    it('should attach optional also_available_on array of LibraryLocation to LookupResponse', () => {
+    it('should not define LookupResponse.also_available_on — locations fold into results instead', () => {
       const schema = spec.components.schemas.LookupResponse as {
-        properties: Record<string, { type?: string; items?: { $ref?: string } }>;
-        required?: string[];
+        properties: Record<string, unknown>;
       };
-      expect(schema.properties.also_available_on).toBeDefined();
-      expect(schema.properties.also_available_on.type).toBe('array');
-      expect(schema.properties.also_available_on.items?.$ref).toBe(
-        '#/components/schemas/LibraryLocation',
-      );
-      // Not required — present only when include_locations: true.
-      expect(schema.required ?? []).not.toContain('also_available_on');
+      expect(schema.properties.also_available_on).toBeUndefined();
     });
 
-    it('should define LibraryLocation as a lean location entry, distinct from LookupResultItem', () => {
-      const schema = spec.components.schemas.LibraryLocation as {
-        required: string[];
-        properties: Record<
-          string,
-          { type?: string; nullable?: boolean; description?: string; enum?: string[] }
-        >;
+    it('should not define a LibraryLocation schema — a folded location is an ordinary LookupResultItem', () => {
+      expect(spec.components.schemas.LibraryLocation).toBeUndefined();
+    });
+
+    it("should broaden LookupResultItem.matched_via's description to name the location-union as a second producer", () => {
+      const schema = spec.components.schemas.LookupResultItem as {
+        properties: Record<string, { description?: string }>;
       };
-      expect(schema).toBeDefined();
-      expect(schema.required).toEqual(['library_id', 'track_artist', 'track_title']);
+      const description = schema.properties.matched_via.description ?? '';
+      expect(description).toContain('SONG_AS_TRACK');
+      expect(description).toContain('multi-location union');
+      expect(description).toContain('discogs_release');
+    });
 
-      expect(schema.properties.library_id.type).toBe('integer');
-      expect(schema.properties.artist.type).toBe('string');
-      expect(schema.properties.album_title.type).toBe('string');
-      expect(schema.properties.track_title.type).toBe('string');
+    it('should leave the AlbumSearchResult.matched_via description untouched (BS catalog search, not the location union)', () => {
+      const schema = spec.components.schemas.AlbumSearchResult as {
+        properties: Record<string, { description?: string }>;
+      };
+      const description = schema.properties.matched_via.description ?? '';
+      expect(description).toContain("Backend's catalog `/library/` search");
+      expect(description).not.toContain('multi-location union');
+    });
 
-      expect(schema.properties.track_position.type).toBe('string');
-      expect(schema.properties.track_position.nullable).toBe(true);
-
-      expect(schema.properties.track_artist.type).toBe('string');
-
-      expect(schema.properties.credit_role.type).toBe('string');
-      expect(schema.properties.credit_role.enum ?? undefined).toEqual(
-        expect.arrayContaining(['primary', 'featured', 'extra']),
-      );
-
-      expect(schema.properties.discogs_release_id.type).toBe('integer');
-      expect(schema.properties.discogs_release_id.nullable).toBe(true);
-
-      expect(schema.properties.artwork_url.type).toBe('string');
-      expect(schema.properties.artwork_url.nullable).toBe(true);
+    it('should leave the LibrarySearchItem.matched_via description untouched (LML catalog search, not the location union)', () => {
+      const schema = spec.components.schemas.LibrarySearchItem as {
+        properties: Record<string, { description?: string }>;
+      };
+      const description = schema.properties.matched_via.description ?? '';
+      expect(description).toContain('catalog-track-search plan §5.1');
+      expect(description).not.toContain('multi-location union');
     });
   });
 

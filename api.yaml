@@ -3127,19 +3127,6 @@ components:
             is omitted. Backend's `library-identity-writer.ts` (E2-BS) sets
             this to true on every call; other consumers (catalog search,
             dj-site proxy, iOS apps) leave it false.
-        include_locations:
-          type: boolean
-          default: false
-          description: >
-            Per the comprehensive multi-location union (LML#1018/#1022). When
-            true, the response carries an additional `also_available_on`
-            array — every other WXYC library shelf location that carries the
-            same track (V/A compilations, soundtracks), ranked by LML, so a
-            DJ can find a backup copy when the primary is missing or
-            checked-out. When false (the default), the response is
-            byte-identical to today — `also_available_on` is omitted.
-            DJ-facing callers (dj-site catalog, request-o-matic) set this;
-            Backend enrichment does not.
         extended:
           type: boolean
           description: >
@@ -3427,10 +3414,15 @@ components:
           items:
             $ref: '#/components/schemas/TrackMatchHint'
           description: >
-            Populated when a track-title match (LML's new SONG_AS_TRACK strategy)
-            drove this release into the results, per catalog-track-search plan §5.1.
-            Empty or absent when the release matched via artist/album strategies.
-            Backward-compatible — existing consumers ignore the field.
+            Populated when a track-title match drove this release into the results.
+            Two producers: LML's SONG_AS_TRACK strategy (per catalog-track-search
+            plan §5.1) for the primary match, and the comprehensive multi-location
+            union (LML#1018/#1019/#1022) for every other WXYC shelf location
+            carrying the same track (V/A compilations, soundtracks) — those rows
+            are folded directly into `results` alongside the primary, tagged with
+            `source: discogs_release` since the recall index is Discogs-release-
+            derived. Empty or absent when the release matched via artist/album
+            strategies. Backward-compatible — existing consumers ignore the field.
         matched_via_alias:
           type: array
           items:
@@ -3559,17 +3551,6 @@ components:
             LML reads them (LML#928 for `X-Caller-Class`-driven lane
             routing, LML#931 for `X-Caller-Reason` caller telemetry) — see
             BS#1843.
-        also_available_on:
-          type: array
-          items:
-            $ref: '#/components/schemas/LibraryLocation'
-          description: >
-            Every other WXYC library shelf location that carries the same
-            track (V/A compilations, soundtracks), ranked by LML so
-            consumers can render in order. Present only when the request set
-            `include_locations: true`; absent otherwise (empty when the flag
-            is set but no other location carries the track) so existing
-            consumers see a byte-identical response (LML#1018/#1022).
         degraded:
           type: boolean
           default: false
@@ -3605,58 +3586,6 @@ components:
             providers) was rate limited or down and its contribution was
             omitted. Set by LML#930's caller-deadline / admission path; read by
             LML#931 (`degraded-mode-result` telemetry) and wxyc-canary#82.
-
-    LibraryLocation:
-      type: object
-      description: >
-        A single other WXYC shelf location carrying the same track, returned
-        on `LookupResponse.also_available_on` when the request set
-        `include_locations: true` (LML#1018/#1022's comprehensive
-        multi-location union). Deliberately a lean entry rather than a full
-        `LookupResultItem` — no live artwork/identity resolution; art is
-        precomputed at index time.
-      required:
-        - library_id
-        - track_artist
-        - track_title
-      properties:
-        library_id:
-          type: integer
-          description: WXYC library.id (shelf location) for this copy.
-        artist:
-          type: string
-          description: Shelf/album artist (e.g. "Soundtracks - L").
-        album_title:
-          type: string
-          description: Album/release title (e.g. "Lost in Translation").
-        track_position:
-          type: string
-          nullable: true
-          description: The track's position on this release (e.g. "A1"), when known.
-        track_title:
-          type: string
-          description: Track title.
-        track_artist:
-          type: string
-          description: >
-            Credited-as artist for this track (e.g. "Brian Reitzell And
-            Roger J. Manning, Jr."), which may differ from the shelf artist
-            on a compilation.
-        credit_role:
-          type: string
-          enum:
-            - primary
-            - featured
-            - extra
-          description: The role this credit represents on the track.
-        discogs_release_id:
-          type: integer
-          nullable: true
-          description: Discogs release ID, usable as an art re-resolution key.
-        artwork_url:
-          type: string
-          nullable: true
-          description: Precomputed cover art URL for this location.
 
     # ====================================
     # Identity Block (§3.2.2 / §3.2.5 cascade)
