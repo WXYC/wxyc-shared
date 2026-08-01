@@ -1129,7 +1129,7 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties.include_locations).toBeUndefined();
     });
 
-    it('should not define LookupResponse.also_available_on — locations fold into results instead', () => {
+    it('should not define the removed separate LookupResponse locations field — locations fold into results instead', () => {
       const schema = spec.components.schemas.LookupResponse as {
         properties: Record<string, unknown>;
       };
