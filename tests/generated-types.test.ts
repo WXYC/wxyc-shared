@@ -932,4 +932,55 @@ describe('Generated TypeScript Types', () => {
       expect(ok.degraded_reason).toBeUndefined();
     });
   });
+
+  describe('DiscogsMatchResult per-service streaming_status (LML#1053)', () => {
+    // Pin the consumer-facing contract BS#1915's self-heal reads: each streaming
+    // service carries verified / absent / unresolved, disambiguating a transient
+    // null (unresolved -> safe to re-ask) from a terminal absence (absent -> never
+    // re-ask). Independent of the sibling `*_url` fields, which keep their meaning.
+    it('accepts a result carrying per-service streaming statuses', () => {
+      const withStatus: DiscogsMatchResult = {
+        release_id: 12345,
+        release_url: 'https://www.discogs.com/release/12345',
+        apple_music_url: null,
+        spotify_url: 'https://open.spotify.com/album/abc',
+        streaming_status: {
+          apple_music: 'unresolved',
+          spotify: 'verified',
+          bandcamp: 'absent',
+        },
+      };
+
+      expect(withStatus.streaming_status?.apple_music).toBe('unresolved');
+      expect(withStatus.streaming_status?.spotify).toBe('verified');
+      expect(withStatus.streaming_status?.bandcamp).toBe('absent');
+    });
+
+    it('treats the per-service status as a closed verified/absent/unresolved union', () => {
+      const statuses: NonNullable<
+        NonNullable<DiscogsMatchResult['streaming_status']>['apple_music']
+      >[] = ['verified', 'absent', 'unresolved'];
+      expect(statuses).toHaveLength(3);
+    });
+
+    it('represents a never-consulted service by omitting its key (not `absent`)', () => {
+      const partial: DiscogsMatchResult = {
+        release_id: 12345,
+        release_url: 'https://www.discogs.com/release/12345',
+        streaming_status: {
+          apple_music: 'verified',
+          // bandcamp never probed on the /lookup/bulk path -> key omitted, not `absent`
+        },
+      };
+      expect(partial.streaming_status?.bandcamp).toBeUndefined();
+    });
+
+    it('accepts a result that omits streaming_status entirely', () => {
+      const baseline: DiscogsMatchResult = {
+        release_id: 12345,
+        release_url: 'https://www.discogs.com/release/12345',
+      };
+      expect(baseline.streaming_status).toBeUndefined();
+    });
+  });
 });

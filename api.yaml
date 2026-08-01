@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.25.0
+  version: 1.26.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3059,6 +3059,52 @@ components:
           nullable: true
           description: SoundCloud search URL
 
+    StreamingResolutionStatus:
+      type: string
+      enum:
+        - verified
+        - absent
+        - unresolved
+      description: >
+        Per-service streaming resolution verdict for one release on a lookup
+        result. `verified` — the service was consulted and a URL was found
+        (accompanies a non-null sibling `*_url`). `absent` — the service was
+        consulted and returned no match; the null `*_url` is terminal and must
+        NOT be re-probed. `unresolved` — a probe was attempted but was
+        inconclusive (timed out, the enrichment tail was shed, or the cache was
+        a cold miss); the null `*_url` is transient and MAY resolve on a later
+        retry. A service that was never consulted at all is represented by the
+        ABSENCE of its key from `StreamingResolution` (never by `absent`), so a
+        consumer never negative-caches a service that was simply never asked.
+        Reuses the per-service verdict vocabulary of `/api/v1/streaming-check`
+        (LML#376). See LML#1053 / BS#1819.
+
+    StreamingResolution:
+      type: object
+      description: >
+        Per-service streaming resolution status for one lookup result, keyed by
+        streaming service (keys match the `*_url` prefixes on
+        `DiscogsMatchResult`). A service's key is PRESENT only when that service
+        was consulted during this lookup; an omitted service was never probed and
+        must NOT be treated as `absent` (the never-consulted state — key omission
+        is its sole encoding, so a consumer has one rule, not two).
+        Additive and independent of the `*_url` fields: it annotates why a
+        `*_url` is null (transient `unresolved` vs terminal `absent`) without
+        changing the meaning of the url fields themselves. Mirrors the
+        per-service shape of `StreamingCheckSources` (LML#376), except a
+        consulted-but-absent service is the explicit `absent` verdict rather than
+        a null, so these per-service fields are non-nullable. Covers the
+        services with a genuine probe/absence distinction on the lookup path
+        (`spotify`, `apple_music`, `bandcamp`); YouTube Music and SoundCloud are
+        search-URL-only and carry no resolution verdict.
+      properties:
+        spotify:
+          $ref: '#/components/schemas/StreamingResolutionStatus'
+        apple_music:
+          $ref: '#/components/schemas/StreamingResolutionStatus'
+        bandcamp:
+          $ref: '#/components/schemas/StreamingResolutionStatus'
+
     ReconciledIdentity:
       type: object
       description: >
@@ -3307,6 +3353,29 @@ components:
           type: string
           nullable: true
           description: SoundCloud search URL
+        streaming_status:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/StreamingResolution'
+          description: >
+            Per-service streaming resolution status (verified / absent /
+            unresolved) for this result, disambiguating WHY a sibling `*_url`
+            field is null. A service marked `unresolved` timed out, had its
+            enrichment tail shed, or was a cold cache miss — its null url is
+            transient and MAY resolve on a later retry; `absent` means the
+            service was consulted and genuinely has no match — its null url is
+            terminal and must NOT be re-probed (re-asking `absent` is the
+            per-play LML-call amplifier BS#1747 killed). A service whose key is
+            OMITTED from this object was never consulted (e.g. Bandcamp on the
+            `/lookup/bulk` path, or the library.db override skipped for a
+            non-library row) and must not be treated as `absent`. Additive and
+            optional: null/omitted on responses from an LML predating the
+            producer rollout, or on paths that resolve no per-service status.
+            Does not change the meaning of the `*_url` fields — it only
+            annotates them. Emitted identically on `/lookup` and `/lookup/bulk`
+            (the LML#681 parity rule). Mirrors the per-service verdict
+            vocabulary of `/api/v1/streaming-check` (LML#376). See LML#1053 /
+            BS#1819.
         discogs_artist_id:
           type: integer
           nullable: true

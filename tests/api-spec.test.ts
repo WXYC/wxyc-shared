@@ -1313,10 +1313,63 @@ describe('OpenAPI Specification', () => {
       expect(schema.discriminator.mapping.insert).toContain('LiveFsInsertEvent');
     });
 
+  });
+
+  describe('Per-Service Streaming Resolution Status (LML#1053)', () => {
+    it('defines StreamingResolutionStatus as a closed verified/absent/unresolved enum', () => {
+      const schema = spec.components.schemas.StreamingResolutionStatus as {
+        type?: string;
+        enum?: string[];
+      };
+      expect(schema).toBeDefined();
+      expect(schema.type).toBe('string');
+      expect(schema.enum).toEqual(['verified', 'absent', 'unresolved']);
+    });
+
+    it('defines StreamingResolution with per-service optional (non-nullable) status refs', () => {
+      const schema = spec.components.schemas.StreamingResolution as {
+        type?: string;
+        properties: Record<string, { $ref?: string; nullable?: boolean }>;
+        required?: string[];
+      };
+      expect(schema).toBeDefined();
+      expect(schema.type).toBe('object');
+      for (const svc of ['spotify', 'apple_music', 'bandcamp']) {
+        const prop = schema.properties[svc];
+        expect(prop, `${svc} property`).toBeDefined();
+        expect(prop.$ref).toBe('#/components/schemas/StreamingResolutionStatus');
+        // Optional but NOT nullable: never-consulted is encoded solely by key
+        // omission; a consulted-but-absent service is the `absent` verdict — so
+        // `null` would be a redundant second encoding of never-consulted.
+        expect(prop.nullable).toBeUndefined();
+      }
+      // Every per-service status is optional: a service key is present only when
+      // that service was consulted this lookup. An omitted service was never
+      // probed and must NOT be read as `absent` (the never-consulted state).
+      expect(schema.required ?? []).toEqual([]);
+    });
+
+    it('attaches streaming_status to DiscogsMatchResult as an optional nullable $ref', () => {
+      const schema = spec.components.schemas.DiscogsMatchResult as {
+        properties: Record<string, { nullable?: boolean; allOf?: Array<{ $ref?: string }> }>;
+        required?: string[];
+      };
+      expect(schema.properties.streaming_status).toBeDefined();
+      expect(schema.properties.streaming_status.nullable).toBe(true);
+      expect(schema.properties.streaming_status.allOf?.[0]?.$ref).toBe(
+        '#/components/schemas/StreamingResolution',
+      );
+      // Additive: not required, so existing LML/BS consumers are unaffected and a
+      // null/omitted object means "no per-service status resolved on this path"
+      // (e.g. an LML predating the producer rollout). Does not change the meaning
+      // of the sibling `*_url` fields — it only annotates why a url is null.
+      expect(schema.required ?? []).not.toContain('streaming_status');
+    });
+
     // The "current version" sentinel lives with the most recent api.yaml change;
-    // adding LiveFsInsertEvent to the LiveFsEvent union bumped the minor.
-    it('bumps info.version to 1.25.0', () => {
-      expect(spec.info.version).toBe('1.25.0');
+    // adding the per-service streaming_status contract bumped the minor.
+    it('bumps info.version to 1.26.0', () => {
+      expect(spec.info.version).toBe('1.26.0');
     });
   });
 
