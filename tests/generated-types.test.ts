@@ -983,4 +983,103 @@ describe('Generated TypeScript Types', () => {
       expect(baseline.streaming_status).toBeUndefined();
     });
   });
+
+  describe('discogsUnavailable trio on AlbumMetadataResponse / AlbumSearchResult / FlowsheetEntryResponse (#285 / #282 / BS#1908)', () => {
+    it('AlbumMetadataResponse accepts the discogsUnavailable trio', () => {
+      const response: AlbumMetadataResponse = {
+        discogsReleaseId: 12345,
+        artworkUrl: 'https://example.com/art.jpg',
+        discogsUnavailable: true,
+        discogsUnavailableNote: 'Embargoed promo-only pressing',
+        lastDiscogsRecheckAt: '2026-08-01T00:00:00Z',
+      };
+
+      expect(response.discogsUnavailable).toBe(true);
+      expect(response.discogsUnavailableNote).toBe('Embargoed promo-only pressing');
+      expect(response.lastDiscogsRecheckAt).toBe('2026-08-01T00:00:00Z');
+    });
+
+    it('AlbumMetadataResponse allows omitting the discogsUnavailable trio', () => {
+      const response: AlbumMetadataResponse = {
+        discogsReleaseId: 12345,
+        artworkUrl: 'https://example.com/art.jpg',
+      };
+
+      expect(response.discogsUnavailable).toBeUndefined();
+      expect(response.discogsUnavailableNote).toBeUndefined();
+      expect(response.lastDiscogsRecheckAt).toBeUndefined();
+    });
+
+    it('AlbumSearchResult accepts the discogsUnavailable trio', () => {
+      const result: AlbumSearchResult = {
+        id: 60359,
+        add_date: '2026-05-12T00:00:00Z',
+        album_title: 'DOGA',
+        artist_name: 'Juana Molina',
+        code_letters: 'MO',
+        code_number: 8,
+        code_artist_number: 3,
+        format_name: 'CD',
+        genre_name: 'Rock',
+        label: 'Sonamos',
+        discogsUnavailable: true,
+        discogsUnavailableNote: null,
+        lastDiscogsRecheckAt: null,
+      };
+
+      expect(result.discogsUnavailable).toBe(true);
+      expect(result.discogsUnavailableNote).toBeNull();
+      expect(result.lastDiscogsRecheckAt).toBeNull();
+    });
+
+    it('AlbumSearchResult allows omitting the discogsUnavailable trio', () => {
+      const result: AlbumSearchResult = {
+        id: 60359,
+        add_date: '2026-05-12T00:00:00Z',
+        album_title: 'DOGA',
+        artist_name: 'Juana Molina',
+        code_letters: 'MO',
+        code_number: 8,
+        code_artist_number: 3,
+        format_name: 'CD',
+        genre_name: 'Rock',
+        label: 'Sonamos',
+      };
+
+      expect(result.discogsUnavailable).toBeUndefined();
+    });
+
+    it('FlowsheetEntryResponse accepts discogsUnavailable + discogsUnavailableNote', () => {
+      const entry: FlowsheetEntryResponse = {
+        id: 1,
+        play_order: 1,
+        show_id: 1,
+        request_flag: false,
+        segue: false,
+        artist_name: 'Jessica Pratt',
+        track_title: 'Back, Baby',
+        album_title: 'On Your Own Love Again',
+        discogsUnavailable: true,
+        discogsUnavailableNote: 'Self-released cassette, never listed',
+      };
+
+      expect(entry.discogsUnavailable).toBe(true);
+      expect(entry.discogsUnavailableNote).toBe('Self-released cassette, never listed');
+    });
+
+    it('FlowsheetEntryResponse allows nullable discogsUnavailable to be explicitly null', () => {
+      const entry: FlowsheetEntryResponse = {
+        id: 1,
+        play_order: 1,
+        show_id: 1,
+        request_flag: false,
+        segue: false,
+        discogsUnavailable: null,
+        discogsUnavailableNote: null,
+      };
+
+      expect(entry.discogsUnavailable).toBeNull();
+      expect(entry.discogsUnavailableNote).toBeNull();
+    });
+  });
 });
