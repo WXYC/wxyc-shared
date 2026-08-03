@@ -646,12 +646,17 @@ describe('OpenAPI Specification', () => {
     };
 
     // The catalog-export projection (Backend-Service catalog-export.service.ts,
-    // CatalogExportRow). The SSOT leads the consumer: this list is 15 fields,
-    // one ahead of that private type until Backend Track 3 (#1493) adds the
-    // 15th, `popularity`.
+    // CatalogExportRow). The SSOT leads the consumer (the private type mirrors
+    // this list under the BS#1477 parity guard). BS#1965 added the four
+    // library.db-producer fields (legacy_release_id, alternate_artist_name,
+    // album_artist, cross_reference_names) — 19 fields total.
     const EXPORT_FIELDS = [
       'id',
+      'legacy_release_id',
       'artist_name',
+      'alternate_artist_name',
+      'album_artist',
+      'cross_reference_names',
       'album_title',
       'code_letters',
       'code_number',
@@ -667,17 +672,18 @@ describe('OpenAPI Specification', () => {
       'rotation_kill_date',
     ];
 
-    it('defines CatalogExportRow with exactly the 15 shipped fields', () => {
+    it('defines CatalogExportRow with exactly the 19 shipped fields', () => {
       const schema = spec.components.schemas.CatalogExportRow as Schema;
       expect(schema).toBeDefined();
       expect(Object.keys(schema.properties ?? {}).sort()).toEqual([...EXPORT_FIELDS].sort());
     });
 
-    it('marks the 8 non-null fields required (deliberate leniency: the nullable keys are omitted)', () => {
+    it('marks the 9 non-null fields required (deliberate leniency: the nullable keys are omitted)', () => {
       const schema = spec.components.schemas.CatalogExportRow as Schema;
       expect((schema.required ?? []).sort()).toEqual(
         [
           'id',
+          'legacy_release_id',
           'artist_name',
           'album_title',
           'code_letters',
@@ -687,6 +693,28 @@ describe('OpenAPI Specification', () => {
           'format_name',
         ].sort()
       );
+    });
+
+    it('ships the four BS#1965 library.db-producer fields (legacy_release_id required int; album_artist/alternate_artist_name/cross_reference_names nullable strings)', () => {
+      const schema = spec.components.schemas.CatalogExportRow as Schema;
+
+      // legacy_release_id: total since BS#1963 mint + backfill, so REQUIRED and
+      // a plain integer (the producer emits it AS library.db's library.id).
+      const legacy = schema.properties?.legacy_release_id;
+      expect(legacy).toBeDefined();
+      expect(legacy!.type).toBe('integer');
+      expect(legacy!.nullable).toBeUndefined();
+      expect(schema.required ?? []).toContain('legacy_release_id');
+
+      // The three curated free-text fields are nullable and stay OUT of required
+      // (genuine library metadata gaps must not break a strict decoder).
+      for (const key of ['album_artist', 'alternate_artist_name', 'cross_reference_names']) {
+        const prop = schema.properties?.[key];
+        expect(prop, key).toBeDefined();
+        expect(prop!.type, key).toBe('string');
+        expect(prop!.nullable, key).toBe(true);
+        expect(schema.required ?? [], key).not.toContain(key);
+      }
     });
 
     it('ships popularity as a nullable integer alongside plays, not as a replacement (BS#1486 Phase-2 Track 3)', () => {
@@ -774,6 +802,56 @@ describe('OpenAPI Specification', () => {
         expect(path?.get, route).toBeDefined();
         expect(path!.get!.security, route).toEqual([{ BearerAuth: [] }]);
       }
+    });
+
+    // --- BS#1965: sibling CTA export for the library.db producer ---
+
+    it('defines CatalogCompilationTrackRow with exactly {legacy_release_id, artist_name, track_title}', () => {
+      const schema = spec.components.schemas.CatalogCompilationTrackRow as Schema;
+      expect(schema).toBeDefined();
+      expect(Object.keys(schema.properties ?? {}).sort()).toEqual(
+        ['legacy_release_id', 'artist_name', 'track_title'].sort()
+      );
+      // Keyed on legacy_release_id + artist_name; track_title is nullable (the CTA
+      // column is). Deliberately NO `id` / `track_position` — library.db's
+      // 3-column CTA table carries neither, so shipping them would break parity.
+      expect((schema.required ?? []).sort()).toEqual(['legacy_release_id', 'artist_name'].sort());
+      expect(schema.properties?.legacy_release_id?.type).toBe('integer');
+      expect(schema.properties?.artist_name?.type).toBe('string');
+      expect(schema.properties?.track_title?.type).toBe('string');
+      expect(schema.properties?.track_title?.nullable).toBe(true);
+      expect(schema.properties?.id).toBeUndefined();
+      expect(schema.properties?.track_position).toBeUndefined();
+    });
+
+    it('declares GET /library/catalog/compilation-tracks (BearerAuth; If-Modified-Since + ?since=; NDJSON 200 + 304)', () => {
+      const path = spec.paths['/library/catalog/compilation-tracks'] as {
+        get?: {
+          security?: Array<Record<string, unknown[]>>;
+          parameters?: Array<{ name: string; in: string }>;
+          responses?: Record<
+            string,
+            { headers?: Record<string, unknown>; content?: Record<string, { schema?: { $ref?: string } }> }
+          >;
+        };
+      };
+      expect(path?.get).toBeDefined();
+      expect(path.get!.security).toEqual([{ BearerAuth: [] }]);
+
+      const ifModifiedSince = path.get!.parameters?.find((p) => p.name === 'If-Modified-Since');
+      expect(ifModifiedSince?.in).toBe('header');
+      const since = path.get!.parameters?.find((p) => p.name === 'since');
+      expect(since?.in).toBe('query');
+
+      const ok = path.get!.responses?.['200'];
+      expect(ok).toBeDefined();
+      // One NDJSON line is one CatalogCompilationTrackRow (framing isn't expressible in OpenAPI).
+      expect(ok!.content?.['application/x-ndjson']?.schema?.$ref).toBe(
+        '#/components/schemas/CatalogCompilationTrackRow'
+      );
+      expect(ok!.headers?.['Last-Modified']).toBeDefined();
+      expect(ok!.headers?.['Content-Encoding']).toBeDefined();
+      expect(path.get!.responses?.['304']).toBeDefined();
     });
   });
 

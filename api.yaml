@@ -1374,12 +1374,22 @@ components:
         of the core catalog row. Deliberately NOT AlbumSearchResult: it drops the
         search-only decoration (matched_via, matched_via_alias, album_dist,
         artist_dist) and the fields the export omits (add_date, label_id,
-        rotation_id, album_artist, date_lost, date_found), and instead ships
+        rotation_id, date_lost, date_found), and instead ships
         rotation RAW (rotation_bin + rotation_kill_date) so the client evaluates
         rotation expiry against its own clock. See the rotation_bin description
         for the load-bearing semantic difference from AlbumSearchResult.
+
+        BS#1965 adds the fields the Backend-sourced library.db producer
+        (discogs-etl#351) needs to build a byte-parity library.db over HTTP
+        instead of a direct Postgres read: legacy_release_id (the producer emits
+        it AS the library.db id, since BS serials collide with the tubafrenzy id
+        space), album_artist, alternate_artist_name, and cross_reference_names
+        (pipe-joined artist aliases). label stays in this row but is always null
+        in the produced library.db (the legacy MySQL export omits it), so it is
+        not load-bearing for the producer.
       required:
         - id
+        - legacy_release_id
         - artist_name
         - album_title
         - code_letters
@@ -1390,12 +1400,49 @@ components:
       properties:
         id:
           type: integer
+          description: >
+            BS serial library.id — the existing on-device clone key for the iOS
+            Spotlight consumer. NOT the library.db id: the library.db producer
+            uses legacy_release_id instead (see below), so BS serials never leak
+            into the tubafrenzy id space.
+        legacy_release_id:
+          type: integer
+          description: >
+            The library row's surrogate key (BS#1963), total since the mint +
+            NULL-legacy backfill. The Backend-sourced library.db producer
+            (discogs-etl#351) emits this AS library.db's library.id.
         artist_name:
           type: string
           description: >
             Authoritative artist name. The server COALESCEs the denormalized
             library.artist_name to artists.artist_name (NOT NULL), so this never
             ships as null even before the denormalization backfill completes.
+        alternate_artist_name:
+          type: string
+          nullable: true
+          description: >
+            Secondary artist name curated by the librarians
+            (library.alternate_artist_name); null when unset. Maps to
+            library.db's alternate_artist_name column.
+        album_artist:
+          type: string
+          nullable: true
+          description: >
+            Album-level artist (library.album_artist), distinct from the
+            shelf-filing artist_name; null when unset. Maps to library.db's
+            album_artist column. (Previously omitted from this export; re-added
+            for the library.db producer.)
+        cross_reference_names:
+          type: string
+          nullable: true
+          description: >
+            Pipe-joined (" | ") names of the artists cataloger-cross-referenced
+            to this row's artist, in either FK direction, via
+            artist_crossreference (discogs-etl#334) — e.g. a band filed under its
+            name carries a member's personal name. Deduplicated and
+            alphabetically ordered for a stable string; null when the artist has
+            no cross-references. Maps to library.db's cross_reference_names
+            column.
         album_title:
           type: string
         code_letters:
@@ -1469,6 +1516,40 @@ components:
             expires, or null if it has none. Used with rotation_bin to evaluate
             live rotation client-side. Absent from AlbumSearchResult — a client
             that reuses AlbumSearchResult for this endpoint silently loses it.
+
+    CatalogCompilationTrackRow:
+      type: object
+      description: >
+        One compilation_track_artist (CTA) row as served by
+        GET /library/catalog/compilation-tracks for the Backend-sourced
+        library.db producer (BS#1965 / discogs-etl#351). The sibling of
+        CatalogExportRow: where that endpoint feeds library.db's `library` table,
+        this feeds its `compilation_track_artist` table (3 columns:
+        library_release_id, artist_name, track_title). Keyed on
+        legacy_release_id — the library row's surrogate key that the producer
+        also emits AS library.db's library.id — so the producer maps
+        legacy_release_id -> compilation_track_artist.library_release_id.
+        Deliberately drops the CTA row id and track_position: library.db's
+        3-column CTA table carries neither, so shipping them would break parity.
+        Distinct from CompilationTrack (the BS#1964 dj-site read shape, which
+        keeps id + track_position and is keyed on the BS serial library_id).
+      required:
+        - legacy_release_id
+        - artist_name
+      properties:
+        legacy_release_id:
+          type: integer
+          description: >
+            The owning library row's legacy_release_id (BS#1963). Becomes
+            library.db's compilation_track_artist.library_release_id, which joins
+            to library.db's library.id.
+        artist_name:
+          type: string
+          description: Per-track performing artist (CTA.artist_name).
+        track_title:
+          type: string
+          nullable: true
+          description: Track title; nullable, matching the CTA column.
 
     AddAlbumRequest:
       type: object
@@ -7026,6 +7107,79 @@ paths:
               # path description.
               schema:
                 $ref: '#/components/schemas/CatalogExportRow'
+        '304':
+          description: >
+            Not Modified — catalog unchanged since the client's
+            If-Modified-Since / since watermark. No body.
+
+  /library/catalog/compilation-tracks:
+    get:
+      summary: Bulk compilation-track (CTA) export for the library.db producer (gzipped NDJSON)
+      description: |
+        Stream every compilation_track_artist (CTA) row as one gzipped,
+        newline-delimited JSON (NDJSON) body — one CatalogCompilationTrackRow per
+        line — so the Backend-sourced library.db producer (BS#1965 /
+        discogs-etl#351) can build library.db's compilation_track_artist table
+        over HTTP instead of a direct Postgres read. Sibling of GET
+        /library/catalog: that endpoint feeds library.db's `library` table, this
+        one feeds its `compilation_track_artist` table.
+
+        Each row is keyed on legacy_release_id (the owning library row's
+        surrogate key, which /library/catalog emits AS library.db's library.id),
+        so the producer maps legacy_release_id ->
+        compilation_track_artist.library_release_id. Rows are emitted ordered by
+        legacy_release_id.
+
+        Conditional GET: same middleware and watermark as GET /library/catalog —
+        Last-Modified is set from the library_watermark, echoed back via
+        If-Modified-Since (or ?since=) for a cheap 304. Because CTA freshness
+        rides library_watermark, a new compilation's CTA rows surface as soon as
+        its library add bumps the watermark; a standalone CTA edit to an existing
+        release lags to the next library write — immaterial for the daily
+        producer cadence.
+
+        Transport (not expressible in the element schema): the body is NDJSON —
+        split on newlines and decode per line; it is NOT a JSON array. It is
+        gzip-encoded (Content-Encoding: gzip). See catalog-export.service.ts
+        (serializeCompilationTracksNdjson).
+      security:
+        - BearerAuth: []   # routes enforce requirePermissions({ catalog: ['read'] })
+      parameters:
+        - name: If-Modified-Since
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            HTTP-date previously returned in Last-Modified. Yields 304 if the
+            catalog has not changed since. Echo the server's string verbatim; do
+            not round-trip it through a local date type.
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Header-free alternative to If-Modified-Since (same semantics).
+      responses:
+        '200':
+          description: All CTA rows as gzipped NDJSON (one CatalogCompilationTrackRow per line).
+          headers:
+            Last-Modified:
+              schema:
+                type: string
+              description: Catalog watermark as an HTTP-date; echo back as If-Modified-Since.
+            Content-Encoding:
+              schema:
+                type: string
+              description: '"gzip" on the gzip-accepting path.'
+          content:
+            application/x-ndjson:
+              # NOTE: the body is newline-delimited CatalogCompilationTrackRow
+              # objects (one per line), NOT a single object or a JSON array.
+              # OpenAPI can't model NDJSON framing; this schema describes ONE
+              # line. See the path description.
+              schema:
+                $ref: '#/components/schemas/CatalogCompilationTrackRow'
         '304':
           description: >
             Not Modified — catalog unchanged since the client's
