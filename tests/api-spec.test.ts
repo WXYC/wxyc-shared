@@ -513,6 +513,126 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  // wxyc-shared#285 (AlbumMetadataResponse) and #282 (AlbumSearchResult)
+  // propagate the discogsUnavailable trio Album already carries (#156) to the
+  // two render surfaces that were missing it: GET /proxy/metadata/album and
+  // catalog-search results. FlowsheetEntryResponse gains a partial slice
+  // (discogsUnavailable + discogsUnavailableNote, deliberately camelCase amid
+  // its snake_case metadata siblings, no lastDiscogsRecheckAt) as the api.yaml
+  // piece of Backend-Service#1908 — the BS-emit and dj-site-render pieces stay
+  // open there. All additive/optional; no existing field's shape changes.
+  describe('discogsUnavailable trio on AlbumMetadataResponse / AlbumSearchResult / FlowsheetEntryResponse (#285 / #282 / BS#1908)', () => {
+    type SchemaProp = {
+      type?: string;
+      nullable?: boolean;
+      format?: string;
+      maxLength?: number;
+    };
+    type Schema = {
+      properties?: Record<string, SchemaProp>;
+      required?: string[];
+    };
+
+    describe('AlbumMetadataResponse (#285)', () => {
+      it('gains discogsUnavailable as a boolean', () => {
+        const schema = spec.components.schemas.AlbumMetadataResponse as Schema;
+        const prop = schema.properties?.discogsUnavailable;
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('boolean');
+        expect(schema.required ?? []).not.toContain('discogsUnavailable');
+      });
+
+      it('gains discogsUnavailableNote as a nullable string capped at 500 chars', () => {
+        const schema = spec.components.schemas.AlbumMetadataResponse as Schema;
+        const prop = schema.properties?.discogsUnavailableNote;
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('string');
+        expect(prop?.nullable).toBe(true);
+        expect(prop?.maxLength).toBe(500);
+      });
+
+      it('gains lastDiscogsRecheckAt as a nullable date-time string, matching Album verbatim', () => {
+        const schema = spec.components.schemas.AlbumMetadataResponse as Schema;
+        const prop = schema.properties?.lastDiscogsRecheckAt;
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('string');
+        expect(prop?.format).toBe('date-time');
+        expect(prop?.nullable).toBe(true);
+        expect(schema.required ?? []).not.toContain('lastDiscogsRecheckAt');
+      });
+    });
+
+    describe('AlbumSearchResult (#282)', () => {
+      it('gains discogsUnavailable as a boolean, matching Album shape', () => {
+        const schema = spec.components.schemas.AlbumSearchResult as Schema;
+        const albumSchema = spec.components.schemas.Album as Schema;
+        const prop = schema.properties?.discogsUnavailable;
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe(albumSchema.properties?.discogsUnavailable?.type);
+        expect(prop?.nullable).toBe(albumSchema.properties?.discogsUnavailable?.nullable);
+        expect(schema.required ?? []).not.toContain('discogsUnavailable');
+      });
+
+      it('gains discogsUnavailableNote as a nullable string capped at 500 chars', () => {
+        const schema = spec.components.schemas.AlbumSearchResult as Schema;
+        const prop = schema.properties?.discogsUnavailableNote;
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('string');
+        expect(prop?.nullable).toBe(true);
+        expect(prop?.maxLength).toBe(500);
+      });
+
+      it('gains lastDiscogsRecheckAt as a nullable date-time string', () => {
+        const schema = spec.components.schemas.AlbumSearchResult as Schema;
+        const prop = schema.properties?.lastDiscogsRecheckAt;
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('string');
+        expect(prop?.format).toBe('date-time');
+        expect(prop?.nullable).toBe(true);
+      });
+    });
+
+    describe('FlowsheetEntryResponse (api.yaml piece of Backend-Service#1908)', () => {
+      function getProperty(prop: string): SchemaProp | undefined {
+        const schema = spec.components.schemas.FlowsheetEntryResponse as {
+          properties?: Record<string, SchemaProp>;
+          allOf?: Array<{ properties?: Record<string, SchemaProp> }>;
+        };
+        if (schema.properties?.[prop]) return schema.properties[prop];
+        for (const branch of schema.allOf ?? []) {
+          if (branch.properties?.[prop]) return branch.properties[prop];
+        }
+        return undefined;
+      }
+
+      it('gains discogsUnavailable as a nullable boolean, camelCase deliberately unlike its snake_case siblings', () => {
+        const prop = getProperty('discogsUnavailable');
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('boolean');
+        expect(prop?.nullable).toBe(true);
+      });
+
+      it('gains discogsUnavailableNote as a nullable string capped at 500 chars', () => {
+        const prop = getProperty('discogsUnavailableNote');
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('string');
+        expect(prop?.nullable).toBe(true);
+        expect(prop?.maxLength).toBe(500);
+      });
+
+      it('does not add lastDiscogsRecheckAt (BS#1908 tracks the BS-emit + dj-site-render pieces separately)', () => {
+        const prop = getProperty('lastDiscogsRecheckAt');
+        expect(prop).toBeUndefined();
+      });
+    });
+
+    // The "current version" sentinel lives with the most recent api.yaml change;
+    // bundling the three discogsUnavailable additions bumped the minor.
+    it('bumps info.version to 1.27.0', () => {
+      expect(spec.info.version).toBe('1.27.0');
+    });
+  });
+
   // GET /library/catalog (the gzipped-NDJSON bulk export) and its row shape
   // shipped in Backend-Service#1468 (Epic F, parent #1466) but were never
   // propagated to this cross-repo SSOT — only to BS's local Swagger-only
@@ -1364,12 +1484,6 @@ describe('OpenAPI Specification', () => {
       // (e.g. an LML predating the producer rollout). Does not change the meaning
       // of the sibling `*_url` fields — it only annotates why a url is null.
       expect(schema.required ?? []).not.toContain('streaming_status');
-    });
-
-    // The "current version" sentinel lives with the most recent api.yaml change;
-    // adding the per-service streaming_status contract bumped the minor.
-    it('bumps info.version to 1.26.0', () => {
-      expect(spec.info.version).toBe('1.26.0');
     });
   });
 

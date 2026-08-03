@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.26.0
+  version: 1.27.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -247,6 +247,21 @@ components:
             release_year:
               type: integer
               nullable: true
+            discogsUnavailable:
+              type: boolean
+              nullable: true
+              description: >-
+                Rides the same MD-set "not on Discogs" flag as the Album
+                surfaces (see `Album.discogsUnavailable`). Deliberately
+                camelCase — unlike its snake_case siblings in this block —
+                to match Backend's `withDiscogsUnavailableCamelCase`
+                serializer, which emits this field on the V2 flowsheet
+                album embed exactly as it does on the other Album surfaces.
+            discogsUnavailableNote:
+              type: string
+              nullable: true
+              maxLength: 500
+              description: Optional free-text reason for `discogsUnavailable`.
             spotify_url:
               type: string
               nullable: true
@@ -1309,6 +1324,26 @@ components:
           type: string
           nullable: true
           description: Album cover artwork URL from Discogs. Null if artwork has not been fetched yet or is unavailable.
+        discogsUnavailable:
+          type: boolean
+          description: |
+            MD-set marker indicating this release is intentionally not on
+            Discogs (embargoed promo, audience-segment release, etc.). When
+            true, the LML runtime-lookup chokepoint does not attempt Discogs
+            resolution for this release. See WXYC/wiki plans/rotation-discogs-unavailable.md.
+        discogsUnavailableNote:
+          type: string
+          nullable: true
+          maxLength: 500
+          description: Optional free-text reason for `discogsUnavailable`.
+        lastDiscogsRecheckAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Stamped on every recheck attempt by the
+            `library-discogs-unavailable-recheck` cron. Read-only from the
+            client side.
         matched_via:
           type: array
           items:
@@ -5637,6 +5672,26 @@ components:
         soundcloudUrl:
           type: string
           description: SoundCloud search URL
+        discogsUnavailable:
+          type: boolean
+          description: >-
+            True when a music director has marked this release as not on
+            Discogs; downstream render surfaces should suppress
+            Discogs-derived artwork/links/tracklist. Mirrors the `Album`
+            schema's MD-set marker (WXYC/wiki plans/rotation-discogs-unavailable.md).
+        discogsUnavailableNote:
+          type: string
+          nullable: true
+          maxLength: 500
+          description: Optional free-text reason for `discogsUnavailable`.
+        lastDiscogsRecheckAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Stamped on every recheck attempt by the
+            `library-discogs-unavailable-recheck` cron. Read-only from the
+            client side.
 
     ArtistMetadataResponse:
       type: object
