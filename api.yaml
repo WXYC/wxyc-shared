@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.27.0
+  version: 1.28.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1663,6 +1663,127 @@ components:
           type: string
         n:
           type: integer
+
+    # ===================
+    # Compilation Track (CTA) Write — BS#1964
+    # ===================
+
+    CompilationTrackInput:
+      type: object
+      description: |
+        A per-track artist entry to write to a compilation (BS#1964). The
+        durable, table-agnostic shape: only the librarian-meaningful free-text
+        fields, so it survives the future compilation_track_artist ->
+        library_track generalization (BS#801), which adds the canonical artist
+        link server-side rather than as a wire field.
+      required:
+        - artist_name
+      properties:
+        artist_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Per-track performing artist (CTA.artist_name).
+        track_title:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: Track title; nullable, matching the CTA column.
+        track_position:
+          type: string
+          maxLength: 20
+          nullable: true
+          description: Sleeve position label, e.g. "A1", "3".
+
+    CompilationTrack:
+      type: object
+      description: A stored compilation_track_artist row (BS#1964).
+      required:
+        - id
+        - artist_name
+      properties:
+        id:
+          type: integer
+          description: Server-assigned CTA row id.
+        artist_name:
+          type: string
+        track_title:
+          type: string
+          nullable: true
+        track_position:
+          type: string
+          nullable: true
+
+    CompilationTrackList:
+      type: object
+      required:
+        - library_id
+        - tracks
+      properties:
+        library_id:
+          type: integer
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompilationTrack'
+
+    CompilationTracksWriteRequest:
+      type: object
+      required:
+        - tracks
+      properties:
+        tracks:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CompilationTrackInput'
+
+    CompilationTracksWriteResponse:
+      type: object
+      description: |
+        Result of an additive CTA write (BS#1964). `inserted + skipped` equals
+        the number of input rows; `tracks` is the release's full stored set
+        after the write.
+      required:
+        - library_id
+        - inserted
+        - skipped
+        - tracks
+      properties:
+        library_id:
+          type: integer
+        inserted:
+          type: integer
+          description: Rows newly created.
+        skipped:
+          type: integer
+          description: Rows already present (matched on a CTA uniqueness key); left untouched.
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompilationTrack'
+
+    CompilationTrackSuggestions:
+      type: object
+      description: |
+        Proposed (unwritten) compilation tracklist derived from the linked
+        Discogs release (BS#1964). `discogs_release_id: null` + empty `tracks`
+        signals no resolvable upstream release -> manual entry.
+      required:
+        - library_id
+        - discogs_release_id
+        - tracks
+      properties:
+        library_id:
+          type: integer
+        discogs_release_id:
+          type: integer
+          nullable: true
+          description: The resolved Discogs release id, or null if none resolved.
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompilationTrackInput'
 
     # ===================
     # Rotation Types
@@ -7239,6 +7360,135 @@ paths:
                 $ref: '#/components/schemas/AlbumSearchResult'
         '404':
           description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/{id}/compilation-tracks:
+    get:
+      summary: List the per-track artists on a V/A compilation release
+      description: |
+        Return the compilation_track_artist (CTA) rows stored for library
+        release `{id}` — the per-track artist/title/position rows that make a
+        Various-Artists compilation searchable at the track level. Empty when
+        the release has no per-track data. (BS#1964.)
+      tags:
+        - Library
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: The release's stored compilation tracks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompilationTrackList'
+        '404':
+          description: Library release not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+    post:
+      summary: Write per-track artists for a V/A compilation release (additive)
+      description: |
+        Append compilation_track_artist rows for library release `{id}` from an
+        explicit list — the manual fallback, and the target the dj-site
+        add-release panel POSTs after the librarian confirms/edits the imported
+        tracklist (see GET .../compilation-tracks/discogs-suggestions).
+
+        Additive-only (BS#1964 / D6): existing CTA rows are never mutated or
+        deleted. Rows already present (matched on the existing uniqueness keys —
+        `(library_id, artist_name, track_title)` and the NULL-track partial
+        unique) are skipped, not duplicated; the response reports `inserted` vs
+        `skipped`. Wholesale replace / release-identity correction is out of
+        scope here and is tracked in BS#801.
+      tags:
+        - Library
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompilationTracksWriteRequest'
+      responses:
+        '200':
+          description: Tracks written; body reports inserted vs skipped and the resulting set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompilationTracksWriteResponse'
+        '400':
+          description: Invalid track list (e.g. empty, or a track missing artist_name).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Library release not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/{id}/compilation-tracks/discogs-suggestions:
+    get:
+      summary: Propose a compilation tracklist from the release's linked Discogs release
+      description: |
+        Autopopulate source (BS#1964). Resolve the Discogs release linked to
+        library `{id}` (its stored discogs_release_id, else the BS->LML lookup
+        path) and return that release's tracklist as write-ready
+        CompilationTrackInput rows — WITHOUT writing anything. The dj-site panel
+        renders these for confirm/edit, then POSTs the (possibly edited) list to
+        POST .../compilation-tracks.
+
+        This is the only Discogs-touching call in the CTA write flow and it is a
+        single release fetch (one LML getRelease), never the per-track
+        N-validation fan-out that BS#1117 warns against; the write path itself
+        does no external I/O. When no Discogs release is resolvable,
+        `discogs_release_id` is null and `tracks` is empty — the caller falls
+        back to manual entry.
+      tags:
+        - Library
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts) —
+      # gated as a write helper (it feeds the confirm/edit write UI), not catalog:read.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: >
+            Proposed tracklist. `discogs_release_id: null` + empty `tracks`
+            means no upstream release resolved — use the manual write path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompilationTrackSuggestions'
+        '404':
+          description: Library release not found.
           content:
             application/json:
               schema:

@@ -630,12 +630,6 @@ describe('OpenAPI Specification', () => {
         expect(prop).toBeUndefined();
       });
     });
-
-    // The "current version" sentinel lives with the most recent api.yaml change;
-    // bundling the three discogsUnavailable additions bumped the minor.
-    it('bumps info.version to 1.27.0', () => {
-      expect(spec.info.version).toBe('1.27.0');
-    });
   });
 
   // GET /library/catalog (the gzipped-NDJSON bulk export) and its row shape
@@ -780,6 +774,129 @@ describe('OpenAPI Specification', () => {
         expect(path?.get, route).toBeDefined();
         expect(path!.get!.security, route).toEqual([{ BearerAuth: [] }]);
       }
+    });
+  });
+
+  // Compilation-track (CTA) write path (BS#1964). Adds the compilation-tracks
+  // sub-collection under a library release so V/A per-track artists can be
+  // written after /wxycdb goes dark. Shape A: the server READS Discogs
+  // (discogs-suggestions) but every WRITE carries an explicit, client-confirmed
+  // list — Discogs-agnostic, additive-only (D6: existing rows untouched), and
+  // thin enough to survive the future compilation_track_artist -> library_track
+  // rename (BS#801). The version sentinel travels here as the most recent change.
+  describe('Compilation Track Write (BS#1964)', () => {
+    type Schema = {
+      required?: string[];
+      properties?: Record<string, Record<string, unknown>>;
+    };
+
+    it('defines CompilationTrackInput: only artist_name required; title/position nullable + capped', () => {
+      const schema = spec.components.schemas.CompilationTrackInput as Schema;
+      expect(schema).toBeDefined();
+      expect((schema.required ?? []).sort()).toEqual(['artist_name']);
+      expect(schema.properties?.artist_name?.type).toBe('string');
+      expect(schema.properties?.artist_name?.maxLength).toBe(255);
+      // The durable free-text triple — no canonical artist_id / confidence /
+      // method here; BS#801 adds those server-side, not on the wire.
+      expect(schema.properties?.artist_id).toBeUndefined();
+      const title = schema.properties?.track_title;
+      expect(title?.type).toBe('string');
+      expect(title?.nullable).toBe(true);
+      expect(title?.maxLength).toBe(255);
+      const position = schema.properties?.track_position;
+      expect(position?.type).toBe('string');
+      expect(position?.nullable).toBe(true);
+      expect(position?.maxLength).toBe(20);
+    });
+
+    it('defines CompilationTrack: a stored row keyed by server id', () => {
+      const schema = spec.components.schemas.CompilationTrack as Schema;
+      expect(schema).toBeDefined();
+      expect((schema.required ?? []).sort()).toEqual(['artist_name', 'id']);
+      expect(schema.properties?.id?.type).toBe('integer');
+      expect(schema.properties?.track_title?.nullable).toBe(true);
+      expect(schema.properties?.track_position?.nullable).toBe(true);
+    });
+
+    it('defines CompilationTrackList wrapping stored rows for a release', () => {
+      const schema = spec.components.schemas.CompilationTrackList as Schema;
+      expect(schema).toBeDefined();
+      expect((schema.required ?? []).sort()).toEqual(['library_id', 'tracks']);
+      expect((schema.properties?.tracks as { items?: { $ref?: string } })?.items?.$ref).toBe(
+        '#/components/schemas/CompilationTrack'
+      );
+    });
+
+    it('defines CompilationTracksWriteRequest as a non-empty list of inputs', () => {
+      const schema = spec.components.schemas.CompilationTracksWriteRequest as Schema;
+      expect(schema).toBeDefined();
+      expect((schema.required ?? []).sort()).toEqual(['tracks']);
+      const tracks = schema.properties?.tracks as { minItems?: number; items?: { $ref?: string } };
+      expect(tracks?.minItems).toBe(1);
+      expect(tracks?.items?.$ref).toBe('#/components/schemas/CompilationTrackInput');
+    });
+
+    it('defines CompilationTracksWriteResponse reporting inserted vs skipped (idempotent write)', () => {
+      const schema = spec.components.schemas.CompilationTracksWriteResponse as Schema;
+      expect(schema).toBeDefined();
+      expect((schema.required ?? []).sort()).toEqual(['inserted', 'library_id', 'skipped', 'tracks']);
+      expect(schema.properties?.inserted?.type).toBe('integer');
+      expect(schema.properties?.skipped?.type).toBe('integer');
+    });
+
+    it('defines CompilationTrackSuggestions with a nullable discogs_release_id (no-match => manual fallback)', () => {
+      const schema = spec.components.schemas.CompilationTrackSuggestions as Schema;
+      expect(schema).toBeDefined();
+      // discogs_release_id is REQUIRED-but-nullable so the null carries meaning
+      // (looked, none resolved) rather than being an absent/unknown field.
+      expect((schema.required ?? []).sort()).toEqual(['discogs_release_id', 'library_id', 'tracks']);
+      expect(schema.properties?.discogs_release_id?.type).toBe('integer');
+      expect(schema.properties?.discogs_release_id?.nullable).toBe(true);
+      // Suggestions are write-ready inputs, not stored rows.
+      expect((schema.properties?.tracks as { items?: { $ref?: string } })?.items?.$ref).toBe(
+        '#/components/schemas/CompilationTrackInput'
+      );
+    });
+
+    it('declares GET + POST /library/{id}/compilation-tracks (BearerAuth; list / additive write)', () => {
+      const path = spec.paths['/library/{id}/compilation-tracks'] as {
+        get?: { security?: unknown[]; responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }> };
+        post?: {
+          security?: unknown[];
+          requestBody?: { content?: Record<string, { schema?: { $ref?: string } }> };
+          responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+        };
+      };
+      expect(path?.get).toBeDefined();
+      expect(path.get!.security).toEqual([{ BearerAuth: [] }]);
+      expect(path.get!.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/CompilationTrackList'
+      );
+      expect(path?.post).toBeDefined();
+      expect(path.post!.security).toEqual([{ BearerAuth: [] }]);
+      expect(path.post!.requestBody?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/CompilationTracksWriteRequest'
+      );
+      expect(path.post!.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/CompilationTracksWriteResponse'
+      );
+    });
+
+    it('declares GET /library/{id}/compilation-tracks/discogs-suggestions (BearerAuth; suggestions)', () => {
+      const path = spec.paths['/library/{id}/compilation-tracks/discogs-suggestions'] as {
+        get?: { security?: unknown[]; responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }> };
+      };
+      expect(path?.get).toBeDefined();
+      expect(path.get!.security).toEqual([{ BearerAuth: [] }]);
+      expect(path.get!.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/CompilationTrackSuggestions'
+      );
+    });
+
+    // The "current version" sentinel lives with the most recent api.yaml change;
+    // the CTA write-path paths + schemas bumped the minor.
+    it('bumps info.version to 1.28.0', () => {
+      expect(spec.info.version).toBe('1.28.0');
     });
   });
 
