@@ -796,6 +796,10 @@ describe('OpenAPI Specification', () => {
       expect((schema.required ?? []).sort()).toEqual(['artist_name']);
       expect(schema.properties?.artist_name?.type).toBe('string');
       expect(schema.properties?.artist_name?.maxLength).toBe(255);
+      // minLength 1 is the sole guard forcing a non-empty per-track artist on
+      // the wire — the constraint the POST's 400 ("a track missing artist_name")
+      // leans on; pin it so a regression to empty-string writes can't merge green.
+      expect(schema.properties?.artist_name?.minLength).toBe(1);
       // The durable free-text triple — no canonical artist_id / confidence /
       // method here; BS#801 adds those server-side, not on the wire.
       expect(schema.properties?.artist_id).toBeUndefined();
@@ -872,6 +876,9 @@ describe('OpenAPI Specification', () => {
       expect(path.get!.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
         '#/components/schemas/CompilationTrackList'
       );
+      expect(path.get!.responses?.['404']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ApiErrorResponse'
+      );
       expect(path?.post).toBeDefined();
       expect(path.post!.security).toEqual([{ BearerAuth: [] }]);
       expect(path.post!.requestBody?.content?.['application/json']?.schema?.$ref).toBe(
@@ -879,6 +886,14 @@ describe('OpenAPI Specification', () => {
       );
       expect(path.post!.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
         '#/components/schemas/CompilationTracksWriteResponse'
+      );
+      // Error contract is load-bearing (dj-site distinguishes a bad list from a
+      // missing release); pin both refs so a dropped/mis-pointed response fails CI.
+      expect(path.post!.responses?.['400']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ApiErrorResponse'
+      );
+      expect(path.post!.responses?.['404']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ApiErrorResponse'
       );
     });
 
@@ -890,6 +905,9 @@ describe('OpenAPI Specification', () => {
       expect(path.get!.security).toEqual([{ BearerAuth: [] }]);
       expect(path.get!.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
         '#/components/schemas/CompilationTrackSuggestions'
+      );
+      expect(path.get!.responses?.['404']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ApiErrorResponse'
       );
     });
 

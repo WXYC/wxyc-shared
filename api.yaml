@@ -1742,8 +1742,11 @@ components:
       type: object
       description: |
         Result of an additive CTA write (BS#1964). `inserted + skipped` equals
-        the number of input rows; `tracks` is the release's full stored set
-        after the write.
+        the number of input rows — a row that duplicates one already inserted
+        earlier in the same request counts toward `skipped` (matched against the
+        just-inserted row on the CTA uniqueness key), so the identity always
+        holds even when the request carries intra-batch duplicates. `tracks` is
+        the release's full stored set after the write.
       required:
         - library_id
         - inserted
