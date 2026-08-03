@@ -1067,18 +1067,20 @@ describe('Generated TypeScript Types', () => {
       expect(entry.discogsUnavailableNote).toBe('Self-released cassette, never listed');
     });
 
-    it('FlowsheetEntryResponse allows nullable discogsUnavailable to be explicitly null', () => {
+    it('FlowsheetEntryResponse allows omitting non-nullable discogsUnavailable while note is explicitly null', () => {
+      // discogsUnavailable is non-nullable (matching the other Album surfaces),
+      // so a row without the flag omits it rather than sending null;
+      // discogsUnavailableNote stays nullable.
       const entry: FlowsheetEntryResponse = {
         id: 1,
         play_order: 1,
         show_id: 1,
         request_flag: false,
         segue: false,
-        discogsUnavailable: null,
         discogsUnavailableNote: null,
       };
 
-      expect(entry.discogsUnavailable).toBeNull();
+      expect(entry.discogsUnavailable).toBeUndefined();
       expect(entry.discogsUnavailableNote).toBeNull();
     });
   });

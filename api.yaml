@@ -249,14 +249,15 @@ components:
               nullable: true
             discogsUnavailable:
               type: boolean
-              nullable: true
               description: >-
                 Rides the same MD-set "not on Discogs" flag as the Album
-                surfaces (see `Album.discogsUnavailable`). Deliberately
-                camelCase — unlike its snake_case siblings in this block —
-                to match Backend's `withDiscogsUnavailableCamelCase`
-                serializer, which emits this field on the V2 flowsheet
-                album embed exactly as it does on the other Album surfaces.
+                surfaces (see `Album.discogsUnavailable`), non-nullable to
+                match them. Deliberately camelCase — unlike its snake_case
+                siblings in this block — to match Backend's
+                `withDiscogsUnavailableCamelCase` serializer. Contract-first:
+                the V2 flowsheet album embed will carry this field once the
+                BS-emit piece (WXYC/Backend-Service#1908) lands; it is not
+                emitted there yet.
             discogsUnavailableNote:
               type: string
               nullable: true

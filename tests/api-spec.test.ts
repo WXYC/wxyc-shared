@@ -605,11 +605,16 @@ describe('OpenAPI Specification', () => {
         return undefined;
       }
 
-      it('gains discogsUnavailable as a nullable boolean, camelCase deliberately unlike its snake_case siblings', () => {
+      it('gains discogsUnavailable as a non-nullable boolean matching the other Album surfaces, camelCase deliberately unlike its snake_case siblings', () => {
         const prop = getProperty('discogsUnavailable');
+        const albumSchema = spec.components.schemas.Album as Schema;
         expect(prop).toBeDefined();
         expect(prop?.type).toBe('boolean');
-        expect(prop?.nullable).toBe(true);
+        // Non-nullable, exactly as Album/AlbumSearchResult/AlbumMetadataResponse
+        // declare it (the BS `withDiscogsUnavailableCamelCase` serializer types
+        // it as a non-null boolean).
+        expect(prop?.nullable).toBeUndefined();
+        expect(prop?.nullable).toBe(albumSchema.properties?.discogsUnavailable?.nullable);
       });
 
       it('gains discogsUnavailableNote as a nullable string capped at 500 chars', () => {
