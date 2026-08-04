@@ -1490,15 +1490,19 @@ components:
                 at all, so there is no legacy order to match — pick the
                 deterministic one.
 
-            FRESHNESS CAVEAT — BS#1965 MUST land a trigger for this. This
-            endpoint's conditional GET rides library_watermark, and
-            artist_crossreference has NO touch_library_watermark trigger as of
-            migration 0105 (which covers library, artists, genres, format,
-            genre_artist_crossreference, rotation — not this table). Without a
-            new trigger, adding a cross-reference does not advance the
-            watermark, the per-watermark gzip cache is never rebuilt, and the
-            producer 304s against a body that will never contain the new alias.
-            Silent and unbounded, not a lag.
+            FRESHNESS: this endpoint's conditional GET rides library_watermark.
+            Migration 0105 fanned the watermark trigger out to library, artists,
+            genres, format, genre_artist_crossreference, and rotation;
+            artist_crossreference was left uncovered until migration 0138 added
+            touch_library_watermark_from_artist_crossreference (AFTER INSERT OR
+            UPDATE OR DELETE OR TRUNCATE ... FOR EACH STATEMENT). A
+            cross-reference write now advances the watermark, the per-watermark
+            gzip cache rebuilds, and the producer's next fetch carries the new
+            alias. Before 0138 this was silent and unbounded rather than a
+            bounded lag — a write to an uncovered source table changed nothing
+            observable until an unrelated write on a covered table happened to
+            bump the watermark, which is why every table a field on this row is
+            derived from must carry the trigger.
         album_title:
           type: string
         code_letters:
@@ -7134,6 +7138,17 @@ paths:
         (~daily); otherwise a 200 with the full body. Same conditionalGet
         middleware as the flowsheet export (BS#902).
 
+        CROSS-ENDPOINT CONSISTENCY: a producer that also reads GET
+        /library/catalog/compilation-tracks (BS#1965 / discogs-etl#351) fetches
+        the two exports as separate HTTP requests that share a library_watermark
+        value but are not one transaction — they form a consistent snapshot only
+        while the watermark stays stable across both fetches. If it advances
+        between them, the producer can pair catalog@T with CTA@T+1 and observe a
+        CTA legacy_release_id with no corresponding row in this body. Treat a
+        Last-Modified change across the two GETs as "re-fetch both"; the pairing
+        self-heals on the producer's next run regardless, so this is a
+        transient-inconsistency rule, not a hard-error condition.
+
         Transport (not expressible in the element schema): the body is NDJSON —
         split on newlines and decode per line; it is NOT a JSON array. It is
         gzip-encoded (Content-Encoding: gzip; most HTTP clients, incl. URLSession,
@@ -7212,41 +7227,76 @@ paths:
         release row it cannot resolve. Apply the same predicate on both
         endpoints.
 
+        CROSS-ENDPOINT CONSISTENCY: this endpoint and GET /library/catalog share
+        a library_watermark value, but the producer (BS#1965 / discogs-etl#351)
+        fetches them as two separate HTTP requests, not one transaction — a
+        consistent snapshot only while the watermark stays stable across both
+        fetches. If it advances between them, the producer can pair catalog@T
+        with CTA@T+1 and observe a legacy_release_id here with no corresponding
+        row in the catalog body — the same dangling-join failure ROW ELIGIBILITY
+        above exists to prevent, arriving by a different route: that predicate
+        guarantees the pairing within a snapshot, this rule is what keeps the
+        producer looking at one. Treat a Last-Modified change across the two
+        GETs as "re-fetch both"; the pairing self-heals on the producer's next
+        run, so a dangling legacy_release_id is evidence to re-fetch, not a hard
+        error.
+
         Conditional GET: same middleware and watermark as GET /library/catalog —
         Last-Modified is set from the library_watermark, echoed back via
         If-Modified-Since (or ?since=) for a cheap 304.
 
-        FRESHNESS CAVEAT — BS#1965 MUST land a trigger for this.
-        compilation_track_artist has NO touch_library_watermark trigger as of
-        migration 0105 (which covers library, artists, genres, format,
-        genre_artist_crossreference, rotation — not this table). CTA writes
-        therefore do not advance the watermark on their own, and the ordering is
-        NOT the reassuring one: the CTA POST always FOLLOWS the library add it
-        would ride. The real sequence is (1) POST /library bumps the watermark
-        to T, (2) the per-watermark gzip cache builds for T, (3) POST
-        /library/{id}/compilation-tracks lands rows at T+delta with no trigger —
-        so the cached body for T does not contain them and this endpoint 304s
-        until some unrelated write bumps the watermark. Post-tubafrenzy-turndown
-        the daily library sync goes away, so "it'll catch up on the next daily
-        write" stops holding and a CTA-only editing session can stay invisible
-        indefinitely.
+        FRESHNESS: this endpoint shares GET /library/catalog's conditional-GET
+        middleware and library_watermark. The intuitive assumption — that a CTA
+        write rides the library add it accompanies — is backwards: the real
+        sequence is (1) POST /library bumps the watermark to T, (2) the
+        per-watermark gzip cache builds for T, (3) POST
+        /library/{id}/compilation-tracks lands rows after that, at T+delta. A
+        CTA-specific trigger was therefore necessary, not merely nice to have:
+        without one, step 3 would leave the cache already built at T unaware of
+        its own rows, and this endpoint would 304 until an unrelated write on a
+        covered table happened to bump the watermark — silent and unbounded, not
+        a lag, and post-tubafrenzy-turndown (once the daily library sync that
+        used to eventually supply that unrelated write goes away) a CTA-only
+        cataloging session could have stayed invisible indefinitely. Migration
+        0138 supplies that trigger:
+        touch_library_watermark_from_compilation_track_artist (AFTER INSERT OR
+        UPDATE OR DELETE OR TRUNCATE ... FOR EACH STATEMENT) on
+        compilation_track_artist advances the watermark on step 3 itself, so the
+        cache rebuilds and the producer's next fetch carries the new rows.
 
-        IMPLEMENTATION NOTES for BS#1965:
-          * Route registration order is load-bearing. This literal path is
-            ambiguous with the templated GET /library/{id}/compilation-tracks
-            (same method, same catalog:['read'] permission), so it MUST be
-            registered before the /:id routes — next to the existing '/catalog'
-            literal in library.route.ts, not next to the other
-            compilation-tracks routes. Registered after, Express matches
+        IMPLEMENTATION NOTES (as-built, BS#1965):
+          * Route registration order is load-bearing, permanently. This literal
+            path is ambiguous with the templated GET
+            /library/{id}/compilation-tracks (same method, same catalog:['read']
+            permission), so it MUST stay registered before the /:id routes —
+            next to the '/catalog' literal in library.route.ts, not next to the
+            other compilation-tracks routes. This binds anyone editing
+            library.route.ts going forward, not just the original
+            implementation: move it after the /:id routes and Express matches
             /:id/compilation-tracks with id === 'catalog', Number('catalog') is
-            NaN, and the producer gets a 4xx/5xx with no auth-layer signal
-            (both routes carry the same permission).
-          * The catalog export holds one full gzipped body resident per pod for
-            the life of the watermark (createWatermarkCache<Buffer>). A second
-            such cache for the full CTA table is additive and long-lived on a
-            memory-constrained host. Size it before shipping; if it is material,
-            fold these rows into /library/catalog behind an opt-in
-            ?include=compilation_tracks instead (BS#1965 leaves the shape open).
+            NaN, and the producer gets a 4xx/5xx with no auth-layer signal to
+            distinguish it from any other failure (both routes carry the
+            identical permission). See the "REGISTRATION ORDER IS LOAD-BEARING"
+            comment in library.route.ts.
+          * Cache sizing (resolved). This endpoint holds a second full gzipped
+            body resident per pod for the life of the watermark
+            (createWatermarkCache<Buffer>), alongside the existing catalog
+            export cache — so it was measured before shipping, against the
+            2026-07-19 prod library.db snapshot's real artist/title strings at
+            the prod CTA row count:
+
+                                 rows      raw  gzipped resident
+              catalog export     64,815  28.5 MB   2.6 MB   2.6 MB
+              CTA export        144,778  13.1 MB   3.2 MB   3.2 MB
+
+            Verdict: not material (~5.8 MB resident for both), so the sibling
+            endpoint was kept rather than folding these rows into
+            /library/catalog behind an opt-in ?include=compilation_tracks.
+            Counterintuitively the CTA buffer is larger than the catalog one
+            despite carrying 3 fields instead of 19 — 2.2x the rows outweighs
+            the narrower shape. Revisit past roughly 1M CTA rows, or sooner if a
+            future consumer needs a payload that can't be built streaming-free;
+            ?include=compilation_tracks remains the documented fallback.
 
         Transport (not expressible in the element schema): the body is NDJSON —
         split on newlines and decode per line; it is NOT a JSON array. It is
