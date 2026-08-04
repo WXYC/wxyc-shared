@@ -646,10 +646,17 @@ describe('OpenAPI Specification', () => {
     };
 
     // The catalog-export projection (Backend-Service catalog-export.service.ts,
-    // CatalogExportRow). The SSOT leads the consumer (the private type mirrors
-    // this list under the BS#1477 parity guard). BS#1965 added the four
-    // library.db-producer fields (legacy_release_id, alternate_artist_name,
-    // album_artist, cross_reference_names) — 19 fields total.
+    // CatalogExportRow). The SSOT LEADS the consumer: this list is 19 fields,
+    // four ahead of that private type until BS#1965 adds the library.db-producer
+    // fields (legacy_release_id, alternate_artist_name, album_artist,
+    // cross_reference_names).
+    //
+    // That lead is a live constraint on Backend-Service, not just a note. BS's
+    // parity guard (BS#1477, tests/unit/services/catalog-export.parity.test.ts)
+    // asserts privateKeys == ssotKeys against the INSTALLED @wxyc/shared, so the
+    // first BS PR that bumps this package past this release fails that test —
+    // including an unrelated Dependabot bump. BS#1965 must land in the same bump,
+    // or BS CI stays red. Do not delete this note until the lead is closed.
     const EXPORT_FIELDS = [
       'id',
       'legacy_release_id',
@@ -678,12 +685,11 @@ describe('OpenAPI Specification', () => {
       expect(Object.keys(schema.properties ?? {}).sort()).toEqual([...EXPORT_FIELDS].sort());
     });
 
-    it('marks the 9 non-null fields required (deliberate leniency: the nullable keys are omitted)', () => {
+    it('marks the 8 non-null fields required (deliberate leniency: the nullable keys are omitted)', () => {
       const schema = spec.components.schemas.CatalogExportRow as Schema;
       expect((schema.required ?? []).sort()).toEqual(
         [
           'id',
-          'legacy_release_id',
           'artist_name',
           'album_title',
           'code_letters',
@@ -695,26 +701,47 @@ describe('OpenAPI Specification', () => {
       );
     });
 
-    it('ships the four BS#1965 library.db-producer fields (legacy_release_id required int; album_artist/alternate_artist_name/cross_reference_names nullable strings)', () => {
+    it('keeps ALL FOUR BS#1965 producer fields out of required — a required key the server does not emit yet breaks every NDJSON line', () => {
       const schema = spec.components.schemas.CatalogExportRow as Schema;
 
-      // legacy_release_id: total since BS#1963 mint + backfill, so REQUIRED and
-      // a plain integer (the producer emits it AS library.db's library.id).
-      const legacy = schema.properties?.legacy_release_id;
-      expect(legacy).toBeDefined();
-      expect(legacy!.type).toBe('integer');
-      expect(legacy!.nullable).toBeUndefined();
-      expect(schema.required ?? []).toContain('legacy_release_id');
-
-      // The three curated free-text fields are nullable and stay OUT of required
-      // (genuine library metadata gaps must not break a strict decoder).
-      for (const key of ['album_artist', 'alternate_artist_name', 'cross_reference_names']) {
+      // This row is also the iOS Spotlight clone's shape, and wxyc-ios-64
+      // regenerates from this SSOT on its own cadence. Until BS#1965 ships, the
+      // server emits the 15-field body; a required key absent from it fails the
+      // WHOLE decode, not one field. Same leniency `popularity` shipped with.
+      // oasdiff does NOT flag adding a required response property, so
+      // `check:breaking` cannot catch a regression here — this test is the guard.
+      for (const key of [
+        'legacy_release_id',
+        'album_artist',
+        'alternate_artist_name',
+        'cross_reference_names',
+      ]) {
         const prop = schema.properties?.[key];
         expect(prop, key).toBeDefined();
-        expect(prop!.type, key).toBe('string');
         expect(prop!.nullable, key).toBe(true);
         expect(schema.required ?? [], key).not.toContain(key);
       }
+
+      // legacy_release_id is an integer (the producer emits it AS library.db's
+      // library.id); the two curated free-text fields are plain strings.
+      expect(schema.properties?.legacy_release_id?.type).toBe('integer');
+      expect(schema.properties?.album_artist?.type).toBe('string');
+      expect(schema.properties?.alternate_artist_name?.type).toBe('string');
+    });
+
+    it('ships cross_reference_names as an ARRAY of names, never a pipe-joined string', () => {
+      const schema = spec.components.schemas.CatalogExportRow as Schema;
+      const prop = schema.properties?.cross_reference_names as
+        | { type?: string; items?: { type?: string } }
+        | undefined;
+      expect(prop).toBeDefined();
+
+      // Nothing constrains artists.artist_name from containing "|" or " | ", and
+      // LML splits this field on the pipe. A joined string would silently split
+      // into phantom aliases with no escaping rule to recover from. The producer
+      // does the join when it writes library.db's TEXT column.
+      expect(prop!.type).toBe('array');
+      expect(prop!.items?.type).toBe('string');
     });
 
     it('ships popularity as a nullable integer alongside plays, not as a replacement (BS#1486 Phase-2 Track 3)', () => {
@@ -795,8 +822,14 @@ describe('OpenAPI Specification', () => {
       expect(path.get!.responses?.['304']).toBeDefined();
     });
 
-    it('requires BearerAuth on all four catalog GET reads — no half-fixed SSOT (decision 4)', () => {
-      const reads = ['/library', '/library/query', '/library/rotation', '/library/catalog'];
+    it('requires BearerAuth on all five catalog GET reads — no half-fixed SSOT (decision 4)', () => {
+      const reads = [
+        '/library',
+        '/library/query',
+        '/library/rotation',
+        '/library/catalog',
+        '/library/catalog/compilation-tracks',
+      ];
       for (const route of reads) {
         const path = spec.paths[route] as { get?: { security?: unknown[] } };
         expect(path?.get, route).toBeDefined();
@@ -822,6 +855,27 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties?.track_title?.nullable).toBe(true);
       expect(schema.properties?.id).toBeUndefined();
       expect(schema.properties?.track_position).toBeUndefined();
+    });
+
+    it('pins the same length bounds as CompilationTrackInput — read and write shapes over one column must agree', () => {
+      const read = spec.components.schemas.CatalogCompilationTrackRow as Schema;
+      const write = spec.components.schemas.CompilationTrackInput as Schema;
+
+      // Both project compilation_track_artist.artist_name varchar(255) NOT NULL
+      // and .track_title varchar(255). The write shape pinned minLength on
+      // artist_name so a regression to empty-string writes can't merge green;
+      // the read shape carries the same bounds so the producer can size its
+      // SQLite column from the contract instead of guessing.
+      expect(read.properties?.artist_name?.minLength).toBe(write.properties?.artist_name?.minLength);
+      expect(read.properties?.artist_name?.maxLength).toBe(write.properties?.artist_name?.maxLength);
+      expect(read.properties?.track_title?.maxLength).toBe(write.properties?.track_title?.maxLength);
+      expect(read.properties?.artist_name?.maxLength).toBe(255);
+    });
+
+    // The "current version" sentinel lives with the most recent api.yaml change;
+    // the BS#1965 producer fields + the CTA export path bumped the minor.
+    it('bumps info.version to 1.29.0', () => {
+      expect(spec.info.version).toBe('1.29.0');
     });
 
     it('declares GET /library/catalog/compilation-tracks (BearerAuth; If-Modified-Since + ?since=; NDJSON 200 + 304)', () => {
@@ -989,11 +1043,6 @@ describe('OpenAPI Specification', () => {
       );
     });
 
-    // The "current version" sentinel lives with the most recent api.yaml change;
-    // the CTA write-path paths + schemas bumped the minor.
-    it('bumps info.version to 1.28.0', () => {
-      expect(spec.info.version).toBe('1.28.0');
-    });
   });
 
   describe('Rotation Schemas', () => {
