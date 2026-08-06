@@ -35,6 +35,11 @@ jobs:
           base: api-base.yaml
           revision: api.yaml
           fail-on: ERR
+          # Findings whitelisted with a written justification. Each entry is
+          # scoped to a main..PR diff and goes inert once merged; see the file's
+          # header. scripts/check-breaking-changes.sh passes the same file, so a
+          # local `npm run check:breaking` matches this job.
+          err-ignore: oasdiff-err-ignore.txt
 
       - name: Comment on PR (Breaking Changes Found)
         if: failure() && steps.base.outputs.skip != 'true'

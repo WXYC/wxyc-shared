@@ -72,7 +72,14 @@ echo ""
 
 # Run oasdiff breaking check
 # --fail-on ERR: exit 1 if breaking changes found
-if oasdiff breaking "$TEMP_BASE" "$PROJECT_ROOT/api.yaml" --fail-on ERR; then
+# --err-ignore: findings whitelisted (with justification) in oasdiff-err-ignore.txt.
+#   Mirrors the `err-ignore` input on .github/workflows/breaking-changes.yml —
+#   keep the two in sync or local and CI disagree.
+IGNORE_FILE="$PROJECT_ROOT/oasdiff-err-ignore.txt"
+IGNORE_ARGS=()
+[[ -f "$IGNORE_FILE" ]] && IGNORE_ARGS=(--err-ignore "$IGNORE_FILE")
+
+if oasdiff breaking "$TEMP_BASE" "$PROJECT_ROOT/api.yaml" --fail-on ERR "${IGNORE_ARGS[@]}"; then
     echo -e "\n${green}No breaking changes detected.${reset}"
 else
     exit_code=$?
