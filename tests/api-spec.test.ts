@@ -2198,6 +2198,24 @@ describe('OpenAPI Specification', () => {
       expect(description).toMatch(/NULL/);
     });
 
+    it('drops the storage instruction naming a table that was never built (BS#801)', () => {
+      // 1.29.0 told Backend to write per-source rows verbatim into a
+      // `library_track_identity_source` sidecar. It does not exist — LML#271
+      // closed as a design decision and the schema half never happened
+      // (verified against prod and all 136 migrations in BS#801). LML's
+      // per-track store is the per-source system of record and Backend
+      // persists composed verdicts only, so the contract must not send a
+      // consumer off to build the sidecar.
+      // The table name still appears, but only inside its own retraction —
+      // a reader migrating off 1.29.0 needs to be told the sidecar isn't
+      // coming, not left to infer it from silence.
+      const schema = spec.components.schemas.BulkResolveTrackIdentity as Schema;
+      const description = schema.description ?? '';
+      expect(description).not.toMatch(/writes? the per-source rows verbatim/);
+      expect(description).toMatch(/library_track_identity_source[^.]*never built/);
+      expect(description).toMatch(/composed verdict/i);
+    });
+
     // The "current version" sentinel lives with the most recent api.yaml change;
     // the include_tracks gate + the BulkResolveTrackIdentity repair bumped the minor.
     it('bumps info.version to 1.30.0', () => {
