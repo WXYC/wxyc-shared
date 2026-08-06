@@ -46,6 +46,20 @@ if [[ ! -f "$PROJECT_ROOT/api.yaml" ]]; then
     exit 2
 fi
 
+# Check the whitelist exists. It is a hard dependency, not an optional extra:
+# oasdiff exits 121 on a missing --err-ignore path and .github/workflows/
+# breaking-changes.yml passes it unconditionally, so skipping it locally would
+# pass here and fail the PR job — the divergence this wiring exists to prevent.
+# Preflight (not just before the oasdiff call) so the failure is reported even
+# on the paths that exit early.
+IGNORE_FILE="$PROJECT_ROOT/oasdiff-err-ignore.txt"
+if [[ ! -f "$IGNORE_FILE" ]]; then
+    echo -e "${red}Error: oasdiff-err-ignore.txt is missing at $IGNORE_FILE${reset}"
+    echo "CI passes this path unconditionally and oasdiff exits 121 without it."
+    echo "Restore the file (an entry-free file of comments is fine)."
+    exit 2
+fi
+
 echo -e "\n${bold}Checking for Breaking API Changes${reset}"
 
 # Get base spec
@@ -72,14 +86,11 @@ echo ""
 
 # Run oasdiff breaking check
 # --fail-on ERR: exit 1 if breaking changes found
-# --err-ignore: findings whitelisted (with justification) in oasdiff-err-ignore.txt.
-#   Mirrors the `err-ignore` input on .github/workflows/breaking-changes.yml —
-#   keep the two in sync or local and CI disagree.
-IGNORE_FILE="$PROJECT_ROOT/oasdiff-err-ignore.txt"
-IGNORE_ARGS=()
-[[ -f "$IGNORE_FILE" ]] && IGNORE_ARGS=(--err-ignore "$IGNORE_FILE")
-
-if oasdiff breaking "$TEMP_BASE" "$PROJECT_ROOT/api.yaml" --fail-on ERR "${IGNORE_ARGS[@]}"; then
+# --err-ignore: findings whitelisted (with justification) in oasdiff-err-ignore.txt,
+#   mirroring the `err-ignore` input on .github/workflows/breaking-changes.yml.
+#   Passed unconditionally, exactly as CI passes it; existence is checked in the
+#   preflight above. Prune entries, keep the file.
+if oasdiff breaking "$TEMP_BASE" "$PROJECT_ROOT/api.yaml" --fail-on ERR --err-ignore "$IGNORE_FILE"; then
     echo -e "\n${green}No breaking changes detected.${reset}"
 else
     exit_code=$?
