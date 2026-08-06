@@ -4160,7 +4160,11 @@ components:
     # absent") rule this contract carried through `1.29.0`:
     #
     #     absent     — the caller did not ask (`include_tracks` false or
-    #                  omitted), or `kind: "unresolved"`.
+    #                  omitted), or `kind: "unresolved"`. LML spells this
+    #                  state `"tracks": null` on the wire (it builds the
+    #                  result with `tracks=None` and does not set
+    #                  `response_model_exclude_none`), so the schema marks
+    #                  the field nullable and consumers accept both.
     #     []         — the caller asked, and LML's per-track matcher has not
     #                  visited this row yet.
     #     [entries]  — the matcher ran. Entries whose `resolved_artist_name`
@@ -4339,9 +4343,18 @@ components:
             `track_title` instead.
         artist_name:
           type: string
+          minLength: 1
           description: >
             Join-back echo of the per-track credit, verbatim, and the
-            load-bearing half of the join key — never NULL. Dual-mode:
+            load-bearing half of the join key — never NULL, and never the
+            empty string (`minLength: 1`, matching
+            `CatalogCompilationTrackRow.artist_name`, since an empty join
+            key is indistinguishable from a missing one). No `maxLength`
+            here, unlike the CTA read/write shapes: those bound one
+            physical `varchar(255)` column, while this field is dual-mode
+            and the `kind: single_artist` arm carries a source credit that
+            no WXYC column bounds. A cap the sources don't respect would
+            turn a long credit into a decode failure. Dual-mode:
             for `kind: compilation` it echoes the
             `compilation_track_artist` row as exported in library.db, so
             a consumer can match it to its own CTA row; for
@@ -4392,9 +4405,16 @@ components:
         sources:
           type: array
           description: >
-            One per-source row per source LML composed the track from.
-            Empty array means LML attempted resolution at track grain
-            and found no matches.
+            One per-source row per source LML composed the track from —
+            audit detail, and the track-grain analogue of
+            `BulkResolveResult.provenance`. Empty array means no source
+            produced a row at track grain at all. That is a different
+            statement from a populated array whose entries carry NULL
+            `external_id`: there, the legs ran and reported no candidate.
+            Read the verdict off `resolved_artist_name`, not off this
+            array's length — an empty `sources` and a `sources` full of
+            NULL-`external_id` legs both accompany a NULL
+            `resolved_artist_name`.
           items:
             $ref: '#/components/schemas/BulkResolveProvenanceEntry'
 
@@ -4452,19 +4472,30 @@ components:
             $ref: '#/components/schemas/BulkResolveProvenanceEntry'
         tracks:
           type: array
+          nullable: true
           description: >
             Per-track identity, returned only when the request set
             `include_tracks: true`. That flag — not `kind` — gates the
             field, and it gates it on both `kind: single_artist` and
             `kind: compilation` (#297); `kind: unresolved` never carries
             tracks. Three states, and the distinction between the last two
-            is load-bearing for WXYC/Backend-Service#1991: **absent** — the
-            caller did not ask (`include_tracks` false or omitted), or the
-            result is `unresolved`; **empty array** — the caller asked, and
-            LML's per-track matcher has not visited this row yet;
+            is load-bearing for WXYC/Backend-Service#1991:
+            **absent or NULL** — the caller did not ask (`include_tracks`
+            false or omitted), or the result is `unresolved`;
+            **empty array** — the caller asked, and LML's per-track matcher
+            has not visited this row yet;
             **non-empty** — the matcher ran, with a NULL
             `resolved_artist_name` on each track it failed on ("the leg
             ran"), so consumers treat non-empty as a resolved signal.
+
+
+            Absent and NULL are the same state, deliberately. LML builds
+            every non-track result with `tracks=None` and serves the
+            endpoint through FastAPI's `response_model` without
+            `response_model_exclude_none`, so the wire has always carried
+            `"tracks": null` rather than omitting the key. `nullable: true`
+            documents the shipped producer instead of describing a wire
+            nobody emits; consumers must accept both spellings.
           items:
             $ref: '#/components/schemas/BulkResolveTrackIdentity'
 
@@ -4474,7 +4505,11 @@ components:
         Response to `POST /api/v1/identity/bulk-resolve-libraries`. Order
         of `results` matches the order of the request's `inputs`. The
         example below is the `include_tracks: true` shape; with the flag
-        false or omitted, every `tracks` key is absent.
+        false or omitted, every result's `tracks` is the absent/NULL state
+        (LML spells it `"tracks": null`). Per-source `method`/`confidence`
+        pairs in the example sit inside `IdentityMethod`'s locked bands —
+        Backend's writer rejects rows that don't, so an example that
+        violated them would hand LML#1021 an unwritable row to copy.
       required:
         - results
       example:
@@ -4490,10 +4525,10 @@ components:
             provenance:
               - source: discogs
                 method: exact_match
-                confidence: 0.98
+                confidence: 1.0
                 external_id: "12345"
               - source: musicbrainz
-                method: alias_match
+                method: name_variation
                 confidence: 0.95
                 external_id: "abc-def-12345"
             tracks:
@@ -4501,12 +4536,12 @@ components:
                 artist_name: "Juana Molina"
                 track_title: "la paradoja"
                 resolved_artist_name: "Juana Molina"
-                confidence: 0.98
+                confidence: 1.0
                 method: exact_match
                 sources:
                   - source: discogs
                     method: exact_match
-                    confidence: 0.98
+                    confidence: 1.0
                     external_id: "release/456"
           - kind: compilation
             library_id: 5678
@@ -4517,10 +4552,10 @@ components:
                 track_title: "Call Your Name"
                 resolved_artist_name: "Chuquimamani-Condori"
                 confidence: 0.90
-                method: exact_match
+                method: name_variation
                 sources:
                   - source: discogs
-                    method: exact_match
+                    method: name_variation
                     confidence: 0.90
                     external_id: "release/789"
               - track_position: null

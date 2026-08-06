@@ -7,6 +7,15 @@
 # Entries here are scoped to a `main`..PR diff, so an entry stops matching the
 # moment its change lands on `main`. Prune dead entries when you notice them;
 # an entry that outlives its diff suppresses nothing but reads as if it does.
+# Prune ENTRIES, never the file: both the CI job and
+# scripts/check-breaking-changes.sh pass this path unconditionally, and oasdiff
+# exits 121 when it is missing. An entry-free file of comments is the floor.
+#
+# Entries must reproduce oasdiff's rendered message verbatim (a substring like
+# "became nullable" matches nothing), so an oasdiff release that rewords a
+# message silently un-matches its entry and turns the job red. If that happens,
+# re-run the check locally and paste the new wording; don't assume the
+# suppression is still in force because the line is still here.
 #
 # Every entry needs a written justification. "oasdiff is being annoying" is not
 # one — a genuine breaking change gets a contract-version conversation, not a
@@ -26,4 +35,23 @@
 # `""` for the 78% of compilation-track rows that carry no position
 # (WXYC/Backend-Service#1989), i.e. encode "unknown" as a value that reads as
 # "known and empty". That is the failure this contract exists to prevent.
+#
+# Caveat on that benefit's timing: `generate:python` runs datamodel-codegen
+# without `--strict-nullable`, which drops `nullable` on required properties, so
+# ALL FIVE nullable fields on `BulkResolveTrackIdentity` (`track_position`,
+# `track_title`, `resolved_artist_name`, `confidence`, `method`) still generate
+# non-Optional for LML. The wire contract is correct as of this change; LML can
+# only honour it once that generator flag lands. See the CLAUDE.md section
+# "Python codegen drops `nullable` on required fields".
 post /api/v1/identity/bulk-resolve-libraries the response property `results/items/tracks/items/track_position` became nullable for the status `200`
+
+# --- wxyc-shared#297 (api.yaml 1.30.0) ---
+# `BulkResolveResult.tracks` gains `nullable: true`. This one corrects the
+# schema toward the wire rather than changing the wire: LML has always built
+# non-track results with `tracks=None` and serves them through FastAPI's
+# `response_model` with no `response_model_exclude_none`, so `"tracks": null`
+# is what every consumer has received since the field shipped. Declaring the
+# nullability cannot break a decoder that survives today's traffic — the
+# undeclared null is the status quo, and the previous schema was the thing
+# describing a wire nobody emits.
+post /api/v1/identity/bulk-resolve-libraries the response property `results/items/tracks` became nullable for the status `200`

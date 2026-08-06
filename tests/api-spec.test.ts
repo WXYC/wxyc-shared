@@ -39,6 +39,15 @@ describe('OpenAPI Specification', () => {
       expect(spec.info.version).toBeDefined();
     });
 
+    // The contract-version sentinel. It used to be re-planted inside whichever
+    // feature block bumped it last (BS#1468's, then #297's), so every api.yaml
+    // change edited a describe named for an unrelated ticket — and a forgotten
+    // move filed the assertion under a ticket that didn't bump anything. It
+    // lives here permanently now; update the literal, leave the location.
+    it('pins info.version to the released contract version', () => {
+      expect(spec.info.version).toBe('1.30.0');
+    });
+
     it('should have components section', () => {
       expect(spec.components).toBeDefined();
       expect(spec.components.schemas).toBeDefined();
@@ -2115,6 +2124,18 @@ describe('OpenAPI Specification', () => {
       expect(schema.required ?? []).not.toContain('tracks');
     });
 
+    it('declares tracks nullable, because LML spells the absent state `"tracks": null`', () => {
+      // LML builds every non-track result with `tracks=None` and serves the
+      // endpoint through FastAPI's `response_model` with no
+      // `response_model_exclude_none`, so the wire has always carried an
+      // explicit null. Optional-but-not-nullable would generate a TS type
+      // (`tracks?: T[]`) that every live response already violates.
+      const schema = spec.components.schemas.BulkResolveResult as Schema;
+      expect(schema.properties?.tracks?.nullable).toBe(true);
+      const description = (schema.properties?.tracks?.description as string) ?? '';
+      expect(description).toMatch(/NULL/);
+    });
+
     it('corrects BulkResolveResultKind so compilation no longer owns tracks alone', () => {
       const kind = spec.components.schemas.BulkResolveResultKind as Schema;
       const description = kind.description ?? '';
@@ -2139,9 +2160,16 @@ describe('OpenAPI Specification', () => {
       );
 
       // artist_name is the join-back key BS actually has (78% of CTA rows are
-      // position-NULL per BS#1989), so it is required and non-nullable.
+      // position-NULL per BS#1989), so it is required and non-nullable — and
+      // minLength 1, since an empty join key is no more usable than a missing
+      // one (same guard CatalogCompilationTrackRow.artist_name carries over
+      // the physical column). No maxLength: the single_artist arm echoes a
+      // source credit no WXYC column bounds, so a cap would decode-fail rather
+      // than protect.
       expect(schema.properties?.artist_name?.type).toBe('string');
       expect(schema.properties?.artist_name?.nullable).toBeUndefined();
+      expect(schema.properties?.artist_name?.minLength).toBe(1);
+      expect(schema.properties?.artist_name?.maxLength).toBeUndefined();
       expect(schema.required ?? []).toContain('artist_name');
 
       // track_title completes the join key; nullable because the CTA column is.
@@ -2194,8 +2222,24 @@ describe('OpenAPI Specification', () => {
     it('states the null-resolved_artist_name convention so non-empty tracks reads as attempted', () => {
       const schema = spec.components.schemas.BulkResolveTrackIdentity as Schema;
       const description = (schema.properties?.resolved_artist_name?.description as string) ?? '';
-      // Same "the leg ran" convention as BulkResolveProvenanceEntry.external_id.
-      expect(description).toMatch(/NULL/);
+      // Same "the leg ran" convention as BulkResolveProvenanceEntry.external_id:
+      // the null must be tied to the matcher having run and resolved nothing,
+      // not merely mentioned somewhere in the prose.
+      expect(description).toMatch(/NULL when the matcher visited this track/);
+      expect(description).toMatch(/`confidence`[\s\S]*`method` are NULL/);
+    });
+
+    it('keeps `sources` from claiming the verdict that now lives on resolved_artist_name', () => {
+      // `sources: []` (no leg produced a row) and a populated `sources` whose
+      // entries carry NULL external_id (legs ran, no candidate) are different
+      // statements that both accompany a NULL verdict. Before this ticket the
+      // field's own description said an empty array meant "found no matches",
+      // which collided with the new convention and gave a producer two ways to
+      // encode one state.
+      const schema = spec.components.schemas.BulkResolveTrackIdentity as Schema;
+      const description = (schema.properties?.sources?.description as string) ?? '';
+      expect(description).not.toMatch(/found no matches/);
+      expect(description).toMatch(/resolved_artist_name/);
     });
 
     it('drops the storage instruction naming a table that was never built (BS#801)', () => {
@@ -2211,15 +2255,15 @@ describe('OpenAPI Specification', () => {
       // coming, not left to infer it from silence.
       const schema = spec.components.schemas.BulkResolveTrackIdentity as Schema;
       const description = schema.description ?? '';
-      expect(description).not.toMatch(/writes? the per-source rows verbatim/);
+      // Pin the retraction, not one phrasing of the instruction: any sentence
+      // naming the table has to be the one saying it was never built.
       expect(description).toMatch(/library_track_identity_source[^.]*never built/);
       expect(description).toMatch(/composed verdict/i);
-    });
-
-    // The "current version" sentinel lives with the most recent api.yaml change;
-    // the include_tracks gate + the BulkResolveTrackIdentity repair bumped the minor.
-    it('bumps info.version to 1.30.0', () => {
-      expect(spec.info.version).toBe('1.30.0');
+      const sentencesNamingTheTable = description
+        .split(/(?<=\.)\s+/)
+        .filter((s) => s.includes('library_track_identity_source'));
+      expect(sentencesNamingTheTable).toHaveLength(1);
+      expect(sentencesNamingTheTable[0]).toMatch(/never built/);
     });
   });
 
