@@ -1,0 +1,29 @@
+# oasdiff error-level ignore list.
+#
+# Format: one line per suppressed finding, `<method> <path> <message>` exactly as
+# oasdiff renders it (case-insensitive, extra spaces collapsed). A line that
+# matches nothing — including a `#` comment — is inert.
+#
+# Entries here are scoped to a `main`..PR diff, so an entry stops matching the
+# moment its change lands on `main`. Prune dead entries when you notice them;
+# an entry that outlives its diff suppresses nothing but reads as if it does.
+#
+# Every entry needs a written justification. "oasdiff is being annoying" is not
+# one — a genuine breaking change gets a contract-version conversation, not a
+# line in this file.
+
+# --- wxyc-shared#297 (api.yaml 1.30.0) ---
+# `BulkResolveTrackIdentity.track_position` goes required-non-null ->
+# required-nullable. oasdiff is right in the abstract: a consumer that decoded
+# the field as non-optional would now break. In fact no such consumer can exist.
+# `BulkResolveResult.tracks` is the only way to reach this property, and it has
+# only ever shipped as an empty array — LML never implemented per-track
+# resolution, and the sole consumer (Backend's `library-identity-consumer`)
+# counts the compilation arm's tracks and skips it without reading an entry.
+# Wire compatibility is therefore total; only the static rule fires.
+#
+# The alternative — keeping the property non-nullable — would force LML to emit
+# `""` for the 78% of compilation-track rows that carry no position
+# (WXYC/Backend-Service#1989), i.e. encode "unknown" as a value that reads as
+# "known and empty". That is the failure this contract exists to prevent.
+post /api/v1/identity/bulk-resolve-libraries the response property `results/items/tracks/items/track_position` became nullable for the status `200`

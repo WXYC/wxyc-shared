@@ -872,12 +872,6 @@ describe('OpenAPI Specification', () => {
       expect(read.properties?.artist_name?.maxLength).toBe(255);
     });
 
-    // The "current version" sentinel lives with the most recent api.yaml change;
-    // the BS#1965 producer fields + the CTA export path bumped the minor.
-    it('bumps info.version to 1.29.0', () => {
-      expect(spec.info.version).toBe('1.29.0');
-    });
-
     it('declares GET /library/catalog/compilation-tracks (BearerAuth; If-Modified-Since + ?since=; NDJSON 200 + 304)', () => {
       const path = spec.paths['/library/catalog/compilation-tracks'] as {
         get?: {
@@ -2073,6 +2067,141 @@ describe('OpenAPI Specification', () => {
           '#/components/schemas/ApiErrorResponse',
         );
       }
+    });
+  });
+
+  describe('Bulk-Resolve-Libraries tracks gating + per-track identity (#297)', () => {
+    type Schema = {
+      type?: string;
+      required?: string[];
+      description?: string;
+      properties?: Record<string, Record<string, unknown>>;
+    };
+
+    // --- Option (B): opt-in `include_tracks`, gating BOTH kinds ---
+
+    it('adds include_tracks to BulkResolveLibrariesRequest as an optional boolean defaulting to false', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesRequest as Schema;
+      const flag = schema.properties?.include_tracks;
+      expect(flag).toBeDefined();
+      expect(flag!.type).toBe('boolean');
+      // Default false is the whole backward-compatibility story: an
+      // un-upgraded Backend that never sends the field keeps today's payload.
+      expect(flag!.default).toBe(false);
+      expect(schema.required ?? []).not.toContain('include_tracks');
+    });
+
+    it('documents include_tracks as gating tracks on both single_artist and compilation', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesRequest as Schema;
+      const description = (schema.properties?.include_tracks?.description as string) ?? '';
+      expect(description).toMatch(/single_artist/);
+      expect(description).toMatch(/compilation/);
+    });
+
+    it('replaces the two-state tracks wording with the three states, on both kinds', () => {
+      const schema = spec.components.schemas.BulkResolveResult as Schema;
+      const tracks = schema.properties?.tracks;
+      expect(tracks).toBeDefined();
+      const description = (tracks!.description as string) ?? '';
+      // The superseded contract: V/A-only, and exactly two states.
+      expect(description).not.toMatch(/Two states/i);
+      expect(description).not.toMatch(/Set only for `kind: compilation`/);
+      // The three states this ticket settled.
+      expect(description).toMatch(/absent/i);
+      expect(description).toMatch(/empty/i);
+      expect(description).toMatch(/include_tracks/);
+      expect(description).toMatch(/single_artist/);
+      // Still optional — the absent state is what an un-upgraded caller sees.
+      expect(schema.required ?? []).not.toContain('tracks');
+    });
+
+    it('corrects BulkResolveResultKind so compilation no longer owns tracks alone', () => {
+      const kind = spec.components.schemas.BulkResolveResultKind as Schema;
+      const description = kind.description ?? '';
+      expect(description).toMatch(/include_tracks/);
+      expect(kind).toHaveProperty('enum', ['single_artist', 'compilation', 'unresolved']);
+    });
+
+    // --- BulkResolveTrackIdentity repair (BS#1991 / LML#1021) ---
+
+    it('ships the join-back echoes, composed verdict, and canonical artist on BulkResolveTrackIdentity', () => {
+      const schema = spec.components.schemas.BulkResolveTrackIdentity as Schema;
+      expect(Object.keys(schema.properties ?? {}).sort()).toEqual(
+        [
+          'artist_name',
+          'confidence',
+          'method',
+          'resolved_artist_name',
+          'sources',
+          'track_position',
+          'track_title',
+        ].sort(),
+      );
+
+      // artist_name is the join-back key BS actually has (78% of CTA rows are
+      // position-NULL per BS#1989), so it is required and non-nullable.
+      expect(schema.properties?.artist_name?.type).toBe('string');
+      expect(schema.properties?.artist_name?.nullable).toBeUndefined();
+      expect(schema.required ?? []).toContain('artist_name');
+
+      // track_title completes the join key; nullable because the CTA column is.
+      expect(schema.properties?.track_title?.type).toBe('string');
+      expect(schema.properties?.track_title?.nullable).toBe(true);
+    });
+
+    it('makes track_position nullable but keeps the key present (positions are unrecoverable for some V/A rows)', () => {
+      const schema = spec.components.schemas.BulkResolveTrackIdentity as Schema;
+      const position = schema.properties?.track_position;
+      expect(position?.type).toBe('string');
+      expect(position?.nullable).toBe(true);
+      // Required-but-nullable: the null says "no position for this row",
+      // which an absent key could not distinguish from "not echoed".
+      expect(schema.required ?? []).toContain('track_position');
+    });
+
+    it('lands the composed per-track verdict as required-but-nullable resolved_artist_name / confidence / method', () => {
+      const schema = spec.components.schemas.BulkResolveTrackIdentity as Schema;
+      const required = schema.required ?? [];
+
+      const resolved = schema.properties?.resolved_artist_name;
+      expect(resolved?.type).toBe('string');
+      expect(resolved?.nullable).toBe(true);
+      expect(required).toContain('resolved_artist_name');
+
+      const confidence = schema.properties?.confidence;
+      expect(confidence?.type).toBe('number');
+      expect(confidence?.nullable).toBe(true);
+      expect(confidence?.minimum).toBe(0);
+      expect(confidence?.maximum).toBe(1);
+      expect(required).toContain('confidence');
+
+      // method is a nullable $ref, so it has to be wrapped in allOf.
+      const method = schema.properties?.method as { allOf?: Array<{ $ref?: string }>; nullable?: boolean };
+      expect(method?.allOf?.[0]?.$ref).toBe('#/components/schemas/IdentityMethod');
+      expect(method?.nullable).toBe(true);
+      expect(required).toContain('method');
+    });
+
+    it('documents artist_name and track_title as dual-mode (CTA echo for V/A, source credit for non-V/A)', () => {
+      const schema = spec.components.schemas.BulkResolveTrackIdentity as Schema;
+      for (const key of ['artist_name', 'track_title']) {
+        const description = (schema.properties?.[key]?.description as string) ?? '';
+        expect(description, key).toMatch(/compilation/);
+        expect(description, key).toMatch(/single_artist/);
+      }
+    });
+
+    it('states the null-resolved_artist_name convention so non-empty tracks reads as attempted', () => {
+      const schema = spec.components.schemas.BulkResolveTrackIdentity as Schema;
+      const description = (schema.properties?.resolved_artist_name?.description as string) ?? '';
+      // Same "the leg ran" convention as BulkResolveProvenanceEntry.external_id.
+      expect(description).toMatch(/NULL/);
+    });
+
+    // The "current version" sentinel lives with the most recent api.yaml change;
+    // the include_tracks gate + the BulkResolveTrackIdentity repair bumped the minor.
+    it('bumps info.version to 1.30.0', () => {
+      expect(spec.info.version).toBe('1.30.0');
     });
   });
 

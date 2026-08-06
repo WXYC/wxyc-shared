@@ -134,7 +134,20 @@ Two gotchas, both verified against the current `api.yaml`:
 1. **`identifiableModels: false` is required, not cosmetic.** Its swift6 default is `true`. Left on, the synthesized oneOf catch-all (e.g. `V2FlowsheetLatestGet200Response`) gets an `extension … : Identifiable {}` with no `id` conformance, and the generated package fails to compile. `swift6.yaml` sets it to `false`, which drops every `Identifiable` extension — verify with `grep -rl ": Identifiable" generated/swift | wc -l` (should be `0`).
 2. **`generateApis: false` does not suppress the `APIs/` directory under `swift6`.** It still emits `Sources/WXYCAPI/APIs/DefaultAPI.swift` (~148KB) and friends even though this repo only wants models. That's harmless for the in-repo reference tree, but any consumer that vendors `generated/swift` (WXYC/wxyc-ios-64#598 and future Swift consumers) must drop `APIs/` themselves — don't rely on the config to keep it out.
 
-Run `npm run check:breaking` before changing `api.yaml` to detect breaking changes.
+### Python codegen drops `nullable` on required fields
+
+`generate:python` runs `datamodel-codegen` **without** `--strict-nullable`, and that flag's absence is not cosmetic: a `required` + `nullable: true` property generates as a plain non-Optional field (`confidence: confloat(ge=0, le=1)`), so the null the contract documents cannot be constructed through the generated model. Only *non-required* nullable properties come out as `str | None = None`.
+
+This bites the required-but-nullable idiom this spec uses whenever a null carries meaning (`BulkResolveProvenanceEntry.confidence`, `BulkResolveTrackIdentity.resolved_artist_name`, `CompilationTrackSuggestions.discogs_release_id`). LML currently works around it by defaulting the None case upstream — i.e. the documented null never reaches the wire. Adding `--strict-nullable` fixes it but rewrites ~200 lines of both Python consumers' committed models, so it needs its own ticket and their review; don't reshape `api.yaml` to route around the generator.
+
+## Breaking-change gate
+
+Run `npm run check:breaking` before changing `api.yaml`. It runs `oasdiff breaking` against `origin/main` with `--fail-on ERR`, mirroring the `breaking-changes.yml` PR job.
+
+Both sides pass `--err-ignore oasdiff-err-ignore.txt`, a whitelist of findings that are breaking by oasdiff's static rules but provably not on the wire (e.g. a property reachable only through an array that has never shipped a non-empty value). Every entry needs a written justification in the file. Two properties to keep in mind:
+
+- **Entries are diff-scoped.** A line matches only while its change is in `main`..PR; once merged it stops matching and is inert. Prune dead entries.
+- **The file is not an escape hatch for real breaks.** A genuine breaking change gets a contract-version conversation, not a line in the whitelist.
 
 ## Testing
 

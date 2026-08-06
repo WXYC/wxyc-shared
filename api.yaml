@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.29.0
+  version: 1.30.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4120,24 +4120,55 @@ components:
     # a verdict per input — composed external IDs, the chosen method,
     # confidence, and per-source provenance.
     #
-    # Request shape is uniform: `{library_id, artist_name, album_title}`.
-    # LML auto-detects V/A from the row (per `library.code_volume_letters
-    # LIKE 'Z%'` or `EXISTS compilation_track_artist`) and discriminates
-    # the response on `kind`:
+    # Request shape is uniform: `{library_id, artist_name, album_title}`,
+    # plus the batch-level `include_tracks` flag. LML auto-detects V/A from
+    # the row (per `library.code_volume_letters LIKE 'Z%'` or
+    # `EXISTS compilation_track_artist`) and discriminates the response on
+    # `kind`:
     #
     #     - `kind: "single_artist"` — resolved single-artist library row;
     #                                  `main` carries the composed identity.
-    #     - `kind: "compilation"`   — V/A row; `tracks` carries per-track
-    #                                  identity (empty array if LML has no
-    #                                  track data for it yet). `main` is
-    #                                  null (no album-level artist anchor).
+    #                                  `tracks` carries per-track identity
+    #                                  when the request asked for it.
+    #     - `kind: "compilation"`   — V/A row; `main` is null (no album-level
+    #                                  artist anchor). `tracks` carries
+    #                                  per-track identity when the request
+    #                                  asked for it.
     #     - `kind: "unresolved"`    — LML attempted resolution and found
     #                                  nothing actionable; first-class
     #                                  outcome so Backend can cache and
-    #                                  not re-ask. `main` and `tracks`
-    #                                  are both null. Audit detail lives
-    #                                  in `provenance` (empty means LML
-    #                                  tried and nothing resolved).
+    #                                  not re-ask. `main` is null and
+    #                                  `tracks` is always absent. Audit
+    #                                  detail lives in `provenance` (empty
+    #                                  means LML tried and nothing resolved).
+    #
+    # ---- `tracks` is opt-in, and gated on BOTH resolved kinds (#297) ----
+    #
+    # Per-track identity is not free. WXYC/Backend-Service#1989 measured a
+    # mean of 56 per-track credits per V/A release, p99 483, max 2,364 — a
+    # 1,000-id page of V/A rows is ~11 MB of track identity that an
+    # album-identity drain would parse and discard, on every future pass.
+    # So the payload is gated behind `BulkResolveLibrariesRequest.include_tracks`
+    # (default `false`), and the gate covers the V/A arm too: exempting the
+    # arm with the worst payload pathology would be backwards.
+    #
+    # Omitting the flag reproduces the pre-`1.30.0` wire exactly, minus the
+    # empty array the V/A arm used to ship — which the sole consumer's
+    # compilation branch counts and skips without reading.
+    #
+    # Three states for `tracks`, replacing the two-state ("present-array or
+    # absent") rule this contract carried through `1.29.0`:
+    #
+    #     absent     — the caller did not ask (`include_tracks` false or
+    #                  omitted), or `kind: "unresolved"`.
+    #     []         — the caller asked, and LML's per-track matcher has not
+    #                  visited this row yet.
+    #     [entries]  — the matcher ran. Entries whose `resolved_artist_name`
+    #                  is NULL are tracks it tried and failed on, the same
+    #                  "the leg ran" convention as
+    #                  `BulkResolveProvenanceEntry.external_id`. A non-empty
+    #                  array is therefore a resolved signal
+    #                  (WXYC/Backend-Service#1991 / LML#1021).
 
     BulkResolveLibrariesRequest:
       type: object
@@ -4155,7 +4186,22 @@ components:
             $ref: '#/components/schemas/BulkResolveInput'
           description: >
             Inputs to resolve. Order preserved in `BulkResolveLibrariesResponse.results`.
+        include_tracks:
+          type: boolean
+          default: false
+          description: >
+            Opt in to per-track identity, for every input in the batch
+            (the flag is batch-level, not per-input). When `false` or
+            omitted — the default, and what an un-upgraded caller sends —
+            `BulkResolveResult.tracks` is absent from every result, so an
+            album-identity drain pays nothing for track composition it
+            would discard. When `true`, LML composes per-track identity
+            for both `kind: single_artist` and `kind: compilation`
+            results; `kind: unresolved` never carries tracks. See
+            `BulkResolveResult.tracks` for the three states the returned
+            array distinguishes.
       example:
+        include_tracks: true
         inputs:
           - library_id: 1234
             artist_name: "Juana Molina"
@@ -4192,10 +4238,12 @@ components:
       type: string
       description: >
         Discriminator for `BulkResolveResult`. `single_artist` carries a
-        composed `main` identity. `compilation` carries `tracks` (empty
-        array if LML has no per-track data for the V/A row yet).
-        `unresolved` is a first-class outcome — caching it (with TTL)
-        prevents repeated re-asking for unresolvable rows.
+        composed `main` identity; `compilation` carries none (a V/A row has
+        no album-level artist anchor). Either may carry `tracks` — per-track
+        identity is gated by the request's `include_tracks` flag, not by
+        `kind` (#297). `unresolved` is a first-class outcome — caching it
+        (with TTL) prevents repeated re-asking for unresolvable rows — and
+        never carries `main` or `tracks`.
       enum:
         - single_artist
         - compilation
@@ -4243,20 +4291,97 @@ components:
     BulkResolveTrackIdentity:
       type: object
       description: >
-        Per-track resolution for a V/A library row. One entry per
-        (library_id, track_position) the request resolved. Sources
-        reflect the per-source rows LML composed the track identity
-        from; the chosen identifiers are not lifted into a per-track
-        `external_ids` block at this contract version — Backend writes
-        the per-source rows verbatim into `library_track_identity_source`
-        per WXYC/library-metadata-lookup#271's design.
+        Per-track resolution for one library row — V/A or not. Returned
+        only when the request set `include_tracks: true`; one entry per
+        track LML's per-track matcher visited. `sources` reflects the
+        per-source rows LML composed the track identity from; the chosen
+        identifiers are not lifted into a per-track `external_ids` block
+        at this contract version — Backend writes the per-source rows
+        verbatim into `library_track_identity_source` per
+        WXYC/library-metadata-lookup#271's design.
+
+
+        The entry is addressable without `track_position`: 78% of
+        Backend's `compilation_track_artist` rows carry a NULL position
+        (WXYC/Backend-Service#1989), so `artist_name` + `track_title` are
+        the join-back key a consumer can actually use. `1.29.0` shipped
+        `track_position` as the only row identifier plus per-source legs,
+        with no composed verdict and no canonical artist — unconsumable
+        for WXYC/Backend-Service#1991, which went unnoticed because the
+        array has only ever shipped empty. The four added fields below
+        close that gap.
       required:
         - track_position
+        - artist_name
+        - track_title
+        - resolved_artist_name
+        - confidence
+        - method
         - sources
       properties:
         track_position:
           type: string
-          description: Track position; matches the request input.
+          nullable: true
+          description: >
+            Track position as the source has it ("A1", "3", …).
+            Required-but-nullable: the key is always present, and NULL
+            says "no position is recoverable for this track" rather than
+            "not echoed". Not a usable row identifier on its own — most
+            of Backend's compilation-track rows are position-NULL
+            (WXYC/Backend-Service#1989); join on `artist_name` +
+            `track_title` instead.
+        artist_name:
+          type: string
+          description: >
+            Join-back echo of the per-track credit, verbatim, and the
+            load-bearing half of the join key — never NULL. Dual-mode:
+            for `kind: compilation` it echoes the
+            `compilation_track_artist` row as exported in library.db, so
+            a consumer can match it to its own CTA row; for
+            `kind: single_artist` there is no CTA row and it carries the
+            credit as LML's source has it.
+        track_title:
+          type: string
+          nullable: true
+          description: >
+            Join-back echo of the track title, completing the join key.
+            Dual-mode in the same way as `artist_name` — the library.db
+            CTA row's title for `kind: compilation`, the source's track
+            title for `kind: single_artist`. NULL when that row or source
+            carries no title (the underlying CTA column is nullable).
+        resolved_artist_name:
+          type: string
+          nullable: true
+          description: >
+            The composed canonical artist for this track — the per-track
+            analogue of `BulkResolveResult.main`, carried as a name
+            because LML does not know Backend's artist ids; consumers map
+            it to their own artist tables locally. NULL when the matcher
+            visited this track and resolved nothing: the entry is still
+            returned so consumers see the leg ran (same convention as
+            `BulkResolveProvenanceEntry.external_id`), and `confidence`
+            and `method` are NULL alongside it.
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: >
+            Composed track-level confidence in [0, 1] — where LML#1021's
+            per-track composition lands (cross-source agreement boost,
+            MIN-of-confidences fallback), applied at track grain exactly
+            as `BulkResolveResult.confidence` applies at album grain.
+            NULL when `resolved_artist_name` is NULL — the matcher ran
+            and produced no verdict, so confidence is undefined (not
+            zero).
+        method:
+          allOf:
+            - $ref: '#/components/schemas/IdentityMethod'
+          nullable: true
+          description: >
+            The composed track-level method — typically the strongest
+            leg's method, or `cross_source_agreement` when LML#1021's
+            boost fired. NULL when `resolved_artist_name` is NULL.
         sources:
           type: array
           description: >
@@ -4321,9 +4446,18 @@ components:
         tracks:
           type: array
           description: >
-            Set only for `kind: compilation`; absent for every other `kind`.
-            Empty array when LML has no per-track data for the V/A row yet.
-            Two states (present-array or absent), not three.
+            Per-track identity, returned only when the request set
+            `include_tracks: true`. That flag — not `kind` — gates the
+            field, and it gates it on both `kind: single_artist` and
+            `kind: compilation` (#297); `kind: unresolved` never carries
+            tracks. Three states, and the distinction between the last two
+            is load-bearing for WXYC/Backend-Service#1991: **absent** — the
+            caller did not ask (`include_tracks` false or omitted), or the
+            result is `unresolved`; **empty array** — the caller asked, and
+            LML's per-track matcher has not visited this row yet;
+            **non-empty** — the matcher ran, with a NULL
+            `resolved_artist_name` on each track it failed on ("the leg
+            ran"), so consumers treat non-empty as a resolved signal.
           items:
             $ref: '#/components/schemas/BulkResolveTrackIdentity'
 
@@ -4331,7 +4465,9 @@ components:
       type: object
       description: >
         Response to `POST /api/v1/identity/bulk-resolve-libraries`. Order
-        of `results` matches the order of the request's `inputs`.
+        of `results` matches the order of the request's `inputs`. The
+        example below is the `include_tracks: true` shape; with the flag
+        false or omitted, every `tracks` key is absent.
       required:
         - results
       example:
@@ -4353,16 +4489,44 @@ components:
                 method: alias_match
                 confidence: 0.95
                 external_id: "abc-def-12345"
+            tracks:
+              - track_position: "3"
+                artist_name: "Juana Molina"
+                track_title: "la paradoja"
+                resolved_artist_name: "Juana Molina"
+                confidence: 0.98
+                method: exact_match
+                sources:
+                  - source: discogs
+                    method: exact_match
+                    confidence: 0.98
+                    external_id: "release/456"
           - kind: compilation
             library_id: 5678
             provenance: []
             tracks:
               - track_position: "A1"
+                artist_name: "Chuquimamani-Condori"
+                track_title: "Call Your Name"
+                resolved_artist_name: "Chuquimamani-Condori"
+                confidence: 0.90
+                method: exact_match
                 sources:
                   - source: discogs
                     method: exact_match
                     confidence: 0.90
                     external_id: "release/789"
+              - track_position: null
+                artist_name: "Csillagrablók"
+                track_title: null
+                resolved_artist_name: null
+                confidence: null
+                method: null
+                sources:
+                  - source: discogs
+                    method: exact_match
+                    confidence: null
+                    external_id: null
           - kind: unresolved
             library_id: 9999
             provenance:
@@ -8284,6 +8448,15 @@ paths:
         `library_identity_source`. `kind: unresolved` is a first-class
         outcome — Backend caches it (with TTL) so the same input is not
         re-asked.
+
+
+        Per-track identity is opt-in: set `include_tracks: true` on the
+        request to get `BulkResolveResult.tracks` on both
+        `kind: single_artist` and `kind: compilation` results. The flag
+        defaults to `false`, which keeps album-identity drains off the
+        (measurably large) track payload — see the schema notes on
+        `BulkResolveLibrariesRequest.include_tracks` and
+        `BulkResolveResult.tracks`.
       security:
         - LMLBearerAuth: []
       tags:
