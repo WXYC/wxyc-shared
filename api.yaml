@@ -4294,11 +4294,18 @@ components:
         Per-track resolution for one library row — V/A or not. Returned
         only when the request set `include_tracks: true`; one entry per
         track LML's per-track matcher visited. `sources` reflects the
-        per-source rows LML composed the track identity from; the chosen
-        identifiers are not lifted into a per-track `external_ids` block
-        at this contract version — Backend writes the per-source rows
-        verbatim into `library_track_identity_source` per
-        WXYC/library-metadata-lookup#271's design.
+        per-source rows LML composed the track identity from — audit
+        provenance, not a storage instruction: LML's per-track store is
+        the per-source system of record, and consumers persist only the
+        composed verdict fields on this entry. `1.29.0` said instead that
+        Backend writes these rows verbatim into
+        `library_track_identity_source`; that table was never built —
+        WXYC/library-metadata-lookup#271 closed as a design decision and
+        the schema half never happened, confirmed against prod and all
+        136 migrations in
+        https://github.com/WXYC/Backend-Service/issues/801#issuecomment-5187348795.
+        The chosen identifiers are not lifted into a per-track
+        `external_ids` block at this contract version.
 
 
         The entry is addressable without `track_position`: 78% of
