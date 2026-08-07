@@ -2107,7 +2107,7 @@ describe('OpenAPI Specification', () => {
       expect(description).toMatch(/compilation/);
     });
 
-    it('replaces the two-state tracks wording with the three states, on both kinds', () => {
+    it('replaces the two-state tracks wording with the four states, on both kinds', () => {
       const schema = spec.components.schemas.BulkResolveResult as Schema;
       const tracks = schema.properties?.tracks;
       expect(tracks).toBeDefined();
@@ -2115,7 +2115,11 @@ describe('OpenAPI Specification', () => {
       // The superseded contract: V/A-only, and exactly two states.
       expect(description).not.toMatch(/Two states/i);
       expect(description).not.toMatch(/Set only for `kind: compilation`/);
-      // The three states this ticket settled.
+      // Nor the three-state framing that shipped in this PR's first pass — the
+      // empty array turned out to carry two meanings, so `tracks` alone cannot
+      // name the state; it names it jointly with `tracks_attempted`.
+      expect(description).not.toMatch(/Three states/i);
+      // The four states this ticket settled.
       expect(description).toMatch(/absent/i);
       expect(description).toMatch(/empty/i);
       expect(description).toMatch(/include_tracks/);
@@ -2141,6 +2145,50 @@ describe('OpenAPI Specification', () => {
       const description = kind.description ?? '';
       expect(description).toMatch(/include_tracks/);
       expect(kind).toHaveProperty('enum', ['single_artist', 'compilation', 'unresolved']);
+    });
+
+    // --- `tracks_attempted`: the resolved signal, decoupled from array length ---
+    //
+    // Without it, `tracks: []` carries two meanings that a consumer cannot tell
+    // apart: the matcher has not visited this row, and the matcher ran and
+    // resolved nothing. Extending the gate to `kind: single_artist` makes the
+    // second case ordinary rather than theoretical — a release LML holds no
+    // tracklist for. BS#1991 would read every one of them as "not yet visited"
+    // and re-ask forever, which is the pathology `kind: unresolved` was made a
+    // first-class outcome to prevent, reintroduced one grain down.
+
+    it('adds tracks_attempted to BulkResolveResult as an optional nullable boolean', () => {
+      const schema = spec.components.schemas.BulkResolveResult as Schema;
+      const attempted = schema.properties?.tracks_attempted;
+      expect(attempted).toBeDefined();
+      expect(attempted!.type).toBe('boolean');
+      // Optional + nullable, symmetric with `tracks`: an un-upgraded caller that
+      // never sends include_tracks keeps today's payload, and LML spells every
+      // not-asked field `null` rather than omitting the key.
+      expect(attempted!.nullable).toBe(true);
+      expect(schema.required ?? []).not.toContain('tracks_attempted');
+    });
+
+    it('makes tracks_attempted the resolved signal, decoupled from array length', () => {
+      const schema = spec.components.schemas.BulkResolveResult as Schema;
+      const description = (schema.properties?.tracks_attempted?.description as string) ?? '';
+      // The load-bearing sentence: true once the matcher has visited the row,
+      // however many tracks it resolved — including none.
+      expect(description).toMatch(/regardless of how many/i);
+      expect(description).toMatch(/WXYC\/Backend-Service#1991/);
+      // And the pairing has to be spelled out, or a producer can emit the one
+      // combination that means nothing (`false` alongside a populated array).
+      expect(description).toMatch(/`false`[\s\S]*empty/);
+    });
+
+    it('retires "non-empty is the resolved signal" from the tracks description', () => {
+      // The 2026-08-06 settlement read non-empty as resolved. That heuristic is
+      // superseded by the explicit flag; leaving it in the prose would give
+      // consumers two rules that disagree exactly on the zero-track case.
+      const schema = spec.components.schemas.BulkResolveResult as Schema;
+      const description = (schema.properties?.tracks?.description as string) ?? '';
+      expect(description).not.toMatch(/non-empty as a resolved signal/);
+      expect(description).toMatch(/tracks_attempted/);
     });
 
     // --- BulkResolveTrackIdentity repair (BS#1991 / LML#1021) ---
