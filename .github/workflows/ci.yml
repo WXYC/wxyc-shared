@@ -52,11 +52,17 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v9.0.0
         with:
-          # This repo has no pyproject.toml/uv.lock/requirements*.txt for
-          # setup-uv's default cache-dependency-glob to key off of, so its
-          # cache would never invalidate. There's nothing here worth caching
-          # anyway -- uvx fetches datamodel-code-generator/ruff themselves.
-          enable-cache: false
+          # setup-uv's cache is ~/.cache/uv -- exactly where `uvx` lands its
+          # fetches of datamodel-code-generator/ruff (and any uv-managed
+          # CPython), so there IS something worth caching here; the previous
+          # comment on this step had the mechanism backwards. This repo has
+          # no pyproject.toml/uv.lock/requirements*.txt for the default
+          # cache-dependency-glob to key off, so point it at the one file
+          # that should invalidate the cache: the pin itself. Bumping
+          # DATAMODEL_CODEGEN_PIN (or the --python version) changes this
+          # file's hash and busts the cache; nothing else in this repo needs
+          # to.
+          cache-dependency-glob: 'scripts/generate-python-models.sh'
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
