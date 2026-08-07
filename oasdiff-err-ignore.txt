@@ -32,3 +32,18 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
+
+# --- wxyc-shared#310 (api.yaml 1.32.0) ---
+# `BulkResolveLibrariesResponse.tracks_contract_version` gains `nullable: true`.
+# This one corrects the schema toward the wire rather than changing the wire:
+# the field was added in api.yaml 1.31.0 one day before this entry, no producer
+# has ever set it, and LML serves this endpoint through FastAPI's
+# `response_model` with no `response_model_exclude_none` and never assigns the
+# field, so `"tracks_contract_version": null` is what every bulk-resolve
+# response has carried since the field shipped. No consumer reads it yet
+# (WXYC/Backend-Service#1991 has not started), so there is no decoder in
+# production for this to break. Declaring the nullability cannot break a
+# decoder that survives today's traffic — the undeclared null is the status
+# quo, same reasoning as the `tracks`/`track_position` entries this file
+# already pruned.
+post /api/v1/identity/bulk-resolve-libraries the response property `tracks_contract_version` became nullable for the status `200`
