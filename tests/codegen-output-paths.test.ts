@@ -53,6 +53,38 @@ describe("codegen output paths (#197)", () => {
   });
 });
 
+// `generated/python/` is gitignored and imported by nothing, here or anywhere
+// in the org: both Python consumers run their own copy of
+// `scripts/generate_api_models.sh` against `api.yaml` and commit
+// `generated/api_models.py` in their own repo. CLAUDE.md's consumer table said
+// otherwise, which is how #302 nearly landed a `--strict-nullable` fix in
+// `package.json` alone and changed nothing for either consumer.
+describe("CLAUDE.md's codegen consumer table (#302)", () => {
+  const claudeMd = readFileSync(join(__dirname, "..", "CLAUDE.md"), "utf-8");
+
+  /** The `| generate:python | ... |` row of the "Output locations and consumers" table. */
+  const pythonRow = () => {
+    const row = claudeMd
+      .split("\n")
+      .find((line) => /^\|\s*`generate:python`\s*\|/.test(line));
+    expect(row, "generate:python row missing from the consumer table").toBeDefined();
+    return row as string;
+  };
+
+  it("does not name either Python service as a consumer of generated/python/", () => {
+    // The fact, not a phrasing: whatever the row says, it must not send a
+    // reader to change this repo's output expecting a consumer to see it.
+    expect(pythonRow()).not.toMatch(/request-o-matic|library-metadata-lookup/);
+  });
+
+  it("points at the script the Python consumers actually run", () => {
+    // A reader who learns the table row is empty still needs to know where
+    // Python models do come from, or the correction just relocates the
+    // confusion.
+    expect(claudeMd).toContain("scripts/generate_api_models.sh");
+  });
+});
+
 // A property carrying an OpenAPI `default` is emitted non-optional by
 // openapi-typescript (its `defaultNonNullable` option, on by default) even when
 // the property is absent from `required`. That reasoning holds for a response —

@@ -110,16 +110,18 @@ The TypeScript codegen script (`scripts/generate-models.js`) produces:
 - `src/generated/openapi-types.d.ts` -- raw openapi-typescript output
 - `src/generated/models/index.ts` -- re-export layer with const objects for enums
 
-All four output trees are **in-repo and gitignored** (`src/generated/`, `generated/`) — they're regenerated artifacts, never committed here. TypeScript is the only output consumed by this package's own build (it ships the DTOs); Python/Swift/Kotlin are produced for downstream consumers.
+All four output trees are **in-repo and gitignored** (`src/generated/`, `generated/`) — they're regenerated artifacts, never committed here. TypeScript is the only output any consumer actually receives (it ships the DTOs in the published package); Python, Swift, and Kotlin are local reference trees a maintainer regenerates and diffs against when hand-updating a consumer.
 
 ### Output locations and consumers
 
 | Script | Output (gitignored) | Consumer(s) | How the consumer uses it today |
 |---|---|---|---|
 | `generate:typescript` | `src/generated/` | Backend-Service, dj-site (via `@wxyc/shared/dtos`) | Imported from the published package |
-| `generate:python` | `generated/python/` | request-o-matic, library-metadata-lookup | Pydantic models |
+| `generate:python` | `generated/python/` | **Nobody** — reference/diff aid only | Both Python services generate their own models from `api.yaml` (see below) |
 | `generate:swift` | `generated/swift/` | wxyc-dj-ios (DJ tool / device-auth), wxyc-ios-64 (listener) | **Hand-maintained** — reference/diff aid only |
 | `generate:kotlin` | `generated/kotlin/` | WXYC-Android | **Hand-maintained** — reference/diff aid only |
+
+**Nothing consumes `generated/python/`.** Both Python services run their *own* copy of `scripts/generate_api_models.sh` against `api.yaml` — resolved from a sibling `wxyc-shared/` checkout, or downloaded from `raw.githubusercontent.com` when there isn't one — and commit the result as `generated/api_models.py` in their own repo ([library-metadata-lookup](https://github.com/WXYC/library-metadata-lookup/blob/main/scripts/generate_api_models.sh), [request-o-matic](https://github.com/WXYC/request-o-matic/blob/main/scripts/generate_api_models.sh)). So `npm run generate:python` here is a reference/diff aid like Swift and Kotlin, not a build step for anyone. Two consequences worth holding onto: **a codegen-flag change made here reaches no consumer** — it has to land in all three invocations (that's the scope correction in #302), or #107 has to consolidate them first; and the three invocations can drift, as they already have on the generator version — LML pins `datamodel-code-generator[http]==0.56.1`, request-o-matic pins `datamodel-code-generator==0.57.0` in `requirements-dev.txt`, and this repo pins nothing at all. Regenerate against a consumer's pin when you're producing output to diff against that consumer.
 
 The Swift/Kotlin consumers **do not yet consume the generated output** — they hand-author types that mirror `api.yaml` (e.g. `wxyc-dj-ios`'s `Packages/WXYCAPI/Sources/WXYCAPI/DTOs/`). So `generated/swift` and `generated/kotlin` are a local reference a maintainer regenerates and diffs against when hand-updating a consumer after an `api.yaml` change — not a tree any consumer checks in. (`library-scanner`, formerly a Swift consumer, is now an archived/read-only repo.)
 
@@ -138,7 +140,7 @@ Two gotchas, both verified against the current `api.yaml`:
 
 `generate:python` runs `datamodel-codegen` **without** `--strict-nullable`, and that flag's absence is not cosmetic: a `required` + `nullable: true` property generates as a plain non-Optional field (`confidence: confloat(ge=0, le=1)`), so the null the contract documents cannot be constructed through the generated model. Only *non-required* nullable properties come out as `str | None = None`.
 
-This bites the required-but-nullable idiom this spec uses whenever a null carries meaning (`BulkResolveProvenanceEntry.confidence`, `BulkResolveTrackIdentity.resolved_artist_name`, `CompilationTrackSuggestions.discogs_release_id`). LML currently works around it by defaulting the None case upstream — i.e. the documented null never reaches the wire. Adding `--strict-nullable` fixes it but rewrites ~200 lines of both Python consumers' committed models, so it needs its own ticket and their review; don't reshape `api.yaml` to route around the generator.
+This bites the required-but-nullable idiom this spec uses whenever a null carries meaning (`BulkResolveProvenanceEntry.confidence`, `BulkResolveTrackIdentity.resolved_artist_name`, `CompilationTrackSuggestions.discogs_release_id`). LML currently works around it by defaulting the None case upstream — i.e. the documented null never reaches the wire. Adding `--strict-nullable` fixes it but rewrites ~200 lines of both Python consumers' committed models, so it needs their review; don't reshape `api.yaml` to route around the generator. Tracked in #302, which also carries the measured blast radius (72 changed field declarations, 36 widened / 36 narrowed) and the reason the flag has to land in all three invocations rather than only in `package.json`.
 
 ## Breaking-change gate
 
