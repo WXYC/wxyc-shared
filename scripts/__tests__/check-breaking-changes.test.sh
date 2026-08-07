@@ -43,14 +43,23 @@ teardown() {
     done < "$IGNORE_FILE"
 }
 
-@test "runs clean under bash 3.2 semantics (set -u + empty array expansion)" {
-    # macOS ships bash 3.2 at /bin/bash, where `"${arr[@]}"` on an empty array
-    # is an unbound-variable abort under `set -u`. The script must not depend
-    # on the bash 5 behaviour the author's homebrew shell happens to have.
-    if [ -x /bin/bash ]; then
-        run /bin/bash "$SCRIPT_PATH"
-        [[ "$output" != *"unbound variable"* ]]
-    fi
+# The original defect: `--err-ignore` args were held in an array and expanded as
+# `"${IGNORE_ARGS[@]}"`, which under bash 3.2 — what macOS ships at /bin/bash —
+# aborts with "unbound variable" when the array is empty and `set -u` is on. The
+# script exits 1 there, and its own header defines exit 1 as "breaking changes
+# detected". The array is gone, so this is a static guard against reintroducing
+# the construct rather than a behavioural test: a runtime check only catches it
+# on a bash 3.2 host, and CI runs bash 5.
+@test "the script contains no bare array expansion (bash 3.2 + set -u trap)" {
+    run grep -nE '"\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}"' "$SCRIPT_PATH"
+    [ "$status" -ne 0 ]
+}
+
+@test "runs clean under whatever /bin/bash the platform ships" {
+    [ -x /bin/bash ] || skip "no /bin/bash"
+    run /bin/bash "$SCRIPT_PATH" "$REPO_ROOT/api.yaml"
+    [[ "$output" != *"unbound variable"* ]]
+    [ "$status" -eq 0 ]
 }
 
 @test "exits 2 with an explanation when the whitelist file is missing" {
@@ -62,7 +71,8 @@ teardown() {
 
     run bash "$TEST_TEMP_DIR/scripts/check-breaking-changes.sh"
     [ "$status" -eq 2 ]
-    [[ "$output" == *"oasdiff-err-ignore.txt is missing"* ]]
+    [[ "$output" == *"oasdiff-err-ignore.txt"* ]]
+    [[ "$output" == *"121"* ]]
 }
 
 @test "exits 2 when api.yaml is absent from the project root" {
@@ -78,4 +88,104 @@ teardown() {
     run "$SCRIPT_PATH" "$REPO_ROOT/api.yaml"
     [ "$status" -eq 0 ]
     [[ "$output" == *"No API changes detected"* ]]
+}
+
+# --- the whitelist actually suppressing something ---
+#
+# Every test above either exits at preflight or takes the identical-specs fast
+# path at the top of the script, so none of them reaches oasdiff. The two below
+# are the only end-to-end coverage: they run a real diff (origin/main..HEAD)
+# through the real flag, and they are written as a pair so that neither can pass
+# for the wrong reason. If the whitelist stops matching — a typo, an oasdiff
+# release that rewords a finding — the first goes red. If the whitelist starts
+# matching things it shouldn't, or the diff stops containing any breaking
+# change at all, the second goes red and the first becomes vacuous.
+
+setup_base() {
+    command -v oasdiff > /dev/null || skip "oasdiff not installed"
+    BASE_SPEC="$TEST_TEMP_DIR/base.yaml"
+    git -C "$REPO_ROOT" show origin/main:api.yaml > "$BASE_SPEC" 2>/dev/null \
+        || skip "no origin/main api.yaml to diff against"
+    if diff -q "$BASE_SPEC" "$REPO_ROOT/api.yaml" > /dev/null 2>&1; then
+        skip "api.yaml identical to origin/main; nothing to suppress"
+    fi
+}
+
+@test "the script exits 0 on the current diff, i.e. the whitelist entries match" {
+    setup_base
+    run "$SCRIPT_PATH" "$BASE_SPEC"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"No breaking changes detected"* ]]
+}
+
+@test "the same diff is genuinely breaking without the whitelist" {
+    # Proves the previous test is suppressing real ERR findings rather than
+    # passing because the diff happens to be clean.
+    setup_base
+    run oasdiff breaking "$BASE_SPEC" "$REPO_ROOT/api.yaml" --fail-on ERR
+    [ "$status" -eq 1 ]
+}
+
+@test "every whitelist entry corresponds to a finding in the current diff" {
+    # The file's own rule is that entries are diff-scoped and dead ones get
+    # pruned. This fails when an entry outlives the change it was written for.
+    setup_base
+    run oasdiff breaking "$BASE_SPEC" "$REPO_ROOT/api.yaml" --fail-on ERR
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line//[[:space:]]/}" ]] && continue
+        # Strip the leading "<method> <path> " to get the message text.
+        message="${line#* }"
+        message="${message#* }"
+        [[ "$output" == *"$message"* ]] || {
+            echo "stale whitelist entry, matches nothing in the diff:"
+            echo "  $line"
+            return 1
+        }
+    done < "$IGNORE_FILE"
+}
+
+@test "a non-breaking oasdiff failure is not reported as a breaking change" {
+    # oasdiff exits 121 for a bad --err-ignore path, 2/3 for a malformed spec.
+    # Reporting those as "Breaking changes detected!" with advice to deprecate
+    # rather than remove is a confidently wrong diagnosis of what is really a
+    # file-permission or syntax problem — the same misdiagnosis the preflight
+    # was written to prevent, arriving through a door the preflight left open.
+    command -v oasdiff > /dev/null || skip "oasdiff not installed"
+    mkdir -p "$TEST_TEMP_DIR/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
+    cp "$IGNORE_FILE" "$TEST_TEMP_DIR/"
+    # Revision is malformed; base is the real spec, so the two differ and the
+    # identical-specs fast path does not swallow the run before oasdiff sees it.
+    printf 'this is not: openapi: at all\n  - and: [unclosed\n' > "$TEST_TEMP_DIR/api.yaml"
+
+    run bash "$TEST_TEMP_DIR/scripts/check-breaking-changes.sh" "$REPO_ROOT/api.yaml"
+    [ "$status" -ne 0 ]
+    [ "$status" -ne 1 ]
+    [[ "$output" != *"Breaking changes detected"* ]]
+    [[ "$output" != *"Deprecating rather than removing"* ]]
+}
+
+@test "an unreadable whitelist fails preflight rather than exiting 121 from oasdiff" {
+    [ "$(id -u)" -ne 0 ] || skip "running as root; permission bits are advisory"
+    mkdir -p "$TEST_TEMP_DIR/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
+    cp "$REPO_ROOT/api.yaml" "$TEST_TEMP_DIR/api.yaml"
+    cp "$IGNORE_FILE" "$TEST_TEMP_DIR/"
+    chmod 000 "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/check-breaking-changes.sh"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"oasdiff-err-ignore.txt"* ]]
+}
+
+@test "a directory named oasdiff-err-ignore.txt fails preflight, not oasdiff" {
+    mkdir -p "$TEST_TEMP_DIR/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
+    cp "$REPO_ROOT/api.yaml" "$TEST_TEMP_DIR/api.yaml"
+    mkdir -p "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/check-breaking-changes.sh"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"oasdiff-err-ignore.txt"* ]]
 }

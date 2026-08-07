@@ -4,6 +4,15 @@ on:
   pull_request:
     paths:
       - 'api.yaml'
+      # The whitelist is listed so a PR that touches only that file still runs
+      # this job. oasdiff exits 121 on a missing --err-ignore path, and the file
+      # invites its own deletion ("prune dead entries"). Without this line, the
+      # PR that empties and removes it skips the job and merges green, and the
+      # 121 detonates on an unrelated author's next api.yaml PR as a red
+      # "breaking changes detected" comment about changes that don't exist.
+      # scripts/check-breaking-changes.sh has a matching local preflight, but
+      # this is a CI-only failure and the deleter may never run the script.
+      - 'oasdiff-err-ignore.txt'
 
 jobs:
   check-breaking:
