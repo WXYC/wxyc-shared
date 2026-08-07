@@ -50,7 +50,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.32.0');
+      expect(spec.info.version).toBe('1.33.0');
     });
 
     it('should have components section', () => {
@@ -2130,6 +2130,37 @@ describe('OpenAPI Specification', () => {
       const description = (schema.properties?.include_tracks?.description as string) ?? '';
       expect(description).toMatch(/single_artist/);
       expect(description).toMatch(/compilation/);
+    });
+
+    // --- The id-space bridge (LML#1021 F2): BulkResolveInput.legacy_release_id ---
+    // Backend's serial `library.id` and library.db's legacy MySQL
+    // LIBRARY_RELEASE_ID are unrelated id spaces; LML's per-track store is
+    // keyed by the latter, so without this field a per-track read cannot
+    // join at all. Decision trail: WXYC/library-metadata-lookup#1021 and
+    // WXYC/Backend-Service#1991.
+
+    it('adds legacy_release_id to BulkResolveInput as an optional nullable integer', () => {
+      const schema = spec.components.schemas.BulkResolveInput as Schema;
+      const field = schema.properties?.legacy_release_id;
+      expect(field).toBeDefined();
+      expect(field!.type).toBe('integer');
+      expect(field!.nullable).toBe(true);
+      expect(schema.required ?? []).not.toContain('legacy_release_id');
+    });
+
+    it('documents legacy_release_id as the legacy LIBRARY_RELEASE_ID space, distinct from the serial library_id', () => {
+      const schema = spec.components.schemas.BulkResolveInput as Schema;
+      const description = (schema.properties?.legacy_release_id?.description as string) ?? '';
+      expect(description).toMatch(/LIBRARY_RELEASE_ID/);
+      expect(description).toMatch(/library\.db/);
+      expect(description).toMatch(/serial/);
+    });
+
+    it('documents the bridge-absent degradation: not-yet-visited, keep re-asking', () => {
+      const schema = spec.components.schemas.BulkResolveInput as Schema;
+      const description = (schema.properties?.legacy_release_id?.description as string) ?? '';
+      expect(description).toMatch(/tracks_attempted/);
+      expect(description).toMatch(/absent or NULL/i);
     });
 
     it('replaces the two-state tracks wording with the four states, on both kinds', () => {
