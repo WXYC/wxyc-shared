@@ -55,11 +55,28 @@
 # adopting the regenerated output -- see CLAUDE.md's "Python codegen and
 # `nullable` on required fields" section.
 #
-# The .venv/PATH fallback (used when `uv` isn't available) resolves against
-# the CALLER's current directory, not this script's own location. This
-# script lives in wxyc-shared, but it is invoked from a consumer repo's root
-# (or a worktree of it) -- resolving against wxyc-shared's own checkout would
-# never find a consumer's venv.
+# The .venv/PATH fallback (used when `uv` isn't available) finds a caller's
+# venv by walking up from the invocation directory ($(pwd)), nearest match
+# wins -- not by jumping straight to a git-derived "repo root", and not this
+# script's own location ($PROJECT_DIR, always wxyc-shared). This script
+# lives in wxyc-shared, but it is invoked from somewhere inside a consumer
+# repo -- resolving against wxyc-shared's own checkout would never find a
+# consumer's venv, and resolving against plain $(pwd) alone only works when
+# the caller happens to invoke this script from the exact directory holding
+# the venv: a cd-ing Makefile recipe, or a CI step with `working-directory:`
+# set to a subdirectory, would silently miss a venv that is really there,
+# one level up (#311). Jumping straight to a git-derived repo root has its
+# own miss: the standard Python monorepo layout puts `.venv` beside a
+# subdirectory's own `pyproject.toml` (e.g. `apps/backend/.venv`), not at
+# the repo root, and jumping past $(pwd) straight to the root would skip
+# exactly that (a regression an earlier version of this fix introduced --
+# see the "regression pinned by code review" bats test). Walking up one
+# directory at a time, nearest match wins, is a superset of both: it finds
+# `.venv` beside the invocation directory, at any ancestor including a
+# consumer's repo root, and at a linked worktree's own root -- without
+# shelling out to git at all, so it works the same whether or not git is
+# installed and is not confused by `GIT_DIR`/`GIT_WORK_TREE` set by an
+# enclosing git hook or `git rebase -x`.
 #
 # Usage:
 #   scripts/generate-python-models.sh [--input PATH] [--output PATH]
@@ -81,6 +98,25 @@ DATAMODEL_CODEGEN_PIN="datamodel-code-generator[http]==0.56.1"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Find a caller's venv binary by walking up from the invocation directory.
+# Handles every layout that matters: .venv beside a subdirectory's own
+# pyproject.toml, .venv at the consumer's repo root, and .venv at a linked
+# worktree's root -- without depending on git being installed or on
+# GIT_DIR/GIT_WORK_TREE being unset (#311).
+find_caller_venv_bin() {
+    local name="$1" dir
+    dir="$PWD"
+    while [[ -n "$dir" && "$dir" != "/" ]]; do
+        if [[ -x "$dir/.venv/bin/$name" ]]; then
+            printf '%s\n' "$dir/.venv/bin/$name"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    [[ -x "/.venv/bin/$name" ]] && { printf '%s\n' "/.venv/bin/$name"; return 0; }
+    return 1
+}
 
 INPUT=""
 DEFAULT_OUTPUT="$PROJECT_DIR/generated/python/models.py"
@@ -197,12 +233,22 @@ else
     # guaranteed to be the pinned version -- warn instead of silently
     # generating a diff nobody asked for.
     #
-    # Resolved against the CALLER's cwd ("$(pwd)"), not $PROJECT_DIR (this
+    # find_caller_venv_bin walks up from $(pwd), not $PROJECT_DIR (this
     # script's own wxyc-shared checkout) -- a consumer invokes this script
-    # from their own repo root, so that's where their venv lives.
-    CODEGEN="$(pwd)/.venv/bin/datamodel-codegen"
-    if [[ ! -x "$CODEGEN" ]]; then
+    # from somewhere inside their own repo, and their venv could be right
+    # there, at an ancestor, or at a linked worktree's root.
+    CODEGEN="$(find_caller_venv_bin datamodel-codegen || true)"
+    if [[ -z "$CODEGEN" ]]; then
         CODEGEN="$(command -v datamodel-codegen 2>/dev/null || true)"
+        if [[ -n "$CODEGEN" ]]; then
+            # Distinguish "no venv above $(pwd)" from "wrong generator
+            # version, silently" -- both used to look identical to the
+            # caller once this PATH lookup ran. Only fires once a PATH
+            # fallback actually turned something up; the "neither uv nor
+            # datamodel-codegen was found" error below already covers the
+            # case where nothing did.
+            echo "No .venv found above $(pwd) -- falling back to PATH-resolved datamodel-codegen ($CODEGEN)." >&2
+        fi
     fi
     if [[ -z "$CODEGEN" ]]; then
         echo "Error: neither uv nor datamodel-codegen was found." >&2
@@ -229,13 +275,14 @@ fi
 # pyproject.toml). `uvx ruff` is a last resort, only to keep this step from
 # silently no-op'ing on a bare runner that has uv but no ruff at all.
 #
-# Like the datamodel-codegen fallback above, this is resolved against the
-# CALLER's cwd, not $PROJECT_DIR -- otherwise "a consumer's own .venv wins"
-# would be false whenever this script runs (which is always, since it lives
-# in wxyc-shared and callers invoke it from their own repo).
+# Like the datamodel-codegen fallback above, this uses find_caller_venv_bin
+# (walking up from $(pwd)), not $PROJECT_DIR -- otherwise "a consumer's own
+# .venv wins" would be false whenever this script runs from a subdirectory
+# (which is always possible, since it lives in wxyc-shared and callers
+# invoke it from somewhere inside their own repo).
 echo "Formatting generated code..."
-RUFF="$(pwd)/.venv/bin/ruff"
-if [[ ! -x "$RUFF" ]]; then
+RUFF="$(find_caller_venv_bin ruff || true)"
+if [[ -z "$RUFF" ]]; then
     RUFF="$(command -v ruff 2>/dev/null || true)"
 fi
 if [[ -n "$RUFF" ]]; then
