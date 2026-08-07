@@ -19,6 +19,17 @@
 # required, or the contract's documented nulls are inexpressible in every
 # Python consumer. If test 15 or 31 goes red, the flag was dropped --
 # restore it; do not resolve toward the pre-#302 state.
+#
+# #319: the GitHub download fallback used to hardcode `main` -- a merge to
+# api.yaml here would silently retarget every unpinned caller's next run,
+# with no commit in the caller's repo and no signal to anyone. `--ref`
+# (or the `WXYC_SHARED_REF` env var) lets a caller pin the download to a
+# specific commit SHA instead. Tests below pin: the pinned ref is what
+# actually gets fetched (not `main`), and the *implicit*-main path (neither
+# --ref nor WXYC_SHARED_REF given) prints a loud warning instead of
+# downloading silently. `--input` and a local PROJECT_DIR/api.yaml still win
+# outright, per the header comment above -- --ref only ever affects the
+# download fallback.
 
 SCRIPT_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/generate-python-models.sh"
@@ -221,9 +232,145 @@ EOF
     [ "$status" -eq 0 ]
 }
 
-@test "falls back to downloading api.yaml from GitHub main when it's missing locally" {
-    run grep -F 'raw.githubusercontent.com/WXYC/wxyc-shared/main/api.yaml' "$SCRIPT_PATH"
+@test "falls back to downloading api.yaml from GitHub when it's missing locally, targeting a pinnable ref rather than a hardcoded main (#319)" {
+    # The ref is now a variable, not a literal "main" -- assert on the
+    # surrounding URL shape plus the variable, not a fully hardcoded string
+    # (that string is exactly what #319 made wrong to hardcode).
+    run bash -c "grep -F 'raw.githubusercontent.com/WXYC/wxyc-shared/' '$SCRIPT_PATH' | grep -F '/api.yaml'"
     [ "$status" -eq 0 ]
+    [[ "$output" == *'$RESOLVED_REF'* || "$output" == *'${RESOLVED_REF}'* ]]
+}
+
+@test "--help documents --ref and WXYC_SHARED_REF (#319)" {
+    run "$SCRIPT_PATH" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"--ref"* ]]
+    [[ "$output" == *"WXYC_SHARED_REF"* ]]
+}
+
+@test "--ref with no value fails with a clear message, not a silent set -e abort" {
+    run "$SCRIPT_PATH" --ref
+    [ "$status" -ne 0 ]
+    [ -n "$output" ]
+    [[ "$output" == *"--ref"* ]]
+}
+
+@test "--ref '' (empty string) fails loudly instead of silently falling back to unpinned" {
+    run "$SCRIPT_PATH" --ref "" --output "$TEST_TEMP_DIR/out.py"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"--ref"* ]]
+    [ ! -f "$TEST_TEMP_DIR/out.py" ]
+}
+
+# --- #319: the download fallback must fetch the PINNED ref, not main. ---
+# Stubs curl so no real network call is made or needed; the stub records its
+# argv and writes a minimal valid spec to whatever -o path it was given, so
+# the rest of the pipeline (datamodel-codegen, if available) can still run
+# to completion instead of only being reachable when the assertions happen
+# to run before the pipeline would otherwise fail.
+
+write_curl_stub() {
+    mkdir -p "$TEST_TEMP_DIR/bin"
+    cat > "$TEST_TEMP_DIR/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+echo "$@" >> "$CURL_LOG"
+out=""
+prev=""
+for a in "$@"; do
+    if [[ "$prev" == "-o" ]]; then out="$a"; fi
+    prev="$a"
+done
+if [[ -n "$out" ]]; then
+    printf 'openapi: 3.0.3\ninfo:\n  title: Stub\n  version: 0.0.0-stub\npaths: {}\n' > "$out"
+fi
+exit 0
+STUB
+    chmod +x "$TEST_TEMP_DIR/bin/curl"
+}
+
+@test "--ref pins the download URL to the given ref instead of main (#319)" {
+    write_curl_stub
+    CURL_LOG="$TEST_TEMP_DIR/curl.log"
+    mkdir -p "$TEST_TEMP_DIR/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
+
+    local pinned_sha="0123456789abcdef0123456789abcdef01234567"
+    run env PATH="$TEST_TEMP_DIR/bin:$PATH" CURL_LOG="$CURL_LOG" \
+        bash "$TEST_TEMP_DIR/scripts/generate-python-models.sh" \
+        --ref "$pinned_sha" --output "$TEST_TEMP_DIR/out/models.py"
+
+    [ -f "$CURL_LOG" ]
+    run grep -F "$pinned_sha" "$CURL_LOG"
+    [ "$status" -eq 0 ]
+    run grep -F "wxyc-shared/main/api.yaml" "$CURL_LOG"
+    [ "$status" -ne 0 ]
+}
+
+@test "WXYC_SHARED_REF env var pins the download URL when no --ref flag is given (#319)" {
+    write_curl_stub
+    CURL_LOG="$TEST_TEMP_DIR/curl.log"
+    mkdir -p "$TEST_TEMP_DIR/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
+
+    local pinned_sha="fedcba9876543210fedcba9876543210fedcba9"
+    run env PATH="$TEST_TEMP_DIR/bin:$PATH" CURL_LOG="$CURL_LOG" WXYC_SHARED_REF="$pinned_sha" \
+        bash "$TEST_TEMP_DIR/scripts/generate-python-models.sh" \
+        --output "$TEST_TEMP_DIR/out/models.py"
+
+    [ -f "$CURL_LOG" ]
+    run grep -F "$pinned_sha" "$CURL_LOG"
+    [ "$status" -eq 0 ]
+    run grep -F "wxyc-shared/main/api.yaml" "$CURL_LOG"
+    [ "$status" -ne 0 ]
+}
+
+@test "--ref flag wins over WXYC_SHARED_REF when both are given (#319)" {
+    write_curl_stub
+    CURL_LOG="$TEST_TEMP_DIR/curl.log"
+    mkdir -p "$TEST_TEMP_DIR/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
+
+    local flag_sha="1111111111111111111111111111111111111a"
+    local env_sha="2222222222222222222222222222222222222b"
+    run env PATH="$TEST_TEMP_DIR/bin:$PATH" CURL_LOG="$CURL_LOG" WXYC_SHARED_REF="$env_sha" \
+        bash "$TEST_TEMP_DIR/scripts/generate-python-models.sh" \
+        --ref "$flag_sha" --output "$TEST_TEMP_DIR/out/models.py"
+
+    [ -f "$CURL_LOG" ]
+    run grep -F "$flag_sha" "$CURL_LOG"
+    [ "$status" -eq 0 ]
+    run grep -F "$env_sha" "$CURL_LOG"
+    [ "$status" -ne 0 ]
+}
+
+@test "an unpinned download (implicit main, #319) warns loudly that it is tracking a moving target" {
+    write_curl_stub
+    CURL_LOG="$TEST_TEMP_DIR/curl.log"
+    mkdir -p "$TEST_TEMP_DIR/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
+
+    run env PATH="$TEST_TEMP_DIR/bin:$PATH" CURL_LOG="$CURL_LOG" \
+        bash "$TEST_TEMP_DIR/scripts/generate-python-models.sh" \
+        --output "$TEST_TEMP_DIR/out/models.py"
+
+    [[ "$output" == *"Warning"* ]]
+    [[ "$output" == *"moving target"* ]]
+    [[ "$output" == *"--ref"* ]]
+    run grep -F "wxyc-shared/main/api.yaml" "$CURL_LOG"
+    [ "$status" -eq 0 ]
+}
+
+@test "a pinned download (--ref) does NOT print the moving-target warning (#319)" {
+    write_curl_stub
+    CURL_LOG="$TEST_TEMP_DIR/curl.log"
+    mkdir -p "$TEST_TEMP_DIR/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
+
+    run env PATH="$TEST_TEMP_DIR/bin:$PATH" CURL_LOG="$CURL_LOG" \
+        bash "$TEST_TEMP_DIR/scripts/generate-python-models.sh" \
+        --ref "abc123def4567890abc123def4567890abc123d" --output "$TEST_TEMP_DIR/out/models.py"
+
+    [[ "$output" != *"moving target"* ]]
 }
 
 # --- Finding 2: the DOCUMENTED consumer invocation must work from inside a ---
