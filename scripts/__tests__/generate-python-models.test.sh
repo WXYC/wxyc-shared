@@ -300,10 +300,14 @@ STUB
 
 @test "prefers uv (the pin) over an ambient PATH/venv install when both are available" {
     # Ordering guard: the uv branch must be checked before falling back to
-    # .venv/PATH resolution, or the pin stops being authoritative.
+    # .venv/PATH resolution, or the pin stops being authoritative. Pinned
+    # against the find_caller_venv_bin CALL SITE for datamodel-codegen, not
+    # its function definition -- the definition necessarily sits near the
+    # top of the file (function definitions aren't order-sensitive the way
+    # a call site is), so grepping for it would not actually guard ordering.
     local uv_line venv_line
     uv_line="$(grep -n 'command -v uv' "$SCRIPT_PATH" | head -1 | cut -d: -f1)"
-    venv_line="$(grep -n '\.venv/bin/datamodel-codegen' "$SCRIPT_PATH" | head -1 | cut -d: -f1)"
+    venv_line="$(grep -n 'find_caller_venv_bin datamodel-codegen' "$SCRIPT_PATH" | head -1 | cut -d: -f1)"
     [ -n "$uv_line" ]
     [ -n "$venv_line" ]
     [ "$uv_line" -lt "$venv_line" ]
@@ -357,6 +361,138 @@ STUB
     run bash -c "cd '$TEST_TEMP_DIR/consumer' && PATH=/usr/bin:/bin bash '$SCRIPT_PATH' --input '$TEST_TEMP_DIR/fixture.yaml' --output out/models.py"
     [ "$status" -eq 0 ]
     grep -q "consumer venv stub ran" "$TEST_TEMP_DIR/consumer/out/models.py"
+}
+
+@test "the datamodel-codegen venv fallback finds a .venv at the consumer's repo root from a SUBDIRECTORY (#311)" {
+    # #311: $(pwd)/.venv only ever finds the venv when the caller invokes
+    # this script from their own repo root. A cd-ing Makefile recipe, or a CI
+    # step with `working-directory:` set one level down, leaves $(pwd) at a
+    # subdirectory -- the venv fallback must still find a .venv sitting at an
+    # ANCESTOR of $(pwd). No git repo is needed for this: walking up from the
+    # invocation directory finds it on its own.
+    mkdir -p "$TEST_TEMP_DIR/consumer/.venv/bin" "$TEST_TEMP_DIR/consumer/apps/backend"
+    cat > "$TEST_TEMP_DIR/consumer/.venv/bin/datamodel-codegen" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then echo "datamodel-codegen 0.56.1"; exit 0; fi
+out=""
+prev=""
+for a in "$@"; do
+    if [[ "$prev" == "--output" ]]; then out="$a"; fi
+    prev="$a"
+done
+mkdir -p "$(dirname "$out")"
+echo "# consumer venv stub ran from a subdirectory" > "$out"
+STUB
+    chmod +x "$TEST_TEMP_DIR/consumer/.venv/bin/datamodel-codegen"
+    write_fixture_spec
+
+    run bash -c "cd '$TEST_TEMP_DIR/consumer/apps/backend' && PATH=/usr/bin:/bin bash '$SCRIPT_PATH' --input '$TEST_TEMP_DIR/fixture.yaml' --output out/models.py"
+    [ "$status" -eq 0 ]
+    grep -q "consumer venv stub ran from a subdirectory" "$TEST_TEMP_DIR/consumer/apps/backend/out/models.py"
+}
+
+@test "the datamodel-codegen venv fallback finds a .venv in the SAME directory as the caller, not just an ancestor (regression pinned by code review on #311)" {
+    # The standard Python monorepo layout puts .venv beside a subdirectory's
+    # own pyproject.toml -- e.g. a git repo rooted above apps/backend, with
+    # apps/backend/.venv and no .venv at the repo root at all. That layout
+    # worked via plain $(pwd)/.venv before #311's first attempt, and must
+    # keep working. Reproduce it with a REAL git repo enclosing the
+    # subdirectory, so a resolution strategy that jumps straight to the repo
+    # root (skipping $(pwd) itself) misses it -- that was the regression the
+    # first attempt at this fix introduced and this test pins against
+    # reintroducing.
+    #
+    # git is resolved dynamically into an isolated PATH entry rather than
+    # assumed to live in /usr/bin -- on a host where git lives only in
+    # /usr/local/bin, PATH=/usr/bin:/bin would silently break git resolution
+    # for an unrelated reason and this test would pass for the wrong reason.
+    mkdir -p "$TEST_TEMP_DIR/consumer/apps/backend/.venv/bin" "$TEST_TEMP_DIR/safe-bin"
+    ln -s "$(command -v git)" "$TEST_TEMP_DIR/safe-bin/git"
+    cat > "$TEST_TEMP_DIR/consumer/apps/backend/.venv/bin/datamodel-codegen" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then echo "datamodel-codegen 0.56.1"; exit 0; fi
+out=""
+prev=""
+for a in "$@"; do
+    if [[ "$prev" == "--output" ]]; then out="$a"; fi
+    prev="$a"
+done
+mkdir -p "$(dirname "$out")"
+echo "# backend-local venv stub ran" > "$out"
+STUB
+    chmod +x "$TEST_TEMP_DIR/consumer/apps/backend/.venv/bin/datamodel-codegen"
+    git init -q "$TEST_TEMP_DIR/consumer"
+    write_fixture_spec
+
+    run bash -c "cd '$TEST_TEMP_DIR/consumer/apps/backend' && PATH='$TEST_TEMP_DIR/safe-bin:/usr/bin:/bin' bash '$SCRIPT_PATH' --input '$TEST_TEMP_DIR/fixture.yaml' --output out/models.py"
+    [ "$status" -eq 0 ]
+    grep -q "backend-local venv stub ran" "$TEST_TEMP_DIR/consumer/apps/backend/out/models.py"
+}
+
+@test "the datamodel-codegen venv fallback prefers the NEAREST .venv when both an ancestor and the invocation directory have one" {
+    mkdir -p "$TEST_TEMP_DIR/consumer/.venv/bin" "$TEST_TEMP_DIR/consumer/apps/backend/.venv/bin"
+    cat > "$TEST_TEMP_DIR/consumer/.venv/bin/datamodel-codegen" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then echo "datamodel-codegen 0.56.1"; exit 0; fi
+out=""
+prev=""
+for a in "$@"; do
+    if [[ "$prev" == "--output" ]]; then out="$a"; fi
+    prev="$a"
+done
+mkdir -p "$(dirname "$out")"
+echo "# WRONG: root venv stub ran" > "$out"
+STUB
+    cat > "$TEST_TEMP_DIR/consumer/apps/backend/.venv/bin/datamodel-codegen" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then echo "datamodel-codegen 0.56.1"; exit 0; fi
+out=""
+prev=""
+for a in "$@"; do
+    if [[ "$prev" == "--output" ]]; then out="$a"; fi
+    prev="$a"
+done
+mkdir -p "$(dirname "$out")"
+echo "# nearest backend venv stub ran" > "$out"
+STUB
+    chmod +x "$TEST_TEMP_DIR/consumer/.venv/bin/datamodel-codegen" "$TEST_TEMP_DIR/consumer/apps/backend/.venv/bin/datamodel-codegen"
+    write_fixture_spec
+
+    run bash -c "cd '$TEST_TEMP_DIR/consumer/apps/backend' && PATH=/usr/bin:/bin bash '$SCRIPT_PATH' --input '$TEST_TEMP_DIR/fixture.yaml' --output out/models.py"
+    [ "$status" -eq 0 ]
+    grep -q "nearest backend venv stub ran" "$TEST_TEMP_DIR/consumer/apps/backend/out/models.py"
+    run grep -F "WRONG" "$TEST_TEMP_DIR/consumer/apps/backend/out/models.py"
+    [ "$status" -ne 0 ]
+}
+
+@test "the datamodel-codegen venv fallback works with no git repository at all, invoked from a subdirectory (#311)" {
+    # The old CALLER_ROOT-via-git resolution degraded to plain $(pwd) outside
+    # a git repo -- a fallback the old bats suite could only exercise from
+    # the repo root, where $(pwd) and the intended target coincide by
+    # accident, so it never actually distinguished the fallback from a real
+    # fix. A directory tree that is not a git repo at all, invoked from a
+    # subdirectory two levels below the .venv, is the case that separates
+    # them: this must succeed without any git repo, and without a git binary
+    # being reachable at all.
+    mkdir -p "$TEST_TEMP_DIR/consumer/.venv/bin" "$TEST_TEMP_DIR/consumer/apps/backend"
+    cat > "$TEST_TEMP_DIR/consumer/.venv/bin/datamodel-codegen" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then echo "datamodel-codegen 0.56.1"; exit 0; fi
+out=""
+prev=""
+for a in "$@"; do
+    if [[ "$prev" == "--output" ]]; then out="$a"; fi
+    prev="$a"
+done
+mkdir -p "$(dirname "$out")"
+echo "# no-git-repo venv stub ran" > "$out"
+STUB
+    chmod +x "$TEST_TEMP_DIR/consumer/.venv/bin/datamodel-codegen"
+    write_fixture_spec
+
+    run bash -c "cd '$TEST_TEMP_DIR/consumer/apps/backend' && PATH=/usr/bin:/bin bash '$SCRIPT_PATH' --input '$TEST_TEMP_DIR/fixture.yaml' --output out/models.py"
+    [ "$status" -eq 0 ]
+    grep -q "no-git-repo venv stub ran" "$TEST_TEMP_DIR/consumer/apps/backend/out/models.py"
 }
 
 # --- Live generation tests: skipped when the pinned generator can't be run. ---
