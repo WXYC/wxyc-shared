@@ -587,6 +587,8 @@ npm run generate:kotlin      # Android types (openapi-generator-cli, requires Ja
 npm run generate:python      # Python models (datamodel-codegen) — reference/diff aid; no repo consumes this output
 ```
 
+Python codegen (`scripts/generate-python-models.sh`, invoked by `generate:python` above) is the canonical script for the org (#107) — it consolidates what used to be two near-identical copies of `scripts/generate_api_models.sh` maintained separately in library-metadata-lookup and request-o-matic. It takes `--input`/`--output` flags so a downstream repo can call it from a sibling checkout: `bash ../wxyc-shared/scripts/generate-python-models.sh --output generated/api_models.py`. The `datamodel-code-generator` version pin lives in one place inside that script (`DATAMODEL_CODEGEN_PIN`); see CLAUDE.md's Code Generation section for the full story, including which consumers have migrated to it.
+
 ## E2E Tests
 
 See [e2e/README.md](./e2e/README.md) for details on running E2E tests.
@@ -649,4 +651,4 @@ See [`railway/`](./railway/) for the Railway service topology, environment varia
 3. Export them from `src/dtos/index.ts`
 4. Add corresponding test fixtures/factories
 5. Run `npm run lint` to verify types
-6. Nothing here updates the Python services. `generated/python/` is a local reference tree that no repo imports — library-metadata-lookup and request-o-matic each run their own `scripts/generate_api_models.sh` against `api.yaml` and commit the result in their own repo. If your change affects them, open a regen ticket there; running `npm run generate:python` locally only produces something to diff against.
+6. Nothing here updates the Python services yet. `generated/python/` is a local reference tree that no repo imports today: library-metadata-lookup and request-o-matic still each run their own unmigrated copy of `scripts/generate_api_models.sh` against `api.yaml` and commit the result in their own repo. The canonical version of that script now lives here as `scripts/generate-python-models.sh` (#107); each service's move onto it is separate, per-repo follow-up work. If your change affects them, open a regen ticket there; running `npm run generate:python` locally only produces something to diff against.
