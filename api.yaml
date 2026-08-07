@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.31.0
+  version: 1.32.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4204,15 +4204,30 @@ components:
     # flag and genuinely has nothing to report — both are `null` either way.
     # `BulkResolveLibrariesResponse.tracks_contract_version` is the
     # response-level marker that separates them, and it only speaks to a
-    # request that set `include_tracks: true`: present and equal to 1 only
-    # then, when the producer also understood the flag. Absent otherwise —
-    # which covers both the predates-the-flag case above AND the ordinary,
+    # request that set `include_tracks: true`: equal to 1 only once the
+    # producer understands the flag AND emits `tracks_attempted` for both
+    # `kind: single_artist` and `kind: compilation` — the two producer arms
+    # ship independently (LML#1138, LML#1021), and setting the marker ahead
+    # of either one tells a consumer to trust `tracks_attempted` on rows
+    # where it is still meaningless. Absent or NULL otherwise — covering
+    # the predates-the-flag case, the one-arm-only case, AND the ordinary,
     # expected response from a fully-upgraded producer to a request where
-    # `include_tracks` was false or omitted. The marker is not a general
-    # "is this producer current" probe; probing it on an ordinary
-    # `include_tracks: false` call and reading the absence as "old
-    # producer" is the exact misreading it exists to prevent. See that
-    # field, and WXYC/wxyc-shared#303 for why the pair alone can't do this.
+    # `include_tracks` was false or omitted.
+    #
+    # LML serves this endpoint without `response_model_exclude_none` and
+    # sets this field nowhere yet, so `tracks_contract_version` ships
+    # `null` — never an omitted key — on every production response today
+    # (WXYC/wxyc-shared#310); `nullable: true` documents that wire instead
+    # of describing one nobody emits, the same treatment as `tracks` above.
+    # That also means a presence probe reads TRUE against the producer
+    # that implements none of this — the inverse of what the marker exists
+    # to signal. A consumer MUST test for the value `1` and
+    # must never test for key presence: absent, `null`, and a producer
+    # that predates this field must all read "not supported", and only
+    # the literal value `1` reads "supported" — which keeps the check
+    # immune to whether any given producer omits or nulls its unset
+    # optionals. See that field, and WXYC/wxyc-shared#303 / #310 for the
+    # two rollout-window defects this closes.
 
     BulkResolveLibrariesRequest:
       type: object
@@ -4743,13 +4758,39 @@ components:
           type: integer
           enum:
             - 1
+          nullable: true
           description: >
             Present and equal to 1 only when the request set
-            `include_tracks: true` and the producer understands the flag.
-            Absent otherwise — both when `include_tracks` was false or
-            omitted, and when the producer predates this field entirely
-            and does not implement `include_tracks` at all. Same
-            precedent as `LookupResponse.api_version`
+            `include_tracks: true`, the producer understands the flag,
+            AND the producer has emitted `tracks_attempted` for both
+            `kind: single_artist` and `kind: compilation` results — see
+            `BulkResolveResult.tracks_attempted`. The two producer arms
+            ship independently (LML#1138, LML#1021); setting the marker
+            with one arm unimplemented tells a consumer to trust
+            `tracks_attempted` on rows where it is still meaningless.
+
+
+            Absent or NULL otherwise: both when `include_tracks` was
+            false or omitted, and when the producer predates this field
+            entirely, or has implemented only one of the two arms above.
+            LML does not set this field anywhere yet and serves this
+            endpoint without `response_model_exclude_none`, so it ships
+            `null` — never an omitted key — on every response in
+            production today (WXYC/wxyc-shared#310); `nullable: true`
+            documents that wire instead of describing one nobody emits,
+            the same treatment as `tracks` / `tracks_attempted` above.
+
+
+            Because of that, a consumer MUST test for the value `1` and
+            must never test for key presence — `!== undefined` against
+            the generated TypeScript reads TRUE for a producer that
+            implements none of this, the inverse of what the marker
+            exists to signal. Absent, `null`, and a producer that
+            predates this field must all read "not supported", and only
+            the literal value `1` reads "supported" — which keeps the
+            check immune to whether any given producer omits or nulls
+            its unset optionals. Same precedent as
+            `LookupResponse.api_version`
             (`LookupRequest.include_identity`): a producer-echoed
             capability marker that lets a consumer distinguish "the
             producer understood my flag and the answer is genuinely
@@ -8698,11 +8739,27 @@ paths:
         from "the producer predates the flag" — both read identically on
         `tracks_attempted`/`tracks` alone (WXYC/wxyc-shared#303). The
         marker only speaks to a request that set `include_tracks: true`:
-        it is present and equal to 1 only then, when the producer also
-        understood the flag. It is absent, and normally absent, on the
+        it is equal to 1 only once the producer understands the flag AND
+        emits `tracks_attempted` for both `kind: single_artist` and
+        `kind: compilation` — the two producer arms ship independently
+        (LML#1138, LML#1021), and setting the marker ahead of either one
+        tells a consumer to trust `tracks_attempted` on rows where it is
+        still meaningless. It is absent, and normally absent, on the
         ordinary request where `include_tracks` was false or omitted —
         that absence is the expected response from a fully-upgraded
         producer too, not evidence the producer predates the flag.
+
+
+        LML does not set this field anywhere yet and serves this endpoint
+        without `response_model_exclude_none`, so `tracks_contract_version`
+        ships `null` — never an omitted key — on every response in
+        production today (WXYC/wxyc-shared#310). A presence check
+        therefore reads TRUE against the producer that implements none
+        of this, the inverse of what the marker exists to signal. A
+        consumer MUST test for the value `1` and
+        must never test for key presence: absent, `null`, and a producer
+        that predates this field must all read "not supported", and only
+        the literal value `1` reads "supported".
       security:
         - LMLBearerAuth: []
       tags:

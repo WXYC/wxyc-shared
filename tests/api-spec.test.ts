@@ -50,7 +50,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.31.0');
+      expect(spec.info.version).toBe('1.32.0');
     });
 
     it('should have components section', () => {
@@ -2357,6 +2357,91 @@ describe('OpenAPI Specification', () => {
         specText.indexOf('/api/v1/artists/search-aliases/bulk:'),
       );
       expect(opBlock).toMatch(/MUST read it as `true`/);
+    });
+
+    // --- #310: tracks_contract_version ships `null` on every response, and
+    // its presence-probe description was the exact inverse of a working
+    // check ---
+    //
+    // LML serves this endpoint through FastAPI's `response_model` without
+    // `response_model_exclude_none` and never sets the marker, so the wire
+    // carries `"tracks_contract_version": null` on 100% of bulk-resolve
+    // responses today — including from a producer that does not implement
+    // `include_tracks` at all. `null` is not a valid instance of
+    // `enum: [1]`, so the field needs the same `nullable: true` treatment
+    // its siblings `tracks` / `tracks_attempted` already carry. And because
+    // it is always null in practice, a presence probe reads TRUE against
+    // exactly the producer that predates the flag — the inverse of the
+    // marker's purpose — so the description has to mandate a
+    // value-equality check instead.
+
+    it('declares tracks_contract_version nullable, because LML ships `"tracks_contract_version": null` on every response today', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesResponse as Schema;
+      expect(schema.properties?.tracks_contract_version?.nullable).toBe(true);
+    });
+
+    it('keeps tracks_contract_version out of required after the nullable fix', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesResponse as Schema;
+      expect(schema.required ?? []).not.toContain('tracks_contract_version');
+    });
+
+    it('mandates a value-equality check on tracks_contract_version and forbids a presence check', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesResponse as Schema;
+      const description = (schema.properties?.tracks_contract_version?.description as string) ?? '';
+      expect(description).toMatch(/MUST test for the value `1`/);
+      expect(description).toMatch(/must never test for key presence/);
+    });
+
+    it('explains why the value probe is required: absent, null, and a pre-#310 producer must all read "not supported"', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesResponse as Schema;
+      const description = (schema.properties?.tracks_contract_version?.description as string) ?? '';
+      expect(description).toMatch(/not supported/);
+      expect(description).toMatch(/only the literal value `1` reads "supported"/);
+    });
+
+    it('states the partial-rollout producer rule: the marker requires tracks_attempted on both single_artist and compilation', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesResponse as Schema;
+      const description = (schema.properties?.tracks_contract_version?.description as string) ?? '';
+      expect(description).toMatch(/`kind: single_artist`/);
+      expect(description).toMatch(/`kind: compilation`/);
+      expect(description).toMatch(/LML#1021/);
+      expect(description).toMatch(/LML#1138/);
+    });
+
+    it('carries the value-probe rule in the four-state block comment, not just the property description', () => {
+      const commentBlock = specText.slice(
+        specText.indexOf('# Four states, read off the PAIR'),
+        specText.indexOf('BulkResolveLibrariesRequest:'),
+      );
+      expect(commentBlock).toMatch(/MUST test for the value `1`/);
+      expect(commentBlock).toMatch(/must never test for key presence/);
+    });
+
+    it('carries the value-probe rule in the bulk-resolve-libraries endpoint description too', () => {
+      const opBlock = specText.slice(
+        specText.indexOf('/api/v1/identity/bulk-resolve-libraries:'),
+        specText.indexOf('/api/v1/artists/search-aliases/bulk:'),
+      );
+      expect(opBlock).toMatch(/MUST test for the value `1`/);
+      expect(opBlock).toMatch(/must never test for key presence/);
+    });
+
+    it('carries the partial-rollout producer rule (LML#1138 alongside LML#1021) in the four-state block comment', () => {
+      const commentBlock = specText.slice(
+        specText.indexOf('# Four states, read off the PAIR'),
+        specText.indexOf('BulkResolveLibrariesRequest:'),
+      );
+      expect(commentBlock).toMatch(/LML#1138/);
+      expect(commentBlock).toMatch(/LML#1021/);
+    });
+
+    it('carries the partial-rollout producer rule (LML#1138 alongside LML#1021) in the bulk-resolve-libraries endpoint description', () => {
+      const opBlock = specText.slice(
+        specText.indexOf('/api/v1/identity/bulk-resolve-libraries:'),
+        specText.indexOf('/api/v1/artists/search-aliases/bulk:'),
+      );
+      expect(opBlock).toMatch(/LML#1138/);
+      expect(opBlock).toMatch(/LML#1021/);
     });
 
     // --- BulkResolveTrackIdentity repair (BS#1991 / LML#1021) ---

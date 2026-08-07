@@ -163,11 +163,20 @@ describe("generated request types stay constructible (#297)", () => {
 // `default` (mirroring `LookupResponse.api_version`'s precedent) — this pins
 // the artifact consumers actually import, because the spec-level assertion
 // in api-spec.test.ts cannot see what the generator did with it.
-describe("generated tracks_contract_version marker stays optional (#303)", () => {
+//
+// #310 added `nullable: true` on top of that (LML ships
+// `"tracks_contract_version": null` on every response, and `null` is not a
+// valid instance of `enum: [1]` without it) — openapi-typescript renders
+// that as a `| null` union member alongside the optional marker, so the
+// full emitted type is `tracks_contract_version?: 1 | null;`, not just
+// `tracks_contract_version?: 1;`. Pinning the wider pattern would pass
+// whether or not the `| null` half is actually there, silently losing the
+// #310 regression guard.
+describe("generated tracks_contract_version marker stays optional and nullable (#303, #310)", () => {
   const responseBlock = () => schemaBlock("BulkResolveLibrariesResponse");
 
-  it("emits tracks_contract_version as optional", () => {
-    expect(responseBlock()).toMatch(/\btracks_contract_version\?:/);
+  it("emits tracks_contract_version as optional and nullable", () => {
+    expect(responseBlock()).toMatch(/\btracks_contract_version\?: 1 \| null;/);
   });
 
   it("keeps results required", () => {
