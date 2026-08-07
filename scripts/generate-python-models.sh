@@ -44,11 +44,16 @@
 # the old consumer scripts' resolution order) and warns loudly, but does not
 # fail, if that binary's version doesn't match the pin.
 #
-# Do not add --strict-nullable here without reading CLAUDE.md's "Python
-# codegen drops `nullable` on required fields" section and #302 first -- that
-# flag has a measured, reviewed blast radius across both Python consumers (72
-# changed field declarations, 36 widened / 36 narrowed) and is being added as
-# its own deliberate change, not folded into this consolidation.
+# --strict-nullable (#302): a required + nullable property must generate as
+# `X | None` while STAYING required (no default) -- without the flag the
+# documented null (e.g. BulkResolveTrackIdentity.resolved_artist_name) is
+# inexpressible through the generated model. The side effect is deliberate
+# and measured (72 changed field declarations across both Python consumers:
+# 36 widened, 36 narrowed): optional NON-nullable properties stop generating
+# as Optional, so explicitly passing None to them raises ValidationError.
+# Each consumer audits its call sites as part of its own regen PR before
+# adopting the regenerated output -- see CLAUDE.md's "Python codegen and
+# `nullable` on required fields" section.
 #
 # The .venv/PATH fallback (used when `uv` isn't available) resolves against
 # the CALLER's current directory, not this script's own location. This
@@ -169,6 +174,7 @@ run_codegen() {
         --target-python-version 3.12 \
         --use-standard-collections \
         --use-union-operator \
+        --strict-nullable \
         --disable-timestamp \
         --custom-file-header "$HEADER"
 }

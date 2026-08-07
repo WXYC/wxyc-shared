@@ -154,14 +154,17 @@ EOF
     [ "$status" -eq 0 ]
 }
 
-# #302 is a deliberate, separately-reviewed change with a measured blast
-# radius across both Python consumers (72 changed field declarations). It must
-# not ride in silently as part of consolidating the three scripts into one.
-# (The script's own header comment names --strict-nullable to explain why it's
-# absent, so this excludes comment lines rather than grepping the whole file.)
-@test "does not pass --strict-nullable (that is #302's job, not #107's)" {
+# #302: --strict-nullable is now a deliberate part of this script. Without it
+# a required + nullable property generates as a plain non-Optional field, so
+# the null the contract documents (BulkResolveTrackIdentity.resolved_artist_name,
+# BulkResolveProvenanceEntry.confidence, ...) is inexpressible in every Python
+# consumer. The blast radius was measured and consumer-audited before flipping
+# (72 changed field declarations, 36 widened / 36 narrowed); see #302 and
+# CLAUDE.md's Python-codegen nullability section. (Excludes comment lines so
+# prose mentioning the flag doesn't satisfy the grep.)
+@test "passes --strict-nullable (#302)" {
     run bash -c "grep -v '^[[:space:]]*#' '$SCRIPT_PATH' | grep -- '--strict-nullable'"
-    [ "$status" -ne 0 ]
+    [ "$status" -eq 0 ]
 }
 
 @test "preserves the flags the consumer scripts relied on (parity, not a lossy merge)" {
@@ -365,20 +368,22 @@ STUB
     grep -q "do not edit manually" "$TEST_TEMP_DIR/out/models.py"
 }
 
-@test "required + nullable fields stay non-Optional without --strict-nullable (documents today's known defect, #302)" {
+@test "required + nullable fields generate as X | None and stay required (#302)" {
     command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
     write_fixture_spec
     run "$SCRIPT_PATH" --input "$TEST_TEMP_DIR/fixture.yaml" --output "$TEST_TEMP_DIR/out/models.py"
     [ "$status" -eq 0 ]
-    # `name` is required + non-nullable: always a plain str.
-    grep -q "name: str" "$TEST_TEMP_DIR/out/models.py"
-    # `genre` is required + nullable=true: WITHOUT --strict-nullable this comes
-    # out as a plain (non-Optional) str too -- the exact defect CLAUDE.md and
-    # #302 describe. If this test starts failing because genre came out
-    # `str | None`, --strict-nullable leaked into this script; that's #302's
-    # change to make, deliberately, elsewhere.
-    grep -q "genre: str" "$TEST_TEMP_DIR/out/models.py"
-    run grep -F "genre: str | None" "$TEST_TEMP_DIR/out/models.py"
+    # `name` is required + non-nullable: still a plain str -- --strict-nullable
+    # must not widen fields whose contract has no null.
+    grep -qE '^ *name: str$' "$TEST_TEMP_DIR/out/models.py"
+    # `genre` is required + nullable=true: WITH --strict-nullable the VALUE is
+    # nullable but the KEY stays required -- `str | None` with no default.
+    grep -qF 'genre: str | None' "$TEST_TEMP_DIR/out/models.py"
+    # Required-but-nullable emits `= Field(...)` -- the ellipsis is pydantic's
+    # REQUIRED marker, not a default. What must never appear is an actual None
+    # default making the key optional (an implementer who expects `= None`
+    # defaults has misread the flag).
+    run grep -E 'genre: str \| None = (None|Field\(None)' "$TEST_TEMP_DIR/out/models.py"
     [ "$status" -ne 0 ]
 }
 
