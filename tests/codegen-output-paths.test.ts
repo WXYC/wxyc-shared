@@ -185,3 +185,62 @@ describe("generated tracks_contract_version marker stays optional and nullable (
     expect(responseBlock()).toMatch(/\n\s+results: /);
   });
 });
+
+// #316: the identical defect on LookupResponse.api_version / .identity — LML
+// never sets either field (not even when `include_identity: true`), and
+// serves `/lookup` without `response_model_exclude_none`, so both ship
+// `null` on every response today.
+//
+// `api_version` is a scalar enum, so `nullable: true` on the property is
+// enough — openapi-typescript renders it right there as `2 | null`.
+//
+// `identity` took a different shape. It stayed a bare `$ref` (OpenAPI 3.0
+// ignores sibling keys — including `nullable: true` — written next to a
+// bare `$ref`, so that alone would have done nothing); nullability instead
+// lives on the *referenced* `LookupIdentityBlock` schema itself. An
+// `allOf`-wrapped nullable ref was tried first and rejected: it made oasdiff
+// report a spurious `response-required-property-removed` on
+// `identity/resolved` (`LookupIdentityBlock.required` is untouched — the
+// finding doesn't correspond to any real change on the wire), on top of the
+// `identity`-became-nullable finding the ticket already expected. Marking
+// the schema nullable instead makes `null` reachable through the *type
+// alias* rather than at the property: `identity?:
+// components["schemas"]["LookupIdentityBlock"];` (no `| null` on this
+// line), with the `| null` living on `LookupIdentityBlock` itself. Both
+// shapes are equivalent for a TypeScript consumer — `null` is reachable
+// either way — but only one of the two produces exactly the two expected
+// oasdiff findings, so this pins the actual emitted shape rather than the
+// originally-planned one.
+describe("generated LookupResponse markers stay optional and nullable (#316)", () => {
+  const responseBlock = () => schemaBlock("LookupResponse");
+
+  it("emits api_version as optional and nullable, nullable right on the property", () => {
+    expect(responseBlock()).toMatch(/\bapi_version\?: 2 \| null;/);
+  });
+
+  it("emits identity as optional, referencing the LookupIdentityBlock type alias (no `| null` at the property)", () => {
+    expect(responseBlock()).toMatch(
+      /\bidentity\?: components\["schemas"\]\["LookupIdentityBlock"\];/,
+    );
+  });
+
+  it("keeps results required", () => {
+    // Guards the assertions above against passing for the wrong reason —
+    // e.g. a regex that matches because the whole block vanished.
+    expect(responseBlock()).toMatch(/\n\s+results: /);
+  });
+
+  it("makes null reachable through the LookupIdentityBlock type alias itself", () => {
+    const start = dts.indexOf("LookupIdentityBlock: {");
+    expect(start, "LookupIdentityBlock missing from generated types").toBeGreaterThan(-1);
+    const closeIdx = dts.indexOf("} | null;", start);
+    expect(
+      closeIdx,
+      "LookupIdentityBlock's closing brace is not followed by `| null;` — nullability was lost",
+    ).toBeGreaterThan(-1);
+    const block = dts.slice(start, closeIdx + "} | null;".length);
+    // Guards against the slice picking up some other `} | null;` far away in
+    // the file — the resolved property must still be inside it.
+    expect(block).toMatch(/\bresolved: components\["schemas"\]\["IdentityResolution"\]\[\];/);
+  });
+});
