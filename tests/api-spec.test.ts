@@ -2304,6 +2304,61 @@ describe('OpenAPI Specification', () => {
       expect(opBlock).toMatch(/tracks_contract_version/);
     });
 
+    // The `tracks_contract_version.description` states the marker's full
+    // precondition: present only when the request set `include_tracks: true`
+    // AND the producer understood it; absent otherwise, and "otherwise"
+    // explicitly includes the ordinary `include_tracks: false`-or-omitted
+    // request from a fully-upgraded producer, not only the predates-the-flag
+    // case. A reader who works only from the four-state block comment or the
+    // endpoint description — not the property description three schemas
+    // away — has to learn the same precondition, or an ordinary
+    // `include_tracks: false` call reads as "this producer predates the
+    // flag" against a fully-upgraded LML.
+
+    it('states the include_tracks: true precondition for tracks_contract_version in the four-state block comment, not just that the marker exists', () => {
+      const commentBlock = specText.slice(
+        specText.indexOf('# Four states, read off the PAIR'),
+        specText.indexOf('BulkResolveLibrariesRequest:'),
+      );
+      expect(commentBlock).toMatch(/include_tracks: true/);
+      expect(commentBlock).toMatch(/false or omitted/i);
+    });
+
+    it('states the include_tracks: true precondition for tracks_contract_version in the bulk-resolve-libraries endpoint description too', () => {
+      const opBlock = specText.slice(
+        specText.indexOf('/api/v1/identity/bulk-resolve-libraries:'),
+        specText.indexOf('/api/v1/artists/search-aliases/bulk:'),
+      );
+      expect(opBlock).toMatch(/include_tracks: true/);
+      expect(opBlock).toMatch(/false or omitted/i);
+    });
+
+    // The Q2 MUST rule (`tracks_attempted: false` + populated `tracks` reads
+    // as `true`) was added only to the tracks_attempted property description
+    // in this PR's first pass. The four-state block comment is the canonical
+    // table an implementer works from ("Four states, read off the PAIR"), and
+    // the endpoint description is the other prose surface a Backend-Service
+    // implementer reads before ever opening the schema — both need the same
+    // repaired reading, or an implementer working from either one reproduces
+    // the un-repaired retry loop the mitigation exists to make survivable.
+
+    it('adds the #303 Q2 consumer reading to the four-state block comment', () => {
+      const commentBlock = specText.slice(
+        specText.indexOf('# Four states, read off the PAIR'),
+        specText.indexOf('BulkResolveLibrariesRequest:'),
+      );
+      expect(commentBlock).toMatch(/producers must not emit it/);
+      expect(commentBlock).toMatch(/MUST read it as `true`/);
+    });
+
+    it('adds the #303 Q2 consumer reading to the bulk-resolve-libraries endpoint description', () => {
+      const opBlock = specText.slice(
+        specText.indexOf('/api/v1/identity/bulk-resolve-libraries:'),
+        specText.indexOf('/api/v1/artists/search-aliases/bulk:'),
+      );
+      expect(opBlock).toMatch(/MUST read it as `true`/);
+    });
+
     // --- BulkResolveTrackIdentity repair (BS#1991 / LML#1021) ---
 
     it('ships the join-back echoes, composed verdict, and canonical artist on BulkResolveTrackIdentity', () => {

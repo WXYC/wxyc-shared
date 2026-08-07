@@ -114,6 +114,23 @@ describe("no doc claims generate:python feeds a consumer (#302, #304)", () => {
   });
 });
 
+// Shared by both `.d.ts`-reading guards below (#297 and #303): each pins a
+// different generated interface within the same 323KB generated file, and
+// each slices out one top-level interface block the same way. Read the file
+// once, and share the slicing logic, rather than each describe re-reading
+// the whole file and re-implementing the same `indexOf`/`slice` pair.
+const dts = readFileSync(
+  join(__dirname, "..", "src", "generated", "openapi-types.d.ts"),
+  "utf-8",
+);
+
+/** Slice one top-level interface block (e.g. `BulkResolveLibrariesRequest: { ... };`) out of the generated `.d.ts`. */
+function schemaBlock(name: string): string {
+  const start = dts.indexOf(`${name}: {`);
+  expect(start, `${name} missing from generated types`).toBeGreaterThan(-1);
+  return dts.slice(start, dts.indexOf("\n        };", start));
+}
+
 // A property carrying an OpenAPI `default` is emitted non-optional by
 // openapi-typescript (its `defaultNonNullable` option, on by default) even when
 // the property is absent from `required`. That reasoning holds for a response —
@@ -125,16 +142,7 @@ describe("no doc claims generate:python feeds a consumer (#302, #304)", () => {
 // the artifact that consumers actually import, because the spec assertion alone
 // cannot see what the generator did with it.
 describe("generated request types stay constructible (#297)", () => {
-  const dts = readFileSync(
-    join(__dirname, "..", "src", "generated", "openapi-types.d.ts"),
-    "utf-8",
-  );
-
-  const requestBlock = () => {
-    const start = dts.indexOf("BulkResolveLibrariesRequest: {");
-    expect(start, "BulkResolveLibrariesRequest missing from generated types").toBeGreaterThan(-1);
-    return dts.slice(start, dts.indexOf("\n        };", start));
-  };
+  const requestBlock = () => schemaBlock("BulkResolveLibrariesRequest");
 
   it("emits include_tracks as optional", () => {
     expect(requestBlock()).toMatch(/\binclude_tracks\?:/);
@@ -156,16 +164,7 @@ describe("generated request types stay constructible (#297)", () => {
 // the artifact consumers actually import, because the spec-level assertion
 // in api-spec.test.ts cannot see what the generator did with it.
 describe("generated tracks_contract_version marker stays optional (#303)", () => {
-  const dts = readFileSync(
-    join(__dirname, "..", "src", "generated", "openapi-types.d.ts"),
-    "utf-8",
-  );
-
-  const responseBlock = () => {
-    const start = dts.indexOf("BulkResolveLibrariesResponse: {");
-    expect(start, "BulkResolveLibrariesResponse missing from generated types").toBeGreaterThan(-1);
-    return dts.slice(start, dts.indexOf("\n        };", start));
-  };
+  const responseBlock = () => schemaBlock("BulkResolveLibrariesResponse");
 
   it("emits tracks_contract_version as optional", () => {
     expect(responseBlock()).toMatch(/\btracks_contract_version\?:/);

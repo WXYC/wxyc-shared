@@ -4183,6 +4183,13 @@ components:
     #                          leg ran" convention as
     #                          `BulkResolveProvenanceEntry.external_id`.
     #
+    # `false` alongside a populated `tracks` is not a fifth state;
+    # producers must not emit it. A consumer that observes it anyway
+    # MUST read it as `true` — the populated array is stronger evidence
+    # of what happened than the flag that disagrees with it, and reading
+    # the row as unattempted would either drop already-resolved tracks
+    # or re-ask a row that already has an answer (WXYC/wxyc-shared#303).
+    #
     # The resolved signal is `tracks_attempted`, not the array's length.
     # Those middle two states are byte-identical in `tracks`, so a consumer
     # reading emptiness as "not visited" re-asks every trackless row on
@@ -4196,10 +4203,16 @@ components:
     # (absent, absent) state identically to a producer that understands the
     # flag and genuinely has nothing to report — both are `null` either way.
     # `BulkResolveLibrariesResponse.tracks_contract_version` is the
-    # response-level marker that separates them: present and equal to 1 only
-    # when the producer understood `include_tracks`, absent otherwise. See
-    # that field, and WXYC/wxyc-shared#303 for why the pair alone can't do
-    # this.
+    # response-level marker that separates them, and it only speaks to a
+    # request that set `include_tracks: true`: present and equal to 1 only
+    # then, when the producer also understood the flag. Absent otherwise —
+    # which covers both the predates-the-flag case above AND the ordinary,
+    # expected response from a fully-upgraded producer to a request where
+    # `include_tracks` was false or omitted. The marker is not a general
+    # "is this producer current" probe; probing it on an ordinary
+    # `include_tracks: false` call and reading the absence as "old
+    # producer" is the exact misreading it exists to prevent. See that
+    # field, and WXYC/wxyc-shared#303 for why the pair alone can't do this.
 
     BulkResolveLibrariesRequest:
       type: object
@@ -8671,7 +8684,11 @@ paths:
         ran off `BulkResolveResult.tracks_attempted`, never off
         `tracks.length`: a row the matcher visited and resolved nothing
         for carries an empty array, indistinguishable from one it has
-        not reached.
+        not reached. `tracks_attempted: false` alongside a populated
+        `tracks` is not a state producers may emit; a consumer that
+        observes it anyway MUST read it as `true` rather than dropping
+        the already-resolved entries or re-asking a row that already has
+        an answer.
 
 
         During the rollout window before every producer implements this
@@ -8679,7 +8696,13 @@ paths:
         is the signal that separates "the producer understood
         `include_tracks` and this batch genuinely has nothing to report"
         from "the producer predates the flag" — both read identically on
-        `tracks_attempted`/`tracks` alone (WXYC/wxyc-shared#303).
+        `tracks_attempted`/`tracks` alone (WXYC/wxyc-shared#303). The
+        marker only speaks to a request that set `include_tracks: true`:
+        it is present and equal to 1 only then, when the producer also
+        understood the flag. It is absent, and normally absent, on the
+        ordinary request where `include_tracks` was false or omitted —
+        that absence is the expected response from a fully-upgraded
+        producer too, not evidence the producer predates the flag.
       security:
         - LMLBearerAuth: []
       tags:
