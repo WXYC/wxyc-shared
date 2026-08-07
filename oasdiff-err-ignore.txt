@@ -21,7 +21,14 @@
 # one — a genuine breaking change gets a contract-version conversation, not a
 # line in this file.
 #
-# There are currently no live entries. The two wxyc-shared#297 suppressions
+# Worked example of the pruning rule, kept because the rule reads abstractly
+# until you have seen it applied once: the two wxyc-shared#297 suppressions
 # (`BulkResolveTrackIdentity.track_position` and `BulkResolveResult.tracks`
 # becoming nullable) landed on `main` in api.yaml 1.30.0, stopped appearing in
-# any `main`..PR diff, and were pruned per the rule above.
+# any `main`..PR diff, and were pruned.
+#
+# Deliberately not recorded here: how many entries are currently live. A comment
+# claiming a count is wrong the moment someone appends an entry below it, and no
+# test can catch that — the checks in
+# scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
+# construction. Read the entries.

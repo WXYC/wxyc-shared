@@ -85,6 +85,35 @@ describe("CLAUDE.md's codegen consumer table (#302)", () => {
   });
 });
 
+// The same claim lived in README.md's Contributing checklist, where a
+// contributor is more likely to meet it than in CLAUDE.md's reference table —
+// and a guard that reads only CLAUDE.md leaves the more-trafficked copy
+// unguarded. Both files are checked here for the same reason: the belief that
+// `generate:python` feeds a consumer is what scoped #302 wrong, and it does not
+// matter which document plants it.
+describe("no doc claims generate:python feeds a consumer (#302, #304)", () => {
+  const docs = ["CLAUDE.md", "README.md"] as const;
+
+  it.each(docs)("%s does not tell the reader to regenerate for a Python service", (doc) => {
+    const text = readFileSync(join(__dirname, "..", doc), "utf-8");
+    // Pin the misleading *instruction*, not co-occurrence. Naming the two
+    // services near `generate:python` is fine and in fact necessary — the
+    // corrected CLAUDE.md paragraph does exactly that to explain where the
+    // models really come from. (This repo writes each paragraph as one long
+    // line, so a co-occurrence filter flags whole explanatory paragraphs.)
+    // What must not survive is a sentence telling the reader that running this
+    // script updates models a Python service uses.
+    const claimsItFeedsAConsumer = [
+      /Python services consume/i,
+      /generate:python`?\s*(?:\S+\s+){0,6}?to update the generated Python models/i,
+    ];
+    const offending = text
+      .split("\n")
+      .filter((line) => claimsItFeedsAConsumer.some((re) => re.test(line)));
+    expect(offending, `${doc} still ties generate:python to a consumer`).toEqual([]);
+  });
+});
+
 // A property carrying an OpenAPI `default` is emitted non-optional by
 // openapi-typescript (its `defaultNonNullable` option, on by default) even when
 // the property is absent from `required`. That reasoning holds for a response —

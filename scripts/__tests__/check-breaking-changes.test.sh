@@ -37,10 +37,8 @@ teardown() {
     # Guards against a stray blank-ish or prose line that silently matches
     # nothing. Entries must name a method + path.
     while IFS= read -r line; do
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        [[ -z "${line//[[:space:]]/}" ]] && continue
         [[ "$line" =~ ^(get|post|put|patch|delete)\ /.+ ]]
-    done < "$IGNORE_FILE"
+    done < <(live_entries)
 }
 
 # The original defect: `--err-ignore` args were held in an array and expanded as
@@ -93,15 +91,21 @@ teardown() {
 # --- the whitelist actually suppressing something ---
 #
 # Every test above either exits at preflight or takes the identical-specs fast
-# path at the top of the script, so none of them reaches oasdiff. The two below
+# path at the top of the script, so none of them reaches oasdiff. The ones below
 # are the only end-to-end coverage: they run a real diff (origin/main..HEAD)
-# through the real flag, and they are written as a pair so that neither can pass
-# for the wrong reason. If the whitelist stops matching — a typo, an oasdiff
-# release that rewords a finding — the first goes red. If the whitelist starts
-# matching things it shouldn't, the second goes red and the first becomes
-# vacuous. The pair only has something to say while the whitelist carries a
-# live entry; with an empty whitelist the second skips (see below), because
-# "this diff is breaking" is a claim about the entries, not about api.yaml.
+# through the real flag.
+#
+# They express the invariant directly — "the whitelist only ever removes
+# findings" — rather than via the whitelist's entry count. An earlier pair
+# asserted "this diff is breaking without the whitelist", which read as a claim
+# about the entries but was written as a claim about api.yaml: unconditional, it
+# demanded that *every* api.yaml PR be breaking, so the first description-only
+# change went red with no defect behind it. Guarding that with an entry count
+# fixed the false red but bought a test that skips on main's steady state (an
+# empty whitelist), in the one suite whose CI wiring exists precisely to stop
+# tests skipping themselves — and bats reports a skip as `ok`, so the suite
+# would have read green while asserting nothing. The subset formulation needs
+# neither the skip nor a parser for the file's syntax.
 
 setup_base() {
     command -v oasdiff > /dev/null || skip "oasdiff not installed"
@@ -113,19 +117,40 @@ setup_base() {
     fi
 }
 
-# Count the whitelist's live entries — every line that is neither a comment nor
-# blank. Zero is a legitimate steady state (the file's own header calls an
-# entry-free file of comments the floor), and it is what the file looks like
-# between the merge of one suppressed change and the next one that needs a
-# suppression.
-live_entry_count() {
-    local count=0 line
-    while IFS= read -r line; do
+# The whitelist's live entries — every line that is neither a comment nor blank.
+# Single definition: the format check, the staleness check and any future reader
+# all go through here, so the entry syntax is described in exactly one place.
+#
+# The `|| [[ -n "$line" ]]` is load-bearing, not defensive. A bare `read` returns
+# non-zero on a final line with no trailing newline and the loop body never runs
+# for it, so an entry pasted in as the last line — routine, since entries are
+# pasted verbatim from oasdiff output — was invisible to every check here while
+# oasdiff itself (Go, bufio.Scanner) still honoured it. That is the worst
+# direction for the bug to run: a live, silently unguarded suppression.
+live_entries() {
+    local line
+    while IFS= read -r line || [[ -n "$line" ]]; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${line//[[:space:]]/}" ]] && continue
-        count=$((count + 1))
+        printf '%s\n' "$line"
     done < "$IGNORE_FILE"
-    echo "$count"
+}
+
+@test "live_entries sees a final entry that has no trailing newline" {
+    # Regression guard. Entries are pasted verbatim from oasdiff output, which
+    # is exactly how a file ends up without a terminating newline. A bare
+    # `while read` drops that last line, so the entry would be honoured by
+    # oasdiff and invisible to every check in this file at once.
+    local saved="$IGNORE_FILE"
+    IGNORE_FILE="$TEST_TEMP_DIR/no-trailing-newline.txt"
+    printf '# a comment\n\npost /api/v1/x the response property `y` became nullable for the status `200`' \
+        > "$IGNORE_FILE"
+
+    run live_entries
+    IGNORE_FILE="$saved"
+
+    [ "${#lines[@]}" -eq 1 ]
+    [[ "${lines[0]}" == post\ /api/v1/x* ]]
 }
 
 @test "the script exits 0 on the current diff, i.e. the whitelist entries match" {
@@ -135,39 +160,52 @@ live_entry_count() {
     [[ "$output" == *"No breaking changes detected"* ]]
 }
 
-@test "the same diff is genuinely breaking without the whitelist" {
-    # Proves the previous test is suppressing real ERR findings rather than
-    # passing because the diff happens to be clean.
+@test "the whitelist only ever removes findings, never adds or rewrites them" {
+    # Non-vacuous at every whitelist size, so it never skips. With entries, it
+    # proves they suppress real findings rather than inventing suppression;
+    # with none, both runs agree and it still exercises the full oasdiff path.
+    # An over-broad or malformed entry that made oasdiff report something new
+    # fails here.
     setup_base
-    # ...but only when there is something to suppress. An empty whitelist has
-    # nothing to prove, and a PR that edits api.yaml without breaking anything
-    # (a description fix, say) is the ordinary case, not a suspicious one. Left
-    # unconditional, this assertion demanded that every api.yaml PR be breaking
-    # — the exact inversion of what the gate is for, and a red CI job with no
-    # actionable defect behind it.
-    [ "$(live_entry_count)" -gt 0 ] \
-        || skip "whitelist has no live entries; nothing to suppress on this diff"
-    run oasdiff breaking "$BASE_SPEC" "$REPO_ROOT/api.yaml" --fail-on ERR
-    [ "$status" -eq 1 ]
+    run oasdiff breaking "$BASE_SPEC" "$REPO_ROOT/api.yaml" -f json
+    [ "$status" -eq 0 ]
+    local unignored="$output"
+    run oasdiff breaking "$BASE_SPEC" "$REPO_ROOT/api.yaml" -f json --err-ignore "$IGNORE_FILE"
+    [ "$status" -eq 0 ]
+    local ignored="$output"
+
+    python3 - "$unignored" "$ignored" <<'PY'
+import json, sys
+key = lambda f: (f.get("id"), f.get("operation"), f.get("path"), f.get("text"))
+before = {key(f) for f in json.loads(sys.argv[1] or "[]")}
+after = {key(f) for f in json.loads(sys.argv[2] or "[]")}
+added = after - before
+if added:
+    print("whitelist introduced findings that oasdiff does not report without it:")
+    for f in sorted(map(str, added)):
+        print("  " + f)
+    sys.exit(1)
+PY
 }
 
 @test "every whitelist entry corresponds to a finding in the current diff" {
     # The file's own rule is that entries are diff-scoped and dead ones get
     # pruned. This fails when an entry outlives the change it was written for.
+    # Correctly vacuous at zero entries: it quantifies over entries, and there
+    # are none. The test above is what stays non-vacuous in that state.
     setup_base
     run oasdiff breaking "$BASE_SPEC" "$REPO_ROOT/api.yaml" --fail-on ERR
+    local findings="$output" line message
     while IFS= read -r line; do
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        [[ -z "${line//[[:space:]]/}" ]] && continue
         # Strip the leading "<method> <path> " to get the message text.
         message="${line#* }"
         message="${message#* }"
-        [[ "$output" == *"$message"* ]] || {
+        [[ "$findings" == *"$message"* ]] || {
             echo "stale whitelist entry, matches nothing in the diff:"
             echo "  $line"
             return 1
         }
-    done < "$IGNORE_FILE"
+    done < <(live_entries)
 }
 
 @test "a non-breaking oasdiff failure is not reported as a breaking change" {

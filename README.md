@@ -584,7 +584,7 @@ TypeScript types are generated from `api.yaml` using [`openapi-typescript`](http
 npm run generate:typescript  # TypeScript types (openapi-typescript)
 npm run generate:swift       # iOS types (openapi-generator-cli, requires Java)
 npm run generate:kotlin      # Android types (openapi-generator-cli, requires Java)
-npm run generate:python      # Python models (datamodel-codegen)
+npm run generate:python      # Python models (datamodel-codegen) — reference/diff aid; no repo consumes this output
 ```
 
 ## E2E Tests
@@ -649,4 +649,4 @@ See [`railway/`](./railway/) for the Railway service topology, environment varia
 3. Export them from `src/dtos/index.ts`
 4. Add corresponding test fixtures/factories
 5. Run `npm run lint` to verify types
-6. If Python services consume the new types, run `npm run generate:python` to update the generated Python models
+6. Nothing here updates the Python services. `generated/python/` is a local reference tree that no repo imports — library-metadata-lookup and request-o-matic each run their own `scripts/generate_api_models.sh` against `api.yaml` and commit the result in their own repo. If your change affects them, open a regen ticket there; running `npm run generate:python` locally only produces something to diff against.
