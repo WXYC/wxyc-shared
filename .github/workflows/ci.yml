@@ -72,15 +72,11 @@ jobs:
       # runnable-but-unrun until now: a regression in check-breaking-changes.sh
       # merged green here and surfaced later as an unexplained red
       # breaking-changes job on someone else's PR.
-      #
-      # test:drift-guard is deliberately absent: tests 4 and 5 in
-      # check-corpus-drift.test.sh fail on main today, untouched by this PR.
-      # Wiring it in would redden CI for an unrelated reason; it gets its own
-      # fix and then its own line here.
       - name: Shell script guards
         run: |
           npm run test:breaking-guard
           npm run test:setup-script
+          npm run test:drift-guard
 
       # Cross-service contract suite (see INVARIANTS.md, src/contracts.ts).
       # When $E2E_BASE_URL is unset, every test in the file is `skipIf`-ed

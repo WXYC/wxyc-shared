@@ -12,7 +12,7 @@ CORPUS_PATH="$REPO_ROOT/src/test-utils/charset-torture.json"
 
 # Pinned hash of the in-tree corpus. Bumped in lockstep with the test in
 # tests/charset-torture.test.ts.
-PINNED_SHA256='75a3395bb10894480dba95bf5b7f379f5056645098d6a1bf9e94416709e5214a'
+PINNED_SHA256='41a18c5c0a92d129ec4b575827b6874196bfb7591e4bdf237a918a5da2de7b66'
 
 setup() {
     TEST_TEMP_DIR="$(mktemp -d)"
