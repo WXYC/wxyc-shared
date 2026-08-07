@@ -1,15 +1,21 @@
 name: CI
 
+# Markdown is NOT ignored. `tests/codegen-output-paths.test.ts` asserts facts
+# about CLAUDE.md and README.md — that neither tells a reader `generate:python`
+# feeds a consuming service — and `paths-ignore: '**.md'` skipped this entire
+# job for a docs-only PR, so those guards could never fire on the one change
+# class they guard. The false claim they now pin got into both files exactly
+# that way. GitHub's path filters have no negation, so the choice is ignore
+# markdown and lose the guards, or run a ~1-minute job on docs PRs. Cheaper to
+# run it.
 on:
   push:
     branches: [main]
     paths-ignore:
-      - '**.md'
       - 'LICENSE'
   pull_request:
     branches: [main]
     paths-ignore:
-      - '**.md'
       - 'LICENSE'
 
 # Workflow-level GITHUB_TOKEN scope. No job in this file pushes code,

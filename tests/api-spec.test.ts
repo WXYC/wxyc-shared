@@ -21,10 +21,15 @@ interface OpenAPISpec {
 
 describe('OpenAPI Specification', () => {
   let spec: OpenAPISpec;
+  // Raw source alongside the parsed tree, for assertions that must hold across
+  // the whole document rather than inside one schema — e.g. a false citation
+  // that could be copy-pasted into any description.
+  let specText: string;
 
   beforeAll(() => {
     const specPath = join(__dirname, '..', 'api.yaml');
     const content = readFileSync(specPath, 'utf-8');
+    specText = content;
     spec = parse(content) as OpenAPISpec;
   });
 
@@ -2354,16 +2359,27 @@ describe('OpenAPI Specification', () => {
       //
       // Pin the fact (no clause anywhere asserts #271 closed), not a phrasing.
       // The description is free to cite #271 accurately, or to leave it out
-      // entirely; either passes. The clause bound (`[^.;]`) keeps a correct
-      // adjacent sentence about BS#792 closing from tripping this.
+      // entirely; either passes.
+      //
+      // Scope is the whole spec text, not one schema's description. The false
+      // attribution is copy-paste-shaped — the same feature is discussed in
+      // BulkResolveResult, BulkResolveProvenanceEntry and the operation
+      // description, all of which already cite LML#1021 — and a guard that
+      // reads one schema would watch it reappear anywhere else in silence.
+      //
+      // Proximity is measured in words rather than with a `[^.;]*` clause
+      // bound. This description is saturated with periods that are not
+      // sentence ends (`1.29.0`, `https://github.com/...`), so a dot-excluding
+      // bound stops early and misses exactly the citation-carried-forward
+      // wording that caused the defect — e.g. "#271 (as of `1.29.0`) closed as
+      // a design decision".
+      const nearbyClosure = /library-metadata-lookup#271(?:\W+\w+){0,12}\W+\bclos(?:e|ed|es|ing|ure)\b/i;
+      const nearbyClosureBefore = /\bclos(?:e|ed|es|ing|ure)\b(?:\W+\w+){0,12}\W+library-metadata-lookup#271/i;
+      expect(specText).not.toMatch(nearbyClosure);
+      expect(specText).not.toMatch(nearbyClosureBefore);
+
       const schema = spec.components.schemas.BulkResolveTrackIdentity as Schema;
       const description = schema.description ?? '';
-      expect(description).not.toMatch(
-        /library-metadata-lookup#271[^.;]*\bclos(?:ed|ure|es)\b/i,
-      );
-      expect(description).not.toMatch(
-        /\bclos(?:ed|ure|es)\b[^.;]*library-metadata-lookup#271/i,
-      );
       // The retraction's evidence has to survive the citation fix: the "never
       // built" claim rests entirely on the BS#801 comment that measured prod
       // and all 136 migrations. Losing the permalink would leave an
@@ -2371,6 +2387,13 @@ describe('OpenAPI Specification', () => {
       expect(description).toContain(
         'Backend-Service/issues/801#issuecomment-5187348795',
       );
+      // And the positive half of the correction: the ticket that actually
+      // closed as a design decision has to be named, or the withdrawn 1.29.0
+      // instruction stops being traceable. Without this, deleting the BS#792
+      // attribution and writing "the ticket that would have created it closed
+      // as a design decision" passes every assertion above while losing the
+      // fact the fix exists to record.
+      expect(description).toMatch(/Backend-Service#792/);
     });
 
     // --- the four states have to be legible from the example, not just the prose ---
