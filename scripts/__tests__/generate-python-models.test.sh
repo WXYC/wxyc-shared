@@ -78,6 +78,17 @@ EOF
     [[ "$output" == *"Usage:"* ]]
 }
 
+@test "--help's stated --output default matches what the script actually uses (Finding 9)" {
+    # OUTPUT defaults to $PROJECT_DIR/generated/python/models.py -- an
+    # absolute path under wxyc-shared's own checkout. The usage text must
+    # say so, not print a bare relative path that reads as "relative to
+    # wherever you run this", which is true for a *passed* --output value but
+    # false for the default.
+    run "$SCRIPT_PATH" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Default: $REPO_ROOT/generated/python/models.py"* ]]
+}
+
 @test "an unknown flag exits non-zero with usage" {
     run "$SCRIPT_PATH" --bogus
     [ "$status" -ne 0 ]
@@ -90,8 +101,56 @@ EOF
     [[ "$output" == *"does-not-exist.yaml"* ]]
 }
 
+# --- Findings 7 + 8: a missing or empty --input/--output value must fail ---
+# --- loudly, not silently abort or silently fall back to the default. ---
+
+@test "--output with no value fails with a clear message, not a silent set -e abort (Finding 7)" {
+    run "$SCRIPT_PATH" --output
+    [ "$status" -ne 0 ]
+    [ -n "$output" ]
+    [[ "$output" == *"--output"* ]]
+}
+
+@test "--input with no value fails with a clear message, not a silent set -e abort (Finding 7)" {
+    run "$SCRIPT_PATH" --input
+    [ "$status" -ne 0 ]
+    [ -n "$output" ]
+    [[ "$output" == *"--input"* ]]
+}
+
+@test "--input '' (empty string) fails loudly instead of silently falling back to this repo's own api.yaml (Finding 8)" {
+    run "$SCRIPT_PATH" --input "" --output "$TEST_TEMP_DIR/out.py"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"--input"* ]]
+    [ ! -f "$TEST_TEMP_DIR/out.py" ]
+}
+
+@test "--output '' (empty string) fails loudly instead of silently falling back to the default output path (Finding 8)" {
+    run "$SCRIPT_PATH" --output ""
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"--output"* ]]
+}
+
 @test "the datamodel-code-generator version is pinned with ==, not a floating spec" {
     run grep -E 'DATAMODEL_CODEGEN_PIN=.*datamodel-code-generator\[http\]==[0-9]+\.[0-9]+\.[0-9]+' "$SCRIPT_PATH"
+    [ "$status" -eq 0 ]
+}
+
+@test "the uvx invocation also pins the interpreter, not just the generator package (Finding 3)" {
+    # DATAMODEL_CODEGEN_PIN alone leaves black/isort/pydantic and the
+    # interpreter floating -- a full lockfile is out of scope, but the
+    # interpreter minor version is cheap to pin and closes the biggest gap.
+    run grep -E 'uvx --python [0-9]+\.[0-9]+(\.[0-9]+)? --from' "$SCRIPT_PATH"
+    [ "$status" -eq 0 ]
+}
+
+@test "the GitHub download fallback bounds curl with a timeout and retry limit (Finding 4)" {
+    # No --max-time/--retry means a half-open connection blocks indefinitely.
+    # scripts/__tests__/generate-python-models.test.sh's own reachability
+    # probe uses --max-time 5; the script it guards must not be laxer.
+    run grep -E 'curl .*--max-time' "$SCRIPT_PATH"
+    [ "$status" -eq 0 ]
+    run grep -E 'curl .*--retry' "$SCRIPT_PATH"
     [ "$status" -eq 0 ]
 }
 
@@ -113,11 +172,15 @@ EOF
 }
 
 @test "still runs ruff format + ruff check --fix over the generated file" {
+    # Pin the actual invocations against $OUTPUT (Finding 10), not just
+    # co-occurrence of the words "ruff"/"format"/"check --fix" anywhere in the
+    # file -- the "Formatting generated code..." echo alone used to satisfy
+    # the old, weaker version of this test.
     run grep -F 'ruff' "$SCRIPT_PATH"
     [ "$status" -eq 0 ]
-    run grep -F -- 'format' "$SCRIPT_PATH"
+    run grep -F -- 'format "$OUTPUT"' "$SCRIPT_PATH"
     [ "$status" -eq 0 ]
-    run grep -F -- 'check --fix' "$SCRIPT_PATH"
+    run grep -F -- 'check --fix "$OUTPUT"' "$SCRIPT_PATH"
     [ "$status" -eq 0 ]
 }
 
@@ -157,9 +220,76 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+# --- Finding 2: the DOCUMENTED consumer invocation must work from inside a ---
+# --- worktree, since the org's global CLAUDE.md requires one for all new ---
+# --- development. There's no script-side fix here -- SCRIPT_DIR already ---
+# --- resolves correctly from any path bash was told to run it at; what was ---
+# --- broken is the recommended COMMAND consumers were told to type. These ---
+# --- tests pin the corrected command (see this script's own header comment ---
+# --- and CLAUDE.md/README.md's migration instructions). ---
+
+@test "the old sibling-relative invocation (bash ../wxyc-shared/...) breaks from inside a consumer's linked worktree" {
+    local root="$TEST_TEMP_DIR/org-naive"
+    mkdir -p "$root/wxyc-shared/scripts"
+    cp "$SCRIPT_PATH" "$root/wxyc-shared/scripts/generate-python-models.sh"
+    git init -q "$root/consumer"
+    git -C "$root/consumer" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+    git -C "$root/consumer" worktree add -q .worktrees/my-branch -b my-branch
+
+    # Assert on path resolution directly (`test -f`) rather than invoking
+    # bash on a path that doesn't exist -- the latter is still a true
+    # end-to-end repro, but its "command not found" exit (127) is a
+    # special-cased bats status best asserted with a version-gated `run -N`,
+    # which the rest of this suite doesn't use.
+    run bash -c "cd '$root/consumer/.worktrees/my-branch' && test -f ../wxyc-shared/scripts/generate-python-models.sh"
+    [ "$status" -ne 0 ]
+}
+
+@test "the git-common-dir-based invocation finds the sibling wxyc-shared checkout from inside a consumer's linked worktree" {
+    local root="$TEST_TEMP_DIR/org-fixed"
+    mkdir -p "$root/wxyc-shared/scripts"
+    cp "$SCRIPT_PATH" "$root/wxyc-shared/scripts/generate-python-models.sh"
+    git init -q "$root/consumer"
+    git -C "$root/consumer" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+    git -C "$root/consumer" worktree add -q .worktrees/my-branch -b my-branch
+
+    run bash -c '
+        cd "'"$root"'/consumer/.worktrees/my-branch" &&
+        WXYC_SHARED="$(dirname "$(git rev-parse --git-common-dir)")/../wxyc-shared" &&
+        bash "$WXYC_SHARED/scripts/generate-python-models.sh" --help
+    '
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Usage:"* ]]
+}
+
 @test "warns rather than fails when a non-pinned datamodel-codegen is used without uv" {
     run grep -F 'Warning' "$SCRIPT_PATH"
     [ "$status" -eq 0 ]
+}
+
+@test "the version-mismatch warning fires on 0.56.10, not just any string containing 0.56.1 (Finding 6, substring bug)" {
+    # [[ "$RESOLVED" != *"$PINNED"* ]] treats 0.56.1 as a substring of 0.56.10
+    # and silently accepts the mismatch. Compare the parsed version token for
+    # exact equality instead.
+    mkdir -p "$TEST_TEMP_DIR/consumer/.venv/bin"
+    cat > "$TEST_TEMP_DIR/consumer/.venv/bin/datamodel-codegen" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then echo "datamodel-codegen 0.56.10"; exit 0; fi
+out=""
+prev=""
+for a in "$@"; do
+    if [[ "$prev" == "--output" ]]; then out="$a"; fi
+    prev="$a"
+done
+mkdir -p "$(dirname "$out")"
+echo "# stub" > "$out"
+STUB
+    chmod +x "$TEST_TEMP_DIR/consumer/.venv/bin/datamodel-codegen"
+    write_fixture_spec
+
+    run bash -c "cd '$TEST_TEMP_DIR/consumer' && PATH=/usr/bin:/bin bash '$SCRIPT_PATH' --input '$TEST_TEMP_DIR/fixture.yaml' --output out/models.py"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Warning"* ]]
 }
 
 @test "prefers uv (the pin) over an ambient PATH/venv install when both are available" {
@@ -174,10 +304,53 @@ EOF
 }
 
 @test "generated header points at the shared script, not a repo-relative path that only makes sense for one caller" {
+    # Pin the literal HEADER content, not just co-occurrence with this
+    # script's own Usage:/comment prose (which would keep this test green even
+    # if HEADER pointed nowhere near generate-python-models.sh).
     run grep -F 'do not edit manually' "$SCRIPT_PATH"
     [ "$status" -eq 0 ]
-    run grep -F 'generate-python-models.sh' "$SCRIPT_PATH"
+    run grep -F 'Regenerate with the shared codegen script: https://github.com/WXYC/wxyc-shared/blob/main/scripts/generate-python-models.sh' "$SCRIPT_PATH"
     [ "$status" -eq 0 ]
+}
+
+# --- .venv fallback must resolve against the CALLER's checkout, not this ---
+# --- script's own (wxyc-shared) repo. Finding 1. ---
+#
+# The predecessor scripts lived in the consumer repo, so their PROJECT_DIR was
+# the consumer's own repo root and `$PROJECT_DIR/.venv` found the consumer's
+# venv. This script now lives in wxyc-shared, so PROJECT_DIR is always
+# wxyc-shared's checkout -- if the .venv fallback still keys off PROJECT_DIR,
+# a caller's own .venv sitting right next to their invocation is never found.
+
+@test "neither the datamodel-codegen nor the ruff venv fallback resolves against this script's own repo" {
+    run grep -n '\$PROJECT_DIR/\.venv\|\${PROJECT_DIR}/\.venv' "$SCRIPT_PATH"
+    [ "$status" -ne 0 ]
+}
+
+@test "the datamodel-codegen venv fallback finds the CALLER's own .venv, not this repo's" {
+    # No uv on PATH, so the script must fall back to .venv/PATH resolution.
+    # The consumer's .venv/bin/datamodel-codegen sits in their own cwd -- the
+    # documented invocation always runs from the consumer's repo root (or a
+    # worktree of it), never from inside wxyc-shared's checkout.
+    mkdir -p "$TEST_TEMP_DIR/consumer/.venv/bin"
+    cat > "$TEST_TEMP_DIR/consumer/.venv/bin/datamodel-codegen" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then echo "datamodel-codegen 0.56.1"; exit 0; fi
+out=""
+prev=""
+for a in "$@"; do
+    if [[ "$prev" == "--output" ]]; then out="$a"; fi
+    prev="$a"
+done
+mkdir -p "$(dirname "$out")"
+echo "# consumer venv stub ran" > "$out"
+STUB
+    chmod +x "$TEST_TEMP_DIR/consumer/.venv/bin/datamodel-codegen"
+    write_fixture_spec
+
+    run bash -c "cd '$TEST_TEMP_DIR/consumer' && PATH=/usr/bin:/bin bash '$SCRIPT_PATH' --input '$TEST_TEMP_DIR/fixture.yaml' --output out/models.py"
+    [ "$status" -eq 0 ]
+    grep -q "consumer venv stub ran" "$TEST_TEMP_DIR/consumer/out/models.py"
 }
 
 # --- Live generation tests: skipped when the pinned generator can't be run. ---
@@ -220,11 +393,19 @@ EOF
 
 @test "runs against this repo's own api.yaml with no flags, writing the documented default path" {
     command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
-    rm -f "$REPO_ROOT/generated/python/models.py"
-    run "$SCRIPT_PATH"
+    # Confined to TEST_TEMP_DIR like every other test here (Finding 5): a copy
+    # of the script + this repo's real api.yaml, laid out the same way as the
+    # real checkout (scripts/ next to api.yaml), so PROJECT_DIR resolves
+    # inside the temp copy and the default --output path never touches the
+    # developer's own generated/python/models.py.
+    mkdir -p "$TEST_TEMP_DIR/proj/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/proj/scripts/generate-python-models.sh"
+    cp "$REPO_ROOT/api.yaml" "$TEST_TEMP_DIR/proj/api.yaml"
+
+    run bash "$TEST_TEMP_DIR/proj/scripts/generate-python-models.sh"
     [ "$status" -eq 0 ]
-    [ -f "$REPO_ROOT/generated/python/models.py" ]
-    grep -q "BaseModel" "$REPO_ROOT/generated/python/models.py"
+    [ -f "$TEST_TEMP_DIR/proj/generated/python/models.py" ]
+    grep -q "BaseModel" "$TEST_TEMP_DIR/proj/generated/python/models.py"
 }
 
 @test "downloads api.yaml from GitHub when invoked outside this repo and no --input is given" {
