@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.33.0
+  version: 1.34.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3480,14 +3480,35 @@ components:
           type: boolean
           default: false
           description: >
-            Per cross-cache-identity plan §3.2.2 (E2-LML write contract). When
-            true, the response carries an additional `identity` block (the
-            §3.2.5 cascade's per-source resolution detail), and `api_version`
-            is set to 2. When false (the default), the response is
-            byte-identical to v0.5.0 — `identity` is absent and `api_version`
-            is omitted. Backend's `library-identity-writer.ts` (E2-BS) sets
-            this to true on every call; other consumers (catalog search,
-            dj-site proxy, iOS apps) leave it false.
+            Per cross-cache-identity plan §3.2.2 (E2-LML write contract).
+            When true, the response is meant to carry an additional
+            `identity` block (the §3.2.5 cascade's per-source resolution
+            detail) with `api_version` set to 2 — see
+            `LookupResponse.api_version` and `LookupResponse.identity`.
+            Neither side of that is implemented yet: no
+            `LookupResponse(...)` construction site in the producer ever
+            sets `api_version` or `identity`, not even when this flag is
+            true, so both fields ship `null` — never an omitted key — on
+            every `/lookup` response in production today, regardless of
+            what this flag is set to (WXYC/wxyc-shared#316). A consumer
+            MUST test `api_version === 2` to detect support, never
+            presence of either key: absent, `null`, and a producer that
+            hasn't implemented this at all must all read "not supported".
+
+
+            No current caller sets this to true. A source read of
+            Backend-Service (re-verified for this fix at `67d6d7b`, the
+            same SHA the original WXYC/wxyc-shared#309 read used —
+            Backend-Service has not moved since) finds no
+            `library-identity-writer.ts` file and no `include_identity`
+            reference anywhere in its TypeScript; the only occurrence in
+            that repo is prose in
+            `plans/library-hook-canonicalization/architecture-pivot-2026-05-09.md`
+            describing the planned E2-BS writer, which has not been
+            built. request-o-matic constructs `LookupRequest` without
+            setting this field, which serializes as the `false` default;
+            dj-site and tubafrenzy do not call `/lookup` with this field
+            at all.
         extended:
           type: boolean
           description: >
@@ -3862,20 +3883,46 @@ components:
       type: object
       description: >
         Response from the lookup service containing library search results
-        and metadata. When the request set `include_identity: true`, the
-        response additionally carries `api_version: 2` and the `identity`
-        block (per cross-cache-identity plan §3.2.2). When false or absent,
-        the response is byte-identical to v0.5.0 — both `api_version` and
-        `identity` are omitted.
+        and metadata. When the request sets `include_identity: true` and
+        the producer understands the flag, the response is meant to
+        additionally carry `api_version: 2` and the `identity` block (per
+        cross-cache-identity plan §3.2.2). Neither side is implemented in
+        the producer yet, so in production today both fields ship `null`
+        — never an omitted key — on every response, regardless of what
+        the request set `include_identity` to (WXYC/wxyc-shared#316). A
+        consumer MUST test `api_version === 2`, never key presence:
+        absent, `null`, and a producer that hasn't implemented this at
+        all must all read "not supported", and only the literal value `2`
+        reads "supported". See `api_version` below for the full rule, and
+        `LookupIdentityBlock` for `identity`'s.
       properties:
         api_version:
           type: integer
           enum:
             - 2
+          nullable: true
           description: >
             Present and equal to 2 only when the request set
-            `include_identity: true`. Absent for the v1-compatible shape so
-            existing consumers see byte-identical responses.
+            `include_identity: true` and the producer understands the
+            flag. No `LookupResponse(...)` construction site in the
+            producer sets this field anywhere yet — not even when the
+            request sets `include_identity: true` — and the endpoint is
+            served through FastAPI's `response_model` without
+            `response_model_exclude_none`, so it ships `null` — never an
+            omitted key — on every `/lookup` response in production today
+            (WXYC/wxyc-shared#316); `nullable: true` documents that wire
+            instead of describing one nobody emits.
+
+
+            Because of that, a consumer MUST test for the value `2` and
+            must never test for key presence — `!== undefined` against
+            the generated TypeScript reads TRUE for a producer that
+            implements none of this, the inverse of what the marker
+            exists to signal. Absent, `null`, and a producer that hasn't
+            implemented `include_identity` at all must all read "not
+            supported", and only the literal value `2` reads "supported"
+            — which keeps the check immune to whether any given producer
+            omits or nulls its unset optionals.
         results:
           type: array
           items:
@@ -3976,10 +4023,17 @@ components:
     # Identity Block (§3.2.2 / §3.2.5 cascade)
     # ====================================
     #
-    # Returned only when LookupRequest.include_identity is true. Carries the
-    # per-source resolution detail from the §3.2.5 cascade so Backend's
-    # `library-identity-writer.ts` (E2-BS) can populate
-    # `library_identity_source` per-row without a second round-trip.
+    # Meant to be returned only when LookupRequest.include_identity is true
+    # and the producer understands the flag, carrying the per-source
+    # resolution detail from the §3.2.5 cascade so a future Backend writer
+    # can populate `library_identity_source` per-row without a second
+    # round-trip. No such writer exists yet: a source read of
+    # Backend-Service at `67d6d7b` finds no `library-identity-writer.ts`
+    # file and no `include_identity` reference anywhere in its TypeScript —
+    # the planned E2-BS writer described in
+    # plans/library-hook-canonicalization/architecture-pivot-2026-05-09.md
+    # has not been built (WXYC/wxyc-shared#316, WXYC/wxyc-shared#309). See
+    # `LookupIdentityBlock` below for what actually ships today.
 
     IdentitySource:
       type: string
@@ -4089,13 +4143,46 @@ components:
 
     LookupIdentityBlock:
       type: object
+      nullable: true
       description: >
         Per-source identity resolution detail for a single library row.
-        Returned on `LookupResponse.identity` when the request set
-        `include_identity: true`. Per §3.2.2, the `resolved` array is
-        complete (one entry per source LML knows about, including the
-        sources whose legs didn't run with `attempted: false`) — consumers
-        get a deterministic shape regardless of which legs were available.
+        Meant to be returned on `LookupResponse.identity` when the request
+        set `include_identity: true` and the producer understands the
+        flag. Per §3.2.2, the `resolved` array is complete (one entry per
+        source LML knows about, including the sources whose legs didn't
+        run with `attempted: false`) — consumers get a deterministic
+        shape regardless of which legs were available, whenever this
+        block is actually populated.
+
+
+        No `LookupResponse(...)` construction site in the producer sets
+        `LookupResponse.identity` anywhere yet — not even when the
+        request sets `include_identity: true` — and the endpoint is
+        served through FastAPI's `response_model` without
+        `response_model_exclude_none`, so `identity` ships `null` — never
+        an omitted key — on every `/lookup` response in production today
+        (WXYC/wxyc-shared#316). `nullable: true` documents that wire
+        instead of describing a shape nobody emits. A consumer
+        distinguishes "identity resolution ran and found nothing" from
+        "the producer hasn't implemented `include_identity`" the same way
+        as `LookupResponse.api_version` — by reading `api_version`, not
+        by probing `identity` for presence or nullness. `identity` alone
+        cannot make that distinction: it is `null` in both cases.
+
+
+        `nullable: true` lives here, on the schema, rather than as an
+        `allOf`-wrapped sibling on `LookupResponse.identity` — the two
+        are equivalent where oasdiff can see through the composition, but
+        an `allOf`-wrapped nullable ref to an object schema with its own
+        `required` list cascaded into a spurious
+        `response-required-property-removed` finding that the direct
+        schema-level `nullable: true` does not, and marking a bare `$ref`
+        nullable by writing the keyword next to it does nothing at all
+        (OpenAPI 3.0 ignores sibling keys next to a `$ref`). This is safe
+        only because `LookupIdentityBlock` is referenced exactly once in
+        this spec, from `LookupResponse.identity` — a second reference
+        would inherit this nullability unconditionally, so re-examine
+        whether `null` is correct there too before adding one.
       required:
         - resolved
       properties:

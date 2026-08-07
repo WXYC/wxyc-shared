@@ -50,7 +50,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.33.0');
+      expect(spec.info.version).toBe('1.34.0');
     });
 
     it('should have components section', () => {
@@ -1216,16 +1216,116 @@ describe('OpenAPI Specification', () => {
       expect(schema.required ?? []).not.toContain('api_version');
     });
 
-    it('should attach optional identity block to LookupResponse', () => {
+    it('should attach optional identity block to LookupResponse as a bare $ref', () => {
+      // #316 tried wrapping this in `allOf` + `nullable: true` first (the
+      // standard workaround for "sibling keys next to a bare $ref are
+      // ignored"), but that made oasdiff report a spurious
+      // response-required-property-removed on `identity/resolved` on top
+      // of the expected became-nullable finding — LookupIdentityBlock.required
+      // never changed, so the finding doesn't correspond to a real change
+      // on the wire, but adding it to the whitelist would have gone beyond
+      // what the ticket pre-authorized. Nullability lives on the
+      // LookupIdentityBlock schema itself instead (see the dedicated test
+      // below), so `identity` stays exactly the bare $ref it was on main.
       const schema = spec.components.schemas.LookupResponse as {
-        properties: Record<string, { $ref?: string }>;
+        properties: Record<string, { $ref?: string; nullable?: boolean }>;
         required?: string[];
       };
-      expect(schema.properties.identity).toBeDefined();
-      expect(schema.properties.identity.$ref).toBe(
-        '#/components/schemas/LookupIdentityBlock',
-      );
+      const identity = schema.properties.identity;
+      expect(identity).toBeDefined();
+      expect(identity.$ref).toBe('#/components/schemas/LookupIdentityBlock');
+      expect(identity.nullable).toBeUndefined();
       expect(schema.required ?? []).not.toContain('identity');
+    });
+
+    it('declares LookupIdentityBlock itself nullable, because LML ships `"identity": null` on every response today', () => {
+      const schema = spec.components.schemas.LookupIdentityBlock as { nullable?: boolean };
+      expect(schema.nullable).toBe(true);
+    });
+
+    it('documents on LookupIdentityBlock why nullable lives on the schema rather than as an allOf sibling on the property', () => {
+      const schema = spec.components.schemas.LookupIdentityBlock as { description?: string };
+      const description = schema.description ?? '';
+      expect(description).toMatch(/referenced exactly once/);
+      expect(description).toMatch(/response-required-property-removed/);
+    });
+
+    it('documents on LookupIdentityBlock that identity ships null on every response and how a consumer should read it', () => {
+      const schema = spec.components.schemas.LookupIdentityBlock as { description?: string };
+      const description = schema.description ?? '';
+      expect(description).toMatch(/`null`/);
+      expect(description).toMatch(/api_version/);
+      expect(description).not.toMatch(/byte-identical to v0\.5\.0/);
+    });
+
+    // --- #316: LookupResponse.api_version / identity ship `null` on every
+    // `/lookup` response today, and the "byte-identical to v0.5.0 — both
+    // omitted" claim never held ---
+    //
+    // LML serves this endpoint through FastAPI's `response_model` without
+    // `response_model_exclude_none`, and no `LookupResponse(...)`
+    // construction site (lookup/orchestrator.py L1343/L1368/L1653,
+    // lookup/router.py L690/L812) ever sets either field — not even when
+    // the request sets `include_identity: true`, because neither side of
+    // the feature is implemented yet. So both fields sit at their `None`
+    // default and FastAPI serializes `null`, which is not a valid instance
+    // of `api_version`'s `enum: [2]`. This is the identical defect
+    // WXYC/wxyc-shared#310 fixed on the sibling marker
+    // `tracks_contract_version`.
+
+    it('declares api_version nullable, because LML ships `"api_version": null` on every response today', () => {
+      const schema = spec.components.schemas.LookupResponse as {
+        properties: Record<string, { nullable?: boolean }>;
+      };
+      expect(schema.properties.api_version.nullable).toBe(true);
+    });
+
+    it('mandates a value-equality check on api_version and forbids a presence check', () => {
+      const schema = spec.components.schemas.LookupResponse as {
+        properties: Record<string, { description?: string }>;
+      };
+      const description = schema.properties.api_version.description ?? '';
+      expect(description).toMatch(/MUST test for the value `2`/);
+      expect(description).toMatch(/must never test for key presence/);
+    });
+
+    it('explains why the value probe is required: absent, null, and an unimplemented producer must all read "not supported"', () => {
+      const schema = spec.components.schemas.LookupResponse as {
+        properties: Record<string, { description?: string }>;
+      };
+      const description = schema.properties.api_version.description ?? '';
+      expect(description).toMatch(/not supported/);
+      expect(description).toMatch(/only the literal value `2` reads "supported"/);
+    });
+
+    it('corrects the LookupResponse schema-level description away from the false "byte-identical to v0.5.0 — both omitted" claim', () => {
+      const schema = spec.components.schemas.LookupResponse as { description?: string };
+      const description = schema.description ?? '';
+      expect(description).not.toMatch(/byte-identical to v0\.5\.0/);
+      expect(description).toMatch(/`null`/);
+      expect(description).toMatch(/MUST test/);
+    });
+
+    it('corrects the include_identity request-field description away from the same false "byte-identical / omitted" claim', () => {
+      const schema = spec.components.schemas.LookupRequest as {
+        properties: Record<string, { description?: string }>;
+      };
+      const description = schema.properties.include_identity.description ?? '';
+      expect(description).not.toMatch(/byte-identical to v0\.5\.0/);
+      expect(description).toMatch(/`null`/);
+    });
+
+    it('re-verifies the stale library-identity-writer.ts caller claim and drops the unverified assertion', () => {
+      // A source read of Backend-Service (re-verified for this fix, same
+      // SHA the original claim was read at: Backend-Service has not moved)
+      // finds no `library-identity-writer.ts` file and no `include_identity`
+      // reference anywhere in its TypeScript. The description must stop
+      // asserting Backend as a live caller that sets this field.
+      const schema = spec.components.schemas.LookupRequest as {
+        properties: Record<string, { description?: string }>;
+      };
+      const description = schema.properties.include_identity.description ?? '';
+      expect(description).not.toMatch(/sets this to true on every call/);
     });
 
     it('should define IdentitySource enum with the six §3.2.0 sources', () => {
