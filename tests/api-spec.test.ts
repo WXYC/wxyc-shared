@@ -2089,15 +2089,35 @@ describe('OpenAPI Specification', () => {
 
     // --- Option (B): opt-in `include_tracks`, gating BOTH kinds ---
 
-    it('adds include_tracks to BulkResolveLibrariesRequest as an optional boolean defaulting to false', () => {
+    it('adds include_tracks to BulkResolveLibrariesRequest as an optional boolean', () => {
       const schema = spec.components.schemas.BulkResolveLibrariesRequest as Schema;
       const flag = schema.properties?.include_tracks;
       expect(flag).toBeDefined();
       expect(flag!.type).toBe('boolean');
-      // Default false is the whole backward-compatibility story: an
-      // un-upgraded Backend that never sends the field keeps today's payload.
-      expect(flag!.default).toBe(false);
       expect(schema.required ?? []).not.toContain('include_tracks');
+    });
+
+    // Omission from `required` is necessary but NOT sufficient for the generated
+    // TypeScript to treat the field as optional. openapi-typescript emits any
+    // property carrying a `default` as non-optional regardless of `required`
+    // (its `defaultNonNullable` option, on by default), on the reasoning that a
+    // server fills the default in — sound for a response, wrong for a request
+    // body the client constructs. With `default: false` present the published
+    // `BulkResolveLibrariesRequest` generated as `include_tracks: boolean` with
+    // no `?`, so `{ inputs }` failed to compile for every TS consumer — for the
+    // one field whose contract is "omitted is the default, and what an
+    // un-upgraded caller sends". The default lives in prose instead; assert on
+    // the spec here, and on the emitted `.d.ts` in the codegen test below.
+    it('does not give include_tracks a schema-level default', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesRequest as Schema;
+      expect(schema.properties?.include_tracks).not.toHaveProperty('default');
+    });
+
+    it('documents in prose that omitting include_tracks means false', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesRequest as Schema;
+      const description = (schema.properties?.include_tracks?.description as string) ?? '';
+      expect(description).toMatch(/omitted/i);
+      expect(description).toMatch(/default/i);
     });
 
     it('documents include_tracks as gating tracks on both single_artist and compilation', () => {
@@ -2307,11 +2327,47 @@ describe('OpenAPI Specification', () => {
       // naming the table has to be the one saying it was never built.
       expect(description).toMatch(/library_track_identity_source[^.]*never built/);
       expect(description).toMatch(/composed verdict/i);
+      // Assert what the retraction is for — that no sentence reintroduces the
+      // table as a live storage instruction — rather than that exactly one
+      // sentence mentions it. Pinning the count made a correct spec go red for
+      // adding a second, also-correct sentence (e.g. a migration note), and the
+      // failure surfaced as an opaque length mismatch.
       const sentencesNamingTheTable = description
         .split(/(?<=\.)\s+/)
         .filter((s) => s.includes('library_track_identity_source'));
-      expect(sentencesNamingTheTable).toHaveLength(1);
-      expect(sentencesNamingTheTable[0]).toMatch(/never built/);
+      expect(sentencesNamingTheTable.length).toBeGreaterThan(0);
+      for (const sentence of sentencesNamingTheTable) {
+        expect(sentence).toMatch(/never built|not built|no such table/i);
+      }
+    });
+
+    // --- the four states have to be legible from the example, not just the prose ---
+
+    const exampleResults = () =>
+      ((spec.components.schemas.BulkResolveLibrariesResponse as Schema).example
+        ?.results ?? []) as Array<Record<string, unknown>>;
+
+    it('spells tracks and tracks_attempted as explicit nulls on the unresolved result', () => {
+      // Both the response description and BulkResolveResult.tracks argue that
+      // LML emits `"tracks": null` rather than omitting the key — that claim is
+      // the justification for marking the field nullable and for one of the two
+      // oasdiff whitelist entries. An example that models the state by omitting
+      // the keys teaches LML#1021 the opposite of what the schema argues.
+      const unresolved = exampleResults().find((r) => r.kind === 'unresolved');
+      expect(unresolved).toBeDefined();
+      expect(unresolved).toHaveProperty('tracks', null);
+      expect(unresolved).toHaveProperty('tracks_attempted', null);
+    });
+
+    it('demonstrates all four tracks_attempted/tracks states', () => {
+      const states = exampleResults()
+        .filter((r) => r.kind !== 'unresolved')
+        .map((r) => `${String(r.tracks_attempted)}/${Array.isArray(r.tracks) && r.tracks.length > 0 ? 'entries' : 'empty'}`);
+      // (false, []) is the state the flag exists to disambiguate from (true, []);
+      // an example that never shows it leaves the distinction abstract.
+      expect(states).toContain('false/empty');
+      expect(states).toContain('true/empty');
+      expect(states).toContain('true/entries');
     });
   });
 

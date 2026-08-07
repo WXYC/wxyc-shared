@@ -4129,18 +4129,22 @@ components:
     #     - `kind: "single_artist"` — resolved single-artist library row;
     #                                  `main` carries the composed identity.
     #                                  `tracks` carries per-track identity
-    #                                  when the request asked for it.
+    #                                  when the request asked for it, paired
+    #                                  with `tracks_attempted`.
     #     - `kind: "compilation"`   — V/A row; `main` is null (no album-level
     #                                  artist anchor). `tracks` carries
     #                                  per-track identity when the request
-    #                                  asked for it.
+    #                                  asked for it, paired with
+    #                                  `tracks_attempted`.
     #     - `kind: "unresolved"`    — LML attempted resolution and found
     #                                  nothing actionable; first-class
     #                                  outcome so Backend can cache and
-    #                                  not re-ask. `main` is null and
-    #                                  `tracks` is always absent. Audit
-    #                                  detail lives in `provenance` (empty
-    #                                  means LML tried and nothing resolved).
+    #                                  not re-ask. `main` is null, and
+    #                                  `tracks`/`tracks_attempted` are the
+    #                                  absent-or-NULL state (LML spells both
+    #                                  `null`). Audit detail lives in
+    #                                  `provenance` (empty means LML tried
+    #                                  and nothing resolved).
     #
     # ---- `tracks` is opt-in, and gated on BOTH resolved kinds (#297) ----
     #
@@ -4204,10 +4208,15 @@ components:
             Inputs to resolve. Order preserved in `BulkResolveLibrariesResponse.results`.
         include_tracks:
           type: boolean
-          default: false
           description: >
             Opt in to per-track identity, for every input in the batch
-            (the flag is batch-level, not per-input). When `false` or
+            (the flag is batch-level, not per-input). Omitting the field
+            means `false`; it carries no schema-level `default` on
+            purpose, because `openapi-typescript` emits a
+            default-bearing property as non-optional even when it is
+            absent from `required`, which would force every TypeScript
+            caller to pass the one field whose whole contract is that
+            you need not. When `false` or
             omitted — the default, and what an un-upgraded caller sends —
             `BulkResolveResult.tracks` is absent from every result, so an
             album-identity drain pays nothing for track composition it
@@ -4269,11 +4278,12 @@ components:
       description: >
         Discriminator for `BulkResolveResult`. `single_artist` carries a
         composed `main` identity; `compilation` carries none (a V/A row has
-        no album-level artist anchor). Either may carry `tracks` — per-track
-        identity is gated by the request's `include_tracks` flag, not by
-        `kind` (#297). `unresolved` is a first-class outcome — caching it
-        (with TTL) prevents repeated re-asking for unresolvable rows — and
-        never carries `main` or `tracks`.
+        no album-level artist anchor). Either may carry `tracks` and
+        `tracks_attempted` — per-track identity is gated by the request's
+        `include_tracks` flag, not by `kind` (#297). `unresolved` is a
+        first-class outcome — caching it (with TTL) prevents repeated
+        re-asking for unresolvable rows — and never carries `main`,
+        `tracks`, or `tracks_attempted`.
       enum:
         - single_artist
         - compilation
@@ -4306,8 +4316,15 @@ components:
             method range from §3.4.1. NULL when `external_id` is NULL —
             the source ran but produced no candidate, so confidence is
             undefined (not zero). When non-null, equal to or greater than
-            the top-level `confidence` (composition rules either MIN or
-            boost, never lower a per-source row).
+            the `confidence` of the object this entry hangs off — the
+            composition rules either MIN or boost, and never lower a
+            per-source row. That referent is grain-relative, because this
+            schema is reused at two grains: under
+            `BulkResolveResult.provenance` it is the result's own
+            `confidence`, and under `BulkResolveTrackIdentity.sources` it
+            is that track's `confidence`, not the result's. The two are
+            unrelated — a `kind: compilation` result has no result-level
+            `confidence` at all, while its tracks each have their own.
         external_id:
           type: string
           nullable: true
@@ -4570,8 +4587,9 @@ components:
         Response to `POST /api/v1/identity/bulk-resolve-libraries`. Order
         of `results` matches the order of the request's `inputs`. The
         example below is the `include_tracks: true` shape; with the flag
-        false or omitted, every result's `tracks` is the absent/NULL state
-        (LML spells it `"tracks": null`). Per-source `method`/`confidence`
+        false or omitted, every result's `tracks` and `tracks_attempted`
+        are the absent/NULL state (LML spells both `null`). Per-source
+        `method`/`confidence`
         pairs in the example sit inside `IdentityMethod`'s locked bands —
         Backend's writer rejects rows that don't, so an example that
         violated them would hand LML#1021 an unwritable row to copy.
@@ -4652,6 +4670,27 @@ components:
                 external_id: "77889"
             tracks_attempted: true
             tracks: []
+          # The state `tracks_attempted` exists to separate from `(true, [])`
+          # above: the caller asked, and LML's per-track matcher has not
+          # reached this row yet. Re-asking it later is correct; re-asking the
+          # `(true, [])` row above is the loop the flag prevents.
+          - kind: single_artist
+            library_id: 5555
+            main:
+              discogs_artist_id: 33445
+            method: exact_match
+            confidence: 1.0
+            provenance:
+              - source: discogs
+                method: exact_match
+                confidence: 1.0
+                external_id: "33445"
+            tracks_attempted: false
+            tracks: []
+          # Nulls, not omitted keys: LML builds the result with `tracks=None`
+          # and does not set `response_model_exclude_none`, so this is the
+          # shape on the wire. The schema's nullability — and one of the two
+          # oasdiff whitelist entries — rests on exactly that.
           - kind: unresolved
             library_id: 9999
             provenance:
@@ -4659,6 +4698,8 @@ components:
                 method: exact_match
                 confidence: null
                 external_id: null
+            tracks_attempted: null
+            tracks: null
       properties:
         results:
           type: array

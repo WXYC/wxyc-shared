@@ -52,3 +52,36 @@ describe("codegen output paths (#197)", () => {
     );
   });
 });
+
+// A property carrying an OpenAPI `default` is emitted non-optional by
+// openapi-typescript (its `defaultNonNullable` option, on by default) even when
+// the property is absent from `required`. That reasoning holds for a response —
+// the server fills the default in — and is wrong for a request body the client
+// constructs. `include_tracks` shipped briefly with `default: false` and
+// generated as `include_tracks: boolean`, which made `{ inputs }` a compile
+// error in every TS consumer, for the one field whose contract is "omitted is
+// the default". The spec-level guard lives in api-spec.test.ts; this one pins
+// the artifact that consumers actually import, because the spec assertion alone
+// cannot see what the generator did with it.
+describe("generated request types stay constructible (#297)", () => {
+  const dts = readFileSync(
+    join(__dirname, "..", "src", "generated", "openapi-types.d.ts"),
+    "utf-8",
+  );
+
+  const requestBlock = () => {
+    const start = dts.indexOf("BulkResolveLibrariesRequest: {");
+    expect(start, "BulkResolveLibrariesRequest missing from generated types").toBeGreaterThan(-1);
+    return dts.slice(start, dts.indexOf("\n        };", start));
+  };
+
+  it("emits include_tracks as optional", () => {
+    expect(requestBlock()).toMatch(/\binclude_tracks\?:/);
+  });
+
+  it("keeps inputs required", () => {
+    // Guards the assertion above against passing for the wrong reason — e.g. a
+    // regex that matches because the whole block vanished.
+    expect(requestBlock()).toMatch(/\n\s+inputs: /);
+  });
+});

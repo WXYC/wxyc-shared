@@ -23,7 +23,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Full history: the breaking-guard bats suite diffs api.yaml against
+      # origin/main to prove the oasdiff whitelist still suppresses real
+      # findings. At the default fetch-depth of 1 that ref does not exist and
+      # those tests skip themselves, which would leave the suite green while
+      # testing nothing — the failure mode the suite was written to close.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:
@@ -54,6 +61,20 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # The bats suites guard shell scripts that vitest cannot reach. They were
+      # runnable-but-unrun until now: a regression in check-breaking-changes.sh
+      # merged green here and surfaced later as an unexplained red
+      # breaking-changes job on someone else's PR.
+      #
+      # test:drift-guard is deliberately absent: tests 4 and 5 in
+      # check-corpus-drift.test.sh fail on main today, untouched by this PR.
+      # Wiring it in would redden CI for an unrelated reason; it gets its own
+      # fix and then its own line here.
+      - name: Shell script guards
+        run: |
+          npm run test:breaking-guard
+          npm run test:setup-script
 
       # Cross-service contract suite (see INVARIANTS.md, src/contracts.ts).
       # When $E2E_BASE_URL is unset, every test in the file is `skipIf`-ed

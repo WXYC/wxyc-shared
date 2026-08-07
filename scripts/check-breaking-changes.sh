@@ -52,11 +52,14 @@ fi
 # pass here and fail the PR job — the divergence this wiring exists to prevent.
 # Preflight (not just before the oasdiff call) so the failure is reported even
 # on the paths that exit early.
+# Checks readability, not just existence: a directory of that name, or a file
+# with no read bit, both sail past a bare `-f`/`-e` and then make oasdiff exit
+# 121 — which the reporting below would otherwise dress up as a breaking change.
 IGNORE_FILE="$PROJECT_ROOT/oasdiff-err-ignore.txt"
-if [[ ! -f "$IGNORE_FILE" ]]; then
-    echo -e "${red}Error: oasdiff-err-ignore.txt is missing at $IGNORE_FILE${reset}"
+if [[ ! -f "$IGNORE_FILE" || ! -r "$IGNORE_FILE" ]]; then
+    echo -e "${red}Error: oasdiff-err-ignore.txt is not a readable file at $IGNORE_FILE${reset}"
     echo "CI passes this path unconditionally and oasdiff exits 121 without it."
-    echo "Restore the file (an entry-free file of comments is fine)."
+    echo "Restore it as a readable file (an entry-free file of comments is fine)."
     exit 2
 fi
 
@@ -90,14 +93,29 @@ echo ""
 #   mirroring the `err-ignore` input on .github/workflows/breaking-changes.yml.
 #   Passed unconditionally, exactly as CI passes it; existence is checked in the
 #   preflight above. Prune entries, keep the file.
-if oasdiff breaking "$TEMP_BASE" "$PROJECT_ROOT/api.yaml" --fail-on ERR --err-ignore "$IGNORE_FILE"; then
+set +e
+oasdiff breaking "$TEMP_BASE" "$PROJECT_ROOT/api.yaml" --fail-on ERR --err-ignore "$IGNORE_FILE"
+exit_code=$?
+set -e
+
+# Only exit 1 means "breaking changes found". oasdiff also exits 121 for an
+# unusable --err-ignore path and 2/3 for a spec it cannot parse; printing the
+# deprecate-don't-remove advice for those diagnoses a file-permission or syntax
+# problem as an API design problem, and sends the reader looking for a breaking
+# change that is not there.
+if [[ $exit_code -eq 0 ]]; then
     echo -e "\n${green}No breaking changes detected.${reset}"
-else
-    exit_code=$?
+elif [[ $exit_code -eq 1 ]]; then
     echo -e "\n${red}Breaking changes detected!${reset}"
     echo -e "${yellow}Consider:"
     echo "  - Adding new fields/endpoints instead of modifying existing ones"
     echo "  - Deprecating rather than removing"
     echo -e "  - Versioning the API if breaking changes are necessary${reset}"
+    exit 1
+else
+    echo -e "\n${red}oasdiff could not complete the comparison (exit $exit_code).${reset}"
+    echo -e "${yellow}This is a tool or input problem, not a breaking change."
+    echo "  - 121: --err-ignore path unusable ($IGNORE_FILE)"
+    echo -e "  - 2/3: a spec failed to parse${reset}"
     exit $exit_code
 fi

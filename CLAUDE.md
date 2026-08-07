@@ -144,7 +144,7 @@ This bites the required-but-nullable idiom this spec uses whenever a null carrie
 
 Run `npm run check:breaking` before changing `api.yaml`. It runs `oasdiff breaking` against `origin/main` with `--fail-on ERR`, mirroring the `breaking-changes.yml` PR job.
 
-Both sides pass `--err-ignore oasdiff-err-ignore.txt`, a whitelist of findings that are breaking by oasdiff's static rules but provably not on the wire (e.g. a property reachable only through an array that has never shipped a non-empty value). Every entry needs a written justification in the file. Two properties to keep in mind:
+Both sides pass `--err-ignore oasdiff-err-ignore.txt`, a whitelist of findings that are breaking by oasdiff's static rules but provably not on the wire (e.g. a property reachable only through an array that has never shipped a non-empty value). Every entry needs a written justification in the file. Three properties to keep in mind:
 
 - **Entries are diff-scoped.** A line matches only while its change is in `main`..PR; once merged it stops matching and is inert. Prune dead *entries* — never the file. Both callers pass the path unconditionally and oasdiff exits 121 when it is missing, so deleting an emptied file turns the next api.yaml PR red with an auto-comment blaming breaking changes that don't exist. An entry-free file of comments is the floor; `scripts/check-breaking-changes.sh` fails fast with that explanation if it goes missing.
 - **Entries are verbatim oasdiff message text.** A substring won't match. An oasdiff release that rewords a finding silently un-matches its entry, so a red job after an oasdiff upgrade means re-pasting the new wording, not re-litigating the change.
