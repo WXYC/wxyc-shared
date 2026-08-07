@@ -2148,6 +2148,14 @@ describe('OpenAPI Specification', () => {
       expect(schema.required ?? []).not.toContain('legacy_release_id');
     });
 
+    // Same openapi-typescript `defaultNonNullable` trap as include_tracks: a
+    // schema-level default would emit the TS property non-optional despite
+    // its absence from `required`, forcing every caller to pass it.
+    it('does not give legacy_release_id a schema-level default', () => {
+      const schema = spec.components.schemas.BulkResolveInput as Schema;
+      expect(schema.properties?.legacy_release_id).not.toHaveProperty('default');
+    });
+
     it('documents legacy_release_id as the legacy LIBRARY_RELEASE_ID space, distinct from the serial library_id', () => {
       const schema = spec.components.schemas.BulkResolveInput as Schema;
       const description = (schema.properties?.legacy_release_id?.description as string) ?? '';
