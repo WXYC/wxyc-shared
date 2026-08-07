@@ -646,6 +646,116 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  // wxyc-shared#318. WXYC/Backend-Service#1827 (merged as #1838) added three
+  // "local-first base fields" to GET /proxy/metadata/album — durable BS state
+  // read off the linked flowsheet row, so an LML timeout can blank
+  // `artworkUrl` but can never blank artist/track/album/label — and never
+  // contracted them here. Undeclared field names are absent from every
+  // generated client, so the non-blankable guarantee was invisible to every
+  // consumer. All three are conditionally assigned in BS
+  // (`if (linkedRow?.record_label)`, `if (linkedRow?.label_id != null)`,
+  // `if (linkedRow?.metadata_status)`), so all three are optional: a free-text
+  // row that never linked to an `album_id` has no local source and the
+  // response omits them.
+  describe('local-first base fields on AlbumMetadataResponse (#318 / BS#1827)', () => {
+    type SchemaProp = {
+      type?: string;
+      nullable?: boolean;
+      description?: string;
+      $ref?: string;
+      allOf?: Array<{ $ref?: string }>;
+      enum?: string[];
+    };
+    type Schema = {
+      properties?: Record<string, SchemaProp>;
+      required?: string[];
+    };
+
+    function albumMetadataResponse(): Schema {
+      return spec.components.schemas.AlbumMetadataResponse as Schema;
+    }
+
+    it('declares recordLabel as an optional string', () => {
+      const schema = albumMetadataResponse();
+      const prop = schema.properties?.recordLabel;
+      expect(prop).toBeDefined();
+      expect(prop?.type).toBe('string');
+      expect(schema.required ?? []).not.toContain('recordLabel');
+    });
+
+    it('declares labelId as an optional integer', () => {
+      const schema = albumMetadataResponse();
+      const prop = schema.properties?.labelId;
+      expect(prop).toBeDefined();
+      expect(prop?.type).toBe('integer');
+      expect(schema.required ?? []).not.toContain('labelId');
+    });
+
+    it('declares metadataStatus as optional and $refs the shared MetadataStatus enum rather than inlining the literals', () => {
+      const schema = albumMetadataResponse();
+      const prop = schema.properties?.metadataStatus;
+      expect(prop).toBeDefined();
+      expect(schema.required ?? []).not.toContain('metadataStatus');
+      // An `allOf` wrapper around the single $ref is how this spec attaches a
+      // description to a referenced schema under OpenAPI 3.0, where sibling
+      // keys next to `$ref` are ignored (see FlowsheetV2TrackEntry's
+      // `upcoming_show`). The point is that the literals live in exactly one
+      // place, so this property and the flowsheet V2 entry cannot drift.
+      const refs = [prop?.$ref, ...(prop?.allOf ?? []).map((branch) => branch.$ref)];
+      expect(refs).toContain('#/components/schemas/MetadataStatus');
+      expect(prop?.enum).toBeUndefined();
+    });
+
+    it('reaches the same enum the V2 flowsheet track entry uses', () => {
+      const metadataStatus = spec.components.schemas.MetadataStatus as SchemaProp;
+      expect(metadataStatus.enum).toEqual([
+        'pending',
+        'enriching',
+        'enriched_match',
+        'enriched_no_match',
+        'failed_no_retry',
+      ]);
+      // The V2 track entry reaches the same schema; both consumers of the enum
+      // move together because neither owns a copy of the literals.
+      const v2Track = spec.components.schemas.FlowsheetV2TrackEntry as {
+        allOf?: Array<{ properties?: Record<string, SchemaProp> }>;
+      };
+      const v2Prop = (v2Track.allOf ?? [])
+        .map((branch) => branch.properties?.metadata_status)
+        .find((candidate) => candidate !== undefined);
+      expect(v2Prop?.$ref).toBe('#/components/schemas/MetadataStatus');
+    });
+
+    it('documents each base field with its provenance and the condition under which BS omits it', () => {
+      const schema = albumMetadataResponse();
+      for (const name of ['recordLabel', 'labelId', 'metadataStatus'] as const) {
+        const description = schema.properties?.[name]?.description ?? '';
+        expect(description, `${name} needs a description`).not.toBe('');
+        // Provenance: the linked flowsheet row, not Discogs/LML.
+        expect(description, `${name} must cite the linked flowsheet row`).toMatch(/flowsheet row/i);
+        // Omission condition: BS only assigns when a linked row supplies it.
+        expect(description, `${name} must state when BS omits it`).toMatch(/omitted/i);
+      }
+    });
+
+    it('keeps recordLabel distinct from label, naming the other in both descriptions', () => {
+      const schema = albumMetadataResponse();
+      const recordLabel = schema.properties?.recordLabel?.description ?? '';
+      const label = schema.properties?.label?.description ?? '';
+      // Merging the two would destroy the local-first guarantee: `label` is the
+      // Discogs *release* label (album_metadata or an LML fallthrough) and is
+      // still NULL on pre-BS#1336 rows (BS#1442), while `recordLabel` is the
+      // catalog label BS wrote at play time.
+      expect(recordLabel).toMatch(/`label`/);
+      expect(label).toMatch(/`recordLabel`/);
+    });
+
+    it('notes on MetadataStatus that AlbumMetadataResponse shares it', () => {
+      const metadataStatus = spec.components.schemas.MetadataStatus as SchemaProp;
+      expect(metadataStatus.description ?? '').toMatch(/AlbumMetadataResponse/);
+    });
+  });
+
   // GET /library/catalog (the gzipped-NDJSON bulk export) and its row shape
   // shipped in Backend-Service#1468 (Epic F, parent #1466) but were never
   // propagated to this cross-repo SSOT — only to BS's local Swagger-only
