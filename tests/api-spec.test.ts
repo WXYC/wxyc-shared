@@ -2312,12 +2312,13 @@ describe('OpenAPI Specification', () => {
 
     it('drops the storage instruction naming a table that was never built (BS#801)', () => {
       // 1.29.0 told Backend to write per-source rows verbatim into a
-      // `library_track_identity_source` sidecar. It does not exist — LML#271
-      // closed as a design decision and the schema half never happened
-      // (verified against prod and all 136 migrations in BS#801). LML's
-      // per-track store is the per-source system of record and Backend
-      // persists composed verdicts only, so the contract must not send a
-      // consumer off to build the sidecar.
+      // `library_track_identity_source` sidecar. It does not exist — BS#792,
+      // the Backend-side design ticket that would have created it, closed as
+      // a design decision and the schema half never happened (verified
+      // against prod and all 136 migrations in BS#801). LML's per-track
+      // store is the per-source system of record and Backend persists
+      // composed verdicts only, so the contract must not send a consumer off
+      // to build the sidecar.
       // The table name still appears, but only inside its own retraction —
       // a reader migrating off 1.29.0 needs to be told the sidecar isn't
       // coming, not left to infer it from silence.
@@ -2339,6 +2340,37 @@ describe('OpenAPI Specification', () => {
       for (const sentence of sentencesNamingTheTable) {
         expect(sentence).toMatch(/never built|not built|no such table/i);
       }
+    });
+
+    it('never states that LML#271 is closed — it is open, and BS#792 is the ticket that closed', () => {
+      // 1.29.0 cited WXYC/library-metadata-lookup#271 as the design behind the
+      // `library_track_identity_source` sidecar, and the retraction that
+      // replaced it carried that citation forward as "#271 closed as a design
+      // decision". #271 is OPEN: it is LML's own per-track identity work,
+      // still being implemented under LML#1021. The ticket that closed as a
+      // design decision without ever growing its schema half is
+      // WXYC/Backend-Service#792 — which is what the cited BS#801 comment
+      // actually says.
+      //
+      // Pin the fact (no clause anywhere asserts #271 closed), not a phrasing.
+      // The description is free to cite #271 accurately, or to leave it out
+      // entirely; either passes. The clause bound (`[^.;]`) keeps a correct
+      // adjacent sentence about BS#792 closing from tripping this.
+      const schema = spec.components.schemas.BulkResolveTrackIdentity as Schema;
+      const description = schema.description ?? '';
+      expect(description).not.toMatch(
+        /library-metadata-lookup#271[^.;]*\bclos(?:ed|ure|es)\b/i,
+      );
+      expect(description).not.toMatch(
+        /\bclos(?:ed|ure|es)\b[^.;]*library-metadata-lookup#271/i,
+      );
+      // The retraction's evidence has to survive the citation fix: the "never
+      // built" claim rests entirely on the BS#801 comment that measured prod
+      // and all 136 migrations. Losing the permalink would leave an
+      // unsourced assertion about a table nobody can check.
+      expect(description).toContain(
+        'Backend-Service/issues/801#issuecomment-5187348795',
+      );
     });
 
     // --- the four states have to be legible from the example, not just the prose ---
