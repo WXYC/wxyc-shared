@@ -56,6 +56,7 @@
     "test:setup-script": "bats scripts/__tests__/setup-dev-environment.test.sh",
     "test:drift-guard": "bats scripts/__tests__/check-corpus-drift.test.sh",
     "test:breaking-guard": "bats scripts/__tests__/check-breaking-changes.test.sh",
+    "test:python-codegen": "bats scripts/__tests__/generate-python-models.test.sh",
     "test:bs-lml-gate": "bats scripts/__tests__/bs-lml-gate/*.test.sh",
     "lint": "tsc --noEmit --declaration false --declarationMap false",
     "lint:e2e": "tsc -p tsconfig.e2e.json",
@@ -63,7 +64,7 @@
     "generate": "npm run generate:typescript && npm run generate:python && npm run generate:swift && npm run generate:kotlin",
     "generate:typescript": "node scripts/generate-models.js",
     "generate:swift": "openapi-generator-cli generate -i api.yaml -g swift6 -o generated/swift -c openapi-config/swift6.yaml --skip-validate-spec",
-    "generate:python": "datamodel-codegen --input api.yaml --input-file-type openapi --output generated/python/models.py --output-model-type pydantic_v2.BaseModel --target-python-version 3.12 --use-standard-collections --use-union-operator",
+    "generate:python": "bash scripts/generate-python-models.sh --output generated/python/models.py",
     "generate:kotlin": "openapi-generator-cli generate -i api.yaml -g kotlin -o generated/kotlin -c openapi-config/kotlin.yaml --skip-validate-spec",
     "check:breaking": "bash scripts/check-breaking-changes.sh"
   },
