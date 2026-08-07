@@ -39,6 +39,7 @@ import {
   Format,
   RequestStatus,
   MetadataSource,
+  MetadataStatus,
   TrackMatchSource,
 } from '../src/generated/models/index.js';
 
@@ -1082,6 +1083,71 @@ describe('Generated TypeScript Types', () => {
 
       expect(entry.discogsUnavailable).toBeUndefined();
       expect(entry.discogsUnavailableNote).toBeNull();
+    });
+  });
+
+  describe('local-first base fields on AlbumMetadataResponse (#318 / BS#1827)', () => {
+    it('accepts recordLabel, labelId and metadataStatus alongside the enriched fields', () => {
+      const response: AlbumMetadataResponse = {
+        recordLabel: 'Houndstooth',
+        labelId: 4271,
+        metadataStatus: MetadataStatus.enriched_match,
+        // Enriched, upstream-dependent siblings. `label` is the Discogs
+        // *release* label and is a different value from `recordLabel`; both
+        // ride the same response.
+        label: 'Houndstooth Recordings',
+        discogsReleaseId: 32346192,
+        artworkUrl: 'https://example.com/art.jpg',
+      };
+
+      expect(response.recordLabel).toBe('Houndstooth');
+      expect(response.labelId).toBe(4271);
+      expect(response.metadataStatus).toBe('enriched_match');
+      expect(response.label).toBe('Houndstooth Recordings');
+    });
+
+    it('allows omitting all three (the free-text row that never linked to an album_id)', () => {
+      const response: AlbumMetadataResponse = {
+        discogsReleaseId: 32346192,
+        artworkUrl: 'https://example.com/art.jpg',
+      };
+
+      expect(response.recordLabel).toBeUndefined();
+      expect(response.labelId).toBeUndefined();
+      expect(response.metadataStatus).toBeUndefined();
+    });
+
+    it('types metadataStatus as the shared MetadataStatus enum, not a bare string', () => {
+      // Assignability in both directions pins the alias to the enum union: a
+      // bare `string` here would let an arbitrary literal through.
+      const status: MetadataStatus = 'enriching';
+      const response: AlbumMetadataResponse = { metadataStatus: status };
+      const roundTrip: MetadataStatus | undefined = response.metadataStatus;
+
+      expect(roundTrip).toBe(MetadataStatus.enriching);
+      expect(Object.values(MetadataStatus)).toEqual([
+        'pending',
+        'enriching',
+        'enriched_match',
+        'enriched_no_match',
+        'failed_no_retry',
+      ]);
+    });
+
+    it('shares one enum alias with the V2 flowsheet track entry', () => {
+      // Same type on both surfaces, so a client can reconcile the proxy
+      // response against the feed row it came from.
+      const track: FlowsheetV2TrackEntry = {
+        id: 1,
+        show_id: 1,
+        play_order: 1,
+        entry_type: 'track',
+        request_flag: false,
+        metadata_status: MetadataStatus.enriched_no_match,
+      };
+      const response: AlbumMetadataResponse = { metadataStatus: track.metadata_status };
+
+      expect(response.metadataStatus).toBe(track.metadata_status);
     });
   });
 });

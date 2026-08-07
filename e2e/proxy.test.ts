@@ -117,6 +117,92 @@ describe('Proxy E2E', () => {
       const cacheControl = response.headers.get('cache-control');
       expect(cacheControl).toBeTruthy();
     });
+
+    // wxyc-shared#318 / WXYC/Backend-Service#1827. The "local-first base
+    // fields" are durable BS state read off the linked flowsheet row, so an
+    // LML timeout can blank `artworkUrl` but can never blank the catalog
+    // label or the enrichment status. They were emitted for months without
+    // being in api.yaml, which meant no generated client decoded them and the
+    // guarantee was consumed nowhere. This is the parity guard: drive the
+    // request off a row the flowsheet says IS linked, then assert the served
+    // response carries the three fields, decoded through the generated type.
+    describe('local-first base fields for a linked flowsheet row (#318 / BS#1827)', () => {
+      /** A recent flowsheet track row that resolved to a catalog album. */
+      type LinkedRow = {
+        album_id?: number | null;
+        artist_name?: string | null;
+        album_title?: string | null;
+        record_label?: string | null;
+        label_id?: number | null;
+        metadata_status?: string | null;
+      };
+
+      async function findLinkedRow(): Promise<LinkedRow | undefined> {
+        const feed = await client.get<LinkedRow[]>('/flowsheet?limit=100');
+        if (!feed.ok || !Array.isArray(feed.body)) return undefined;
+        // `album_id` is the discriminator BS itself keys the local read off
+        // (selectLinkedFlowsheetRow); `record_label` narrows to rows that
+        // actually have the base field to echo, since BS assigns it only when
+        // the linked row's column is non-empty.
+        return feed.body.find(
+          (row) => row.album_id != null && !!row.artist_name && !!row.album_title && !!row.record_label
+        );
+      }
+
+      it('echoes recordLabel / labelId / metadataStatus from the linked row', async () => {
+        const row = await findLinkedRow();
+        if (!row) {
+          // A stack seeded with only free-text entries has nothing to assert
+          // against — the fields are correctly absent there.
+          console.log('Skipping: no linked flowsheet row with a record_label in the recent feed');
+          return;
+        }
+
+        const query = new URLSearchParams({
+          artistName: row.artist_name!,
+          releaseTitle: row.album_title!,
+        });
+        const response = await client.get<AlbumMetadataResponse>(
+          `/proxy/metadata/album?${query.toString()}`
+        );
+
+        expect(response.ok).toBe(true);
+
+        // Present, and equal to the flowsheet row they were read from.
+        expect(response.body.recordLabel).toBe(row.record_label);
+        if (row.label_id != null) {
+          expect(response.body.labelId).toBe(row.label_id);
+        }
+        if (row.metadata_status) {
+          expect(response.body.metadataStatus).toBe(row.metadata_status);
+        }
+      });
+
+      it('keeps recordLabel distinct from the Discogs release label', async () => {
+        const row = await findLinkedRow();
+        if (!row) {
+          console.log('Skipping: no linked flowsheet row with a record_label in the recent feed');
+          return;
+        }
+
+        const query = new URLSearchParams({
+          artistName: row.artist_name!,
+          releaseTitle: row.album_title!,
+        });
+        const response = await client.get<AlbumMetadataResponse>(
+          `/proxy/metadata/album?${query.toString()}`
+        );
+
+        expect(response.ok).toBe(true);
+        // `label` may be absent entirely — pre-BS#1336 album_metadata rows
+        // still carry a NULL label (BS#1442). That is exactly why the two are
+        // separate keys: `recordLabel` survives regardless.
+        expect(response.body.recordLabel).toBeTruthy();
+        if (response.body.label !== undefined) {
+          expect(typeof response.body.label).toBe('string');
+        }
+      });
+    });
   });
 
   // -- GET /proxy/metadata/artist -------------------------------------------

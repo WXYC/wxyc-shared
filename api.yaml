@@ -3146,6 +3146,12 @@ components:
         states. iOS branches on this to decide whether to render inline metadata or fall back
         to the proxy-fetch path (WXYC/wxyc-ios-64#270). Only emitted on track entries.
 
+        Two surfaces reference this schema and must move together: the V2 flowsheet track
+        entry's `metadata_status`, and `AlbumMetadataResponse.metadataStatus` — the latter a
+        local-first echo of the same column off the linked flowsheet row (wxyc-shared#318,
+        WXYC/Backend-Service#1827), so a client can reconcile a proxy response against the
+        feed row it came from. Add a value here, not in a copy of the list.
+
     AlbumMetadata:
       type: object
       required:
@@ -6438,7 +6444,57 @@ components:
 
     AlbumMetadataResponse:
       type: object
+      description: >-
+        Response body for `GET /proxy/metadata/album`. Two tiers of field share
+        one flat wire shape, with no `base`/`enriched` wrapper to tell them
+        apart. **Base** fields (`recordLabel`, `labelId`, `metadataStatus`) are
+        durable Backend-Service state read off the linked flowsheet row before
+        any upstream lookup is attempted (WXYC/Backend-Service#1827). **Enriched**
+        fields (`artworkUrl`, `discogsUrl`, `genres`, `label`, the streaming
+        URLs, ...) come from Discogs via library-metadata-lookup. The split is
+        the point: an LML timeout can blank every enriched field but can never
+        blank the base ones.
       properties:
+        # ── Base fields (WXYC/Backend-Service#1827) ────────────────────────
+        # Local-first: sourced from the linked flowsheet row via
+        # selectLinkedFlowsheetRow, never from Discogs/LML. All three are
+        # conditionally assigned in the handler, so all three are optional.
+        recordLabel:
+          type: string
+          description: >-
+            Local-first base field. The catalog record label Backend-Service
+            wrote onto the flowsheet row at play time (`flowsheet.record_label`),
+            read back off the linked flowsheet row — durable BS state, never a
+            Discogs/LML read. Distinct from `label`, which is the Discogs
+            *release* label; the two carry genuinely different values with
+            different provenance and must not be merged, because collapsing
+            them would make the catalog label blankable by an upstream timeout.
+            Omitted when the request resolves to no linked flowsheet row, or
+            when that row's `record_label` is null/empty — a free-text entry
+            that never linked to an `album_id` has no local source for it.
+        labelId:
+          type: integer
+          description: >-
+            Local-first base field. Backend-Service's `label` table id for
+            `recordLabel`, read off the same linked flowsheet row
+            (`flowsheet.label_id`). Lets a client join to the catalog label
+            record instead of string-matching the name. Omitted when the
+            request resolves to no linked flowsheet row, or when that row's
+            `label_id` is null.
+        metadataStatus:
+          allOf:
+            - $ref: '#/components/schemas/MetadataStatus'
+          description: >-
+            Local-first base field. A faithful echo of the linked flowsheet
+            row's `metadata_status` column — the same enrichment-lifecycle
+            value the V2 flowsheet feed reports for that row, which is why it
+            shares the `MetadataStatus` schema rather than restating the
+            literals (the two must move together). It reports the row's stored
+            state, including any replay staleness; the terminal-vs-non-terminal
+            interpretation belongs to the client (WXYC/wxyc-ios-64#685).
+            Omitted when the request resolves to no linked flowsheet row, or
+            when that row's `metadata_status` is null.
+        # ── Enriched fields (Discogs via library-metadata-lookup) ──────────
         discogsReleaseId:
           type: integer
           description: Discogs release ID
@@ -6463,7 +6519,14 @@ components:
           description: Discogs style classifications (more specific than genres)
         label:
           type: string
-          description: Primary record label name
+          description: >-
+            Primary label on the Discogs *release*, from the cached
+            `album_metadata` row or an LML fallthrough. Enriched, not base:
+            absent when the upstream lookup fails, and still null on
+            `album_metadata` rows enriched before WXYC/Backend-Service#1336
+            (see WXYC/Backend-Service#1442). Not the same field as
+            `recordLabel`, which is the catalog label from the linked
+            flowsheet row and survives an upstream failure.
         discogsArtistId:
           type: integer
           description: Discogs artist ID, for linking to artist metadata
