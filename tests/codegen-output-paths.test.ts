@@ -146,3 +146,34 @@ describe("generated request types stay constructible (#297)", () => {
     expect(requestBlock()).toMatch(/\n\s+inputs: /);
   });
 });
+
+// Same trap, same guard, for the #303 response-side marker. `include_tracks`
+// was bitten by `default: false` forcing a non-optional emit despite being
+// absent from `required`; `tracks_contract_version` carries the identical
+// risk because its whole job is to be distinguishably *absent* for a
+// producer that predates it. api.yaml deliberately gives it no schema-level
+// `default` (mirroring `LookupResponse.api_version`'s precedent) — this pins
+// the artifact consumers actually import, because the spec-level assertion
+// in api-spec.test.ts cannot see what the generator did with it.
+describe("generated tracks_contract_version marker stays optional (#303)", () => {
+  const dts = readFileSync(
+    join(__dirname, "..", "src", "generated", "openapi-types.d.ts"),
+    "utf-8",
+  );
+
+  const responseBlock = () => {
+    const start = dts.indexOf("BulkResolveLibrariesResponse: {");
+    expect(start, "BulkResolveLibrariesResponse missing from generated types").toBeGreaterThan(-1);
+    return dts.slice(start, dts.indexOf("\n        };", start));
+  };
+
+  it("emits tracks_contract_version as optional", () => {
+    expect(responseBlock()).toMatch(/\btracks_contract_version\?:/);
+  });
+
+  it("keeps results required", () => {
+    // Guards the assertion above against passing for the wrong reason — e.g.
+    // a regex that matches because the whole block vanished.
+    expect(responseBlock()).toMatch(/\n\s+results: /);
+  });
+});

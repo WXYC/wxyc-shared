@@ -50,7 +50,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.30.0');
+      expect(spec.info.version).toBe('1.31.0');
     });
 
     it('should have components section', () => {
@@ -2216,6 +2216,94 @@ describe('OpenAPI Specification', () => {
       expect(description).toMatch(/tracks_attempted/);
     });
 
+    // --- #303 Q2: the forbidden (false, populated tracks) pairing gets a
+    // defined consumer reading instead of staying merely prohibited ---
+    //
+    // The schema cannot enforce that a producer never emits `false` alongside
+    // a populated `tracks` — both are independent optional properties, no
+    // oneOf/dependentRequired. Mitigation (2) from #303: keep the "producers
+    // must not emit it" prohibition, and additionally define what a consumer
+    // does if a producer bug emits it anyway, so the violation is survivable
+    // rather than undefined behavior on the pairing that gates a retry loop.
+
+    it('keeps the existing "producers must not emit it" prohibition on tracks_attempted', () => {
+      const schema = spec.components.schemas.BulkResolveResult as Schema;
+      const description = (schema.properties?.tracks_attempted?.description as string) ?? '';
+      expect(description).toMatch(/producers must not emit it/);
+    });
+
+    it('adds the #303 Q2 consumer reading: false alongside populated tracks MUST be read as true', () => {
+      const schema = spec.components.schemas.BulkResolveResult as Schema;
+      const description = (schema.properties?.tracks_attempted?.description as string) ?? '';
+      expect(description).toMatch(
+        /observes `tracks_attempted: false`[\s\S]*MUST read it as `true`/,
+      );
+      expect(description).toMatch(/wxyc-shared#303/);
+    });
+
+    // --- #303 Q1 option A: tracks_contract_version, the producer-echoed
+    // capability marker ---
+    //
+    // Follows the precedent already in this spec: LookupResponse.api_version
+    // answers LookupRequest.include_identity the same way. Without a marker,
+    // (absent, absent) on `tracks_attempted`/`tracks` is one wire spelling for
+    // two different facts during the LML rollout window — "the producer
+    // understood include_tracks and genuinely has nothing to report" and "the
+    // producer predates include_tracks entirely" — and a consumer cannot tell
+    // them apart. `tracks_contract_version` is the positive signal that closes
+    // the gap.
+
+    it('adds tracks_contract_version to BulkResolveLibrariesResponse as an optional integer pinned to 1', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesResponse as Schema;
+      const marker = schema.properties?.tracks_contract_version;
+      expect(marker).toBeDefined();
+      expect(marker!.type).toBe('integer');
+      expect(marker!.enum).toEqual([1]);
+      // Optional and additive — an old producer that never heard of this
+      // field simply omits it, which is exactly the state the marker exists
+      // to name.
+      expect(schema.required ?? []).not.toContain('tracks_contract_version');
+    });
+
+    // A property carrying an OpenAPI `default` is emitted non-optional by
+    // openapi-typescript regardless of `required` (its `defaultNonNullable`
+    // option). `include_tracks` was bitten by exactly this; the marker's
+    // whole job is to be distinguishably absent, so a default would defeat it.
+    it('does not give tracks_contract_version a schema-level default', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesResponse as Schema;
+      expect(schema.properties?.tracks_contract_version).not.toHaveProperty('default');
+    });
+
+    it('documents tracks_contract_version as present only when the producer understood include_tracks', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesResponse as Schema;
+      const description = (schema.properties?.tracks_contract_version?.description as string) ?? '';
+      expect(description).toMatch(/present and equal to 1/i);
+      expect(description).toMatch(/include_tracks/);
+      expect(description).toMatch(/absent/i);
+    });
+
+    it('ties tracks_contract_version to the api_version / include_identity precedent this spec already set', () => {
+      const schema = spec.components.schemas.BulkResolveLibrariesResponse as Schema;
+      const description = (schema.properties?.tracks_contract_version?.description as string) ?? '';
+      expect(description).toMatch(/api_version/);
+    });
+
+    it('mentions tracks_contract_version in the four-state block comment, so a reader of the table learns how to tell an old producer from a new one', () => {
+      const commentBlock = specText.slice(
+        specText.indexOf('# Four states, read off the PAIR'),
+        specText.indexOf('BulkResolveLibrariesRequest:'),
+      );
+      expect(commentBlock).toMatch(/tracks_contract_version/);
+    });
+
+    it('mentions tracks_contract_version in the bulk-resolve-libraries endpoint description', () => {
+      const opBlock = specText.slice(
+        specText.indexOf('/api/v1/identity/bulk-resolve-libraries:'),
+        specText.indexOf('/api/v1/artists/search-aliases/bulk:'),
+      );
+      expect(opBlock).toMatch(/tracks_contract_version/);
+    });
+
     // --- BulkResolveTrackIdentity repair (BS#1991 / LML#1021) ---
 
     it('ships the join-back echoes, composed verdict, and canonical artist on BulkResolveTrackIdentity', () => {
@@ -2423,6 +2511,17 @@ describe('OpenAPI Specification', () => {
       expect(states).toContain('false/empty');
       expect(states).toContain('true/empty');
       expect(states).toContain('true/entries');
+    });
+
+    it('shows tracks_contract_version: 1 in the flag-on response example', () => {
+      // The example is `include_tracks: true` throughout (per the response
+      // description above), so it's the producer-understood-the-flag case —
+      // the marker belongs on the example precisely because it is response-
+      // level, not per-result.
+      const example = (spec.components.schemas.BulkResolveLibrariesResponse as Schema).example as
+        | Record<string, unknown>
+        | undefined;
+      expect(example).toHaveProperty('tracks_contract_version', 1);
     });
   });
 

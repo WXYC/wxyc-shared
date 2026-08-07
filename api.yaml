@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.30.0
+  version: 1.31.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4189,6 +4189,17 @@ components:
     # every pass, forever — the pathology `kind: "unresolved"` was made a
     # first-class outcome to prevent, reintroduced one grain down
     # (WXYC/Backend-Service#1991 / LML#1021).
+    #
+    # For the rollout window before every producer implements this contract,
+    # the PAIR has a second ambiguity the four states above don't cover: a
+    # producer that predates `include_tracks` entirely spells the
+    # (absent, absent) state identically to a producer that understands the
+    # flag and genuinely has nothing to report — both are `null` either way.
+    # `BulkResolveLibrariesResponse.tracks_contract_version` is the
+    # response-level marker that separates them: present and equal to 1 only
+    # when the producer understood `include_tracks`, absent otherwise. See
+    # that field, and WXYC/wxyc-shared#303 for why the pair alone can't do
+    # this.
 
     BulkResolveLibrariesRequest:
       type: object
@@ -4538,7 +4549,13 @@ components:
             resolved nothing;
             **`true` with a populated `tracks`** — the matcher ran and
             produced entries. `false` alongside a populated `tracks` is
-            not a state; producers must not emit it.
+            not a state; producers must not emit it. A consumer that
+            observes `tracks_attempted: false` alongside a populated
+            `tracks` anyway MUST read it as `true` — the populated array
+            is stronger evidence of what happened than the flag that
+            disagrees with it, and reading the row as unattempted would
+            either drop already-resolved tracks or re-ask a row that
+            already has an answer (WXYC/wxyc-shared#303).
 
 
             The middle two are what this field exists for. They are
@@ -4596,10 +4613,14 @@ components:
         `method`/`confidence`
         pairs in the example sit inside `IdentityMethod`'s locked bands —
         Backend's writer rejects rows that don't, so an example that
-        violated them would hand LML#1021 an unwritable row to copy.
+        violated them would hand LML#1021 an unwritable row to copy. The
+        example also carries `tracks_contract_version: 1`, echoing that the
+        producer that emitted it understood `include_tracks`; see that
+        field for the rollout-window ambiguity it exists to resolve.
       required:
         - results
       example:
+        tracks_contract_version: 1
         results:
           - kind: single_artist
             library_id: 1234
@@ -4705,6 +4726,26 @@ components:
             tracks_attempted: null
             tracks: null
       properties:
+        tracks_contract_version:
+          type: integer
+          enum:
+            - 1
+          description: >
+            Present and equal to 1 only when the request set
+            `include_tracks: true` and the producer understands the flag.
+            Absent otherwise — both when `include_tracks` was false or
+            omitted, and when the producer predates this field entirely
+            and does not implement `include_tracks` at all. Same
+            precedent as `LookupResponse.api_version`
+            (`LookupRequest.include_identity`): a producer-echoed
+            capability marker that lets a consumer distinguish "the
+            producer understood my flag and the answer is genuinely
+            nothing" from "the producer predates my flag" — a
+            distinction `tracks_attempted`/`tracks` cannot make alone,
+            because both are spelled `null` in either case
+            (WXYC/wxyc-shared#303). No schema-level `default`, for the
+            same `openapi-typescript` `defaultNonNullable` reason
+            documented on `BulkResolveLibrariesRequest.include_tracks`.
         results:
           type: array
           items:
@@ -8631,6 +8672,14 @@ paths:
         `tracks.length`: a row the matcher visited and resolved nothing
         for carries an empty array, indistinguishable from one it has
         not reached.
+
+
+        During the rollout window before every producer implements this
+        contract, `BulkResolveLibrariesResponse.tracks_contract_version`
+        is the signal that separates "the producer understood
+        `include_tracks` and this batch genuinely has nothing to report"
+        from "the producer predates the flag" — both read identically on
+        `tracks_attempted`/`tracks` alone (WXYC/wxyc-shared#303).
       security:
         - LMLBearerAuth: []
       tags:
