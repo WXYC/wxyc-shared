@@ -123,7 +123,7 @@ All four output trees are **in-repo and gitignored** (`src/generated/`, `generat
 | `generate:swift` | `generated/swift/` | Nobody | wxyc-dj-ios, wxyc-ios-64 hand-author types mirroring `api.yaml` |
 | `generate:kotlin` | `generated/kotlin/` | Nobody | WXYC-Android hand-authors types mirroring `api.yaml` |
 
-**Where the Python models really come from, and where that's headed.** As of #107, the canonical Python codegen script is `scripts/generate-python-models.sh` in this repo, living next to `api.yaml`. That colocation solves only half of what its two predecessors had to do: those scripts lived in the *consumer* repo and had to go find the spec elsewhere (a sibling wxyc-shared checkout, worktree-aware via `git rev-parse --git-common-dir`, or a GitHub download), while this one already has the spec next door. It does **not** solve the other half — locating *this script* from a consumer repo — and the org's global CLAUDE.md requiring a worktree for all new development makes that the normal case, not an edge case: a caller's cwd is typically `<repo>/.worktrees/<branch>`, and a plain `../wxyc-shared` from there resolves to `<repo>/.worktrees/wxyc-shared`, which doesn't exist. It takes `--input`/`--output` flags, defaults to this repo's own `api.yaml` -> `generated/python/models.py`, and downloads from `raw.githubusercontent.com` only in the fallback case of being invoked without a local `api.yaml` at all. **Today, both Python services still run their own pre-#107 copy** — `scripts/generate_api_models.sh` in [library-metadata-lookup](https://github.com/WXYC/library-metadata-lookup/blob/main/scripts/generate_api_models.sh) and [request-o-matic](https://github.com/WXYC/request-o-matic/blob/main/scripts/generate_api_models.sh) — and commit the result as `generated/api_models.py` in their own repo; migrating each one onto the shared script is separate, per-repo follow-up work (their own PR, their own review), not part of #107's change here. Once a consumer migrates, the worktree-safe invocation is:
+**Where the Python models really come from, and where that's headed.** As of #107, the canonical Python codegen script is `scripts/generate-python-models.sh` in this repo, living next to `api.yaml`. That colocation solves only half of what its two predecessors had to do: those scripts lived in the *consumer* repo and had to go find the spec elsewhere (a sibling wxyc-shared checkout, worktree-aware via `git rev-parse --git-common-dir`, or a GitHub download), while this one already has the spec next door. It does **not** solve the other half — locating *this script* from a consumer repo — and the org's global CLAUDE.md requiring a worktree for all new development makes that the normal case, not an edge case: a caller's cwd is typically `<repo>/.worktrees/<branch>`, and a plain `../wxyc-shared` from there resolves to `<repo>/.worktrees/wxyc-shared`, which doesn't exist. It takes `--input`/`--output`/`--ref` flags, defaults to this repo's own `api.yaml` -> `generated/python/models.py`, and downloads from `raw.githubusercontent.com` only in the fallback case of being invoked without a local `api.yaml` at all — see "Pinning the spec ref" below for what `--ref` controls on that download and why #319 made it necessary. **Today, both Python services still run their own pre-#107 copy** — `scripts/generate_api_models.sh` in [library-metadata-lookup](https://github.com/WXYC/library-metadata-lookup/blob/main/scripts/generate_api_models.sh) and [request-o-matic](https://github.com/WXYC/request-o-matic/blob/main/scripts/generate_api_models.sh) — and commit the result as `generated/api_models.py` in their own repo; migrating each one onto the shared script is separate, per-repo follow-up work (their own PR, their own review), not part of #107's change here. Once a consumer migrates, the worktree-safe invocation is:
 
 ```bash
 WXYC_SHARED="$(dirname "$(git rev-parse --git-common-dir)")/../wxyc-shared"
@@ -152,6 +152,51 @@ Two gotchas, both verified against the current `api.yaml`:
 `scripts/generate-python-models.sh` runs `datamodel-codegen` **with `--strict-nullable`** (#302): a `required` + `nullable: true` property generates as `X | None = Field(...)` — the value nullable, the key still required (the ellipsis is pydantic's required marker, not a default). This is what makes the required-but-nullable idiom this spec uses wherever a null carries meaning (`BulkResolveProvenanceEntry.confidence`, `BulkResolveTrackIdentity.resolved_artist_name`, `CompilationTrackSuggestions.discogs_release_id`) actually expressible through the generated Python models. A bats test pins the flag's presence; don't remove it, and don't reshape `api.yaml` to route around the generator.
 
 **The retained side effect (know it before regenerating a consumer):** the same flag stops *optional non-nullable* properties from generating as `Optional` (that was a byproduct of the old defaulting bug, not the contract). After a consumer regenerates, explicitly passing `None` to those fields raises `ValidationError`, and inbound JSON `null` for them becomes a 422. The measured blast radius at 1.30.0 was 72 changed field declarations — 36 widened (the fix), 36 narrowed (the side effect) — and the narrowed list lives in #302. Each Python consumer (library-metadata-lookup, request-o-matic) audits its construction sites and inbound-null surface as part of its own regen PR; LML's audit found seven production sites needing present-but-null guards (Discogs API and cache reads), fixed ahead of its regen. **Until a consumer's regen ticket merges (LML: library-metadata-lookup#1153; ROM: request-o-matic#218), that repo's committed `api_models.py` still has the old non-Optional shapes — do not write producer code that emits the documented nulls against an unregenerated model.**
+
+### Pinning the spec ref (and detecting drift)
+
+`scripts/generate-python-models.sh`'s GitHub download fallback (taken only when a caller has no local `api.yaml` next to the script — see the table above) used to hardcode `main`. That meant an `api.yaml` merge here silently changed what an unpinned caller downloaded on its *next* run, with no commit in the caller's repo and no signal to anyone — [#319](https://github.com/WXYC/wxyc-shared/issues/319). The fix has two independent halves, matching #319's decided "A + B'":
+
+**A — pin the download with `--ref`.** Pass `--ref <git-ref>`, or set the `WXYC_SHARED_REF` env var (the flag wins if both are given), to pin the download to a specific wxyc-shared commit instead of tracking `main`:
+
+```bash
+bash "$WXYC_SHARED/scripts/generate-python-models.sh" --ref <commit-sha> --output generated/api_models.py
+```
+
+**Prefer a commit SHA over a tag.** Tags in this repo are not immutable by policy — `gha/v1` is explicitly a *moving* major tag (see the Tag Stability Policy above) — so a SHA is the only ref that actually pins; a tag can move out from under a caller exactly the way `main` already does. `--ref` accepts tags too (nothing stops you), but a SHA is the only choice that makes "pinned" mean what it sounds like.
+
+Leaving `--ref`/`WXYC_SHARED_REF` unset is still permitted — the download just falls back to `main` — but the script now prints a loud, impossible-to-miss warning to stderr when it takes that path, instead of downloading silently. Erroring outright on an unpinned download was considered and rejected: this script has existing unpinned callers today (both Python consumers currently run their own pre-#107 copies, and even post-migration nothing forces a caller to pass `--ref`), and turning an unset flag into a hard failure would break every one of them with no migration window. The warning is the honest middle ground — CI callers should always pass `--ref`, but the script does not get to unilaterally decide that for every caller.
+
+`--ref`/`WXYC_SHARED_REF` only affects the download fallback: `--input` and a local `PROJECT_DIR/api.yaml` both still win outright (a `Note:` on stderr says so if you passed `--ref` alongside either), matching the resolution order this script already had.
+
+**B' — detect drift on a schedule, without a cross-repo credential.** #319's ticket proposed (option B) having this repo `repository_dispatch` into each Python consumer on every `api.yaml` merge, which needs a new write-scoped token stored *here*, forwarding into two other repos. B' does the same job without that credential: `.github/workflows/check-api-spec-drift.yml` is a read-only reusable workflow a consumer calls **on its own schedule**, comparing its pinned ref against wxyc-shared's current `main`. The consumer's own thin caller workflow decides what "stale" means for it — open an issue, open a regen PR, just log it — using its own `GITHUB_TOKEN`, not a token from this repo.
+
+```yaml
+# in a Python consumer repo, e.g. .github/workflows/wxyc-shared-drift.yml
+on:
+  schedule:
+    - cron: '0 13 * * 1'   # weekly, Monday 13:00 UTC
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  check-drift:
+    uses: WXYC/wxyc-shared/.github/workflows/check-api-spec-drift.yml@main
+    with:
+      pinned-ref: '<the commit SHA generate-python-models.sh --ref is pinned to>'
+  # a following job gated on `needs: check-drift` and
+  # `if: needs.check-drift.outputs.drift == 'true'` is where the consumer
+  # decides what to do -- that job declares its OWN write permissions in the
+  # consumer's own workflow file, not here.
+```
+
+Inputs: `pinned-ref` (required) — the ref the caller wants checked; `wxyc-shared-ref` (optional, default `main`) — which ref of *this reusable workflow's own script* to run, independent of which api.yaml refs are being compared (those are always the caller's `pinned-ref` vs. wxyc-shared's current `main`). Outputs: `drift` (`"true"`/`"false"`), `current-sha`, `current-version`, `pinned-version` — plus a human-readable summary in the job log and `$GITHUB_STEP_SUMMARY`.
+
+**Permissions contract: `contents: read` only, and nothing else.** Every read this workflow does is unauthenticated public content — `git ls-remote` for wxyc-shared's `main` SHA (doesn't count against the GitHub REST API rate limit, unlike `gh api`) and `raw.githubusercontent.com` fetches for api.yaml at two refs, the same fetch the download fallback above already makes. No secrets are declared or needed. Per the Tag Stability Policy above, reusable-workflow permissions intersect caller ∩ callee — escalating this workflow's required floor in a future revision is itself a breaking change and needs a `gha/v2` cut, not a same-file edit; this file is new today with no `gha/v1` implications yet, which is exactly why that note belongs here before the first caller adopts it.
+
+This workflow is deliberately never a hard gate: `check-spec-drift.sh` (the comparison logic it runs) always exits `0` on a successful comparison, drift or not — see that script's own header for why a passing exit even when `drift: 'true'` is the correct behavior, not a bug.
+
+`scripts/generate-python-models.sh`'s `--ref` support and this workflow are both new as of #319 and have no `gha/v1` implications: neither is `check-charset-corpus-drift.yml`, so the Tag Stability Policy's bump procedure doesn't apply to them yet. After this PR merges, tag `gha/v1` should be moved to include it (`git tag -f gha/v1 origin/main && git push --force origin gha/v1`, per the non-breaking bump procedure above) so a consumer pinning `@gha/v1` picks it up — that tag move is a maintainer release action taken after merge, not part of this PR.
 
 ## Breaking-change gate
 

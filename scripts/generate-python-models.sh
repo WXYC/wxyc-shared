@@ -79,17 +79,40 @@
 # enclosing git hook or `git rebase -x`.
 #
 # Usage:
-#   scripts/generate-python-models.sh [--input PATH] [--output PATH]
+#   scripts/generate-python-models.sh [--input PATH] [--output PATH] [--ref REF]
 #
 #   --input PATH   Path to api.yaml. Default: PROJECT_DIR/api.yaml, falling
 #                  back to downloading
-#                  raw.githubusercontent.com/WXYC/wxyc-shared/main/api.yaml
-#                  when that file doesn't exist.
+#                  raw.githubusercontent.com/WXYC/wxyc-shared/<ref>/api.yaml
+#                  when that file doesn't exist (see --ref).
 #   --output PATH  Where to write the generated models. Downstream consumers
 #                  should pass their own repo's path, e.g.
 #                  --output generated/api_models.py. Default:
 #                  generated/python/models.py (this repo's own reference
 #                  tree -- gitignored, consumed by nobody; see CLAUDE.md).
+#   --ref REF      Git ref (commit SHA, branch, or tag) of wxyc-shared to
+#                  download api.yaml from, when the download fallback is
+#                  actually taken (see --input above). Also settable via the
+#                  WXYC_SHARED_REF environment variable; --ref wins if both
+#                  are given. Ignored whenever --input is given or a local
+#                  PROJECT_DIR/api.yaml is found -- see #319.
+#
+#                  PREFER A COMMIT SHA. Tags in this repo are not immutable
+#                  by policy -- gha/v1 is a deliberately MOVING major tag
+#                  (see CLAUDE.md's Tag Stability Policy) -- so a SHA is the
+#                  only ref that actually pins. A branch name (including the
+#                  default, unpinned "main") is exactly the moving target
+#                  this flag exists to let a caller opt out of.
+#
+#                  Leaving this unset is still permitted -- erroring by
+#                  default would break every existing unpinned caller with
+#                  no migration path -- but the download then targets
+#                  wxyc-shared's main branch and prints a loud warning
+#                  instead of downloading silently, because an unpinned
+#                  fetch is exactly the failure mode #319 describes: an
+#                  api.yaml merge here can change a caller's CI input with
+#                  no commit in the caller's repo and no signal to anyone.
+#                  CI callers should always pass --ref.
 #   -h, --help     Show this help and exit.
 
 set -euo pipefail
@@ -119,12 +142,13 @@ find_caller_venv_bin() {
 }
 
 INPUT=""
+REF=""
 DEFAULT_OUTPUT="$PROJECT_DIR/generated/python/models.py"
 OUTPUT="$DEFAULT_OUTPUT"
 
 usage() {
     cat <<EOF
-Usage: generate-python-models.sh [--input PATH] [--output PATH]
+Usage: generate-python-models.sh [--input PATH] [--output PATH] [--ref REF]
 
 Generate Python Pydantic v2 models from api.yaml, using
 datamodel-code-generator pinned to $DATAMODEL_CODEGEN_PIN.
@@ -137,6 +161,15 @@ datamodel-code-generator pinned to $DATAMODEL_CODEGEN_PIN.
                  Default: $DEFAULT_OUTPUT
                  (this repo's own reference tree -- a caller almost always
                  wants to pass --output explicitly)
+  --ref REF      Git ref (SHA, branch, or tag) of wxyc-shared to download
+                 api.yaml from, when the download fallback is taken.
+                 Also settable via the WXYC_SHARED_REF env var (--ref wins
+                 if both are given). Prefer a commit SHA -- tags here are
+                 not immutable (gha/v1 moves) so only a SHA truly pins.
+                 Ignored when --input is given or a local api.yaml is found.
+                 Default: unpinned (downloads from wxyc-shared's main branch
+                 and prints a loud warning -- CI callers should always pass
+                 this; see #319).
   -h, --help     Show this help and exit
 EOF
 }
@@ -167,6 +200,20 @@ while [[ $# -gt 0 ]]; do
             OUTPUT="$2"
             shift 2
             ;;
+        --ref)
+            # Same fail-loud-not-silently-fallback reasoning as --input and
+            # --output above: an empty --ref would otherwise be
+            # indistinguishable from "not passed" and silently resolve to
+            # the unpinned default, which is the one thing this flag exists
+            # to let a caller opt out of.
+            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+                echo "Error: --ref requires a non-empty value." >&2
+                usage >&2
+                exit 2
+            fi
+            REF="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -179,6 +226,23 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Resolve the ref used ONLY by the GitHub download fallback below (#319).
+# --ref wins over WXYC_SHARED_REF; neither given falls back to wxyc-shared's
+# main branch, which is unpinned -- see the warning printed when the
+# download path is actually taken. This has no effect at all when --input
+# is given or a local PROJECT_DIR/api.yaml is found, since neither of those
+# paths downloads anything.
+REF_WAS_PINNED=0
+if [[ -n "$REF" ]]; then
+    RESOLVED_REF="$REF"
+    REF_WAS_PINNED=1
+elif [[ -n "${WXYC_SHARED_REF:-}" ]]; then
+    RESOLVED_REF="$WXYC_SHARED_REF"
+    REF_WAS_PINNED=1
+else
+    RESOLVED_REF="main"
+fi
+
 # Resolve api.yaml.
 if [[ -n "$INPUT" ]]; then
     API_YAML="$INPUT"
@@ -186,13 +250,30 @@ if [[ -n "$INPUT" ]]; then
         echo "Error: --input path does not exist: $API_YAML" >&2
         exit 2
     fi
+    if [[ "$REF_WAS_PINNED" -eq 1 ]]; then
+        echo "Note: --ref/WXYC_SHARED_REF ($RESOLVED_REF) is ignored -- --input was given, so nothing is downloaded." >&2
+    fi
 elif [[ -f "$PROJECT_DIR/api.yaml" ]]; then
     API_YAML="$PROJECT_DIR/api.yaml"
+    if [[ "$REF_WAS_PINNED" -eq 1 ]]; then
+        echo "Note: --ref/WXYC_SHARED_REF ($RESOLVED_REF) is ignored -- a local api.yaml was found at $PROJECT_DIR/api.yaml, so nothing is downloaded." >&2
+    fi
 else
     API_YAML="$(mktemp)"
     trap 'rm -f "$API_YAML"' EXIT
-    echo "api.yaml not found at $PROJECT_DIR/api.yaml -- downloading from GitHub..." >&2
-    curl -sSfL --max-time 30 --retry 3 "https://raw.githubusercontent.com/WXYC/wxyc-shared/main/api.yaml" -o "$API_YAML"
+    if [[ "$REF_WAS_PINNED" -eq 0 ]]; then
+        # #319: this is the silent-drift failure mode. An api.yaml merge to
+        # wxyc-shared's main can change what THIS run downloads relative to
+        # the last run, with no commit in the caller's repo and no signal to
+        # anyone -- exactly the bug this flag exists to let a caller opt out
+        # of. Loud by design; CI use should always pass --ref.
+        cat >&2 <<EOF
+Warning: api.yaml not found at $PROJECT_DIR/api.yaml -- downloading from wxyc-shared's main branch, an unpinned, moving target.
+This means the spec used by this run can differ from the last run with no code change on your side. CI callers should pass --ref <commit-sha> (or set WXYC_SHARED_REF) to pin a specific wxyc-shared commit -- not a branch, and in this repo not even a tag: gha/v1-style tags are explicitly allowed to move (see CLAUDE.md's Tag Stability Policy). Find a SHA at https://github.com/WXYC/wxyc-shared/commits/main/api.yaml. See WXYC/wxyc-shared#319.
+EOF
+    fi
+    echo "api.yaml not found at $PROJECT_DIR/api.yaml -- downloading from GitHub ($RESOLVED_REF)..." >&2
+    curl -sSfL --max-time 30 --retry 3 "https://raw.githubusercontent.com/WXYC/wxyc-shared/${RESOLVED_REF}/api.yaml" -o "$API_YAML"
 fi
 echo "Using api.yaml: $API_YAML"
 

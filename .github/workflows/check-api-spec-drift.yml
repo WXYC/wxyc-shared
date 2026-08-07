@@ -1,0 +1,133 @@
+name: API Spec Drift Guard
+
+# Reusable, READ-ONLY workflow that checks whether a caller's pinned
+# wxyc-shared ref (see scripts/generate-python-models.sh's --ref flag) has
+# fallen behind api.yaml on wxyc-shared's main branch.
+#
+# This is #319's option B': a merge to api.yaml here has no way to notify a
+# Python consumer that its committed generated/api_models.py is now stale.
+# Sending a cross-repo signal (the ticket's option B, `repository_dispatch`)
+# would need a new write-scoped token stored in THIS repo -- a new
+# cross-repo credential purely to save a consumer a scheduled poll. Instead,
+# the consumer calls this workflow on ITS OWN schedule (or in a PR, or
+# on-demand) and decides what to do with the result using its own
+# GITHUB_TOKEN: open an issue, open a regen PR, or just log it. No shared
+# secret, no cross-repo write scope, on either side.
+#
+# Invoked from a consumer repo's own thin caller workflow as:
+#
+#   name: wxyc-shared spec drift
+#   on:
+#     schedule:
+#       - cron: '0 13 * * 1'  # weekly, Monday 13:00 UTC
+#     workflow_dispatch: {}
+#   permissions:
+#     contents: read
+#   jobs:
+#     check-drift:
+#       uses: WXYC/wxyc-shared/.github/workflows/check-api-spec-drift.yml@main
+#       with:
+#         pinned-ref: '<the commit SHA your generate-python-models.sh --ref is pinned to>'
+#     # a following job, gated on `needs: check-drift` and
+#     # `if: needs.check-drift.outputs.drift == 'true'`, is where the
+#     # caller decides what "stale" means for it (open an issue, etc.) --
+#     # that job needs its OWN write permissions, declared in the caller's
+#     # own workflow file, not here.
+#
+# This workflow declares no secrets: everything it reads (wxyc-shared's
+# main SHA, and api.yaml at two refs) is public, unauthenticated content --
+# `git ls-remote` over the smart HTTP protocol for the SHA (does not count
+# against GitHub's REST API rate limit) and `raw.githubusercontent.com`
+# fetches for the two api.yaml copies, exactly as
+# scripts/generate-python-models.sh's own download fallback already does.
+
+on:
+  workflow_call:
+    inputs:
+      pinned-ref:
+        description: "The git ref of WXYC/wxyc-shared this caller's generated Python models are pinned to -- a commit SHA, ideally (see generate-python-models.sh --ref / WXYC_SHARED_REF)"
+        required: true
+        type: string
+      wxyc-shared-ref:
+        description: "Git ref of WXYC/wxyc-shared whose scripts/check-spec-drift.sh to run. Does NOT affect which ref's api.yaml is compared -- that is always wxyc-shared's current main vs. inputs.pinned-ref. Default: main, matching check-charset-corpus-drift.yml's equivalent input."
+        required: false
+        type: string
+        default: "main"
+    outputs:
+      drift:
+        description: "'true' if api.yaml's info.version differs between pinned-ref and wxyc-shared's current main, else 'false'"
+        value: ${{ jobs.drift-check.outputs.drift }}
+      current-sha:
+        description: "wxyc-shared:main's current commit SHA at the time this workflow ran"
+        value: ${{ jobs.drift-check.outputs.current-sha }}
+      current-version:
+        description: "api.yaml's info.version at wxyc-shared:main"
+        value: ${{ jobs.drift-check.outputs.current-version }}
+      pinned-version:
+        description: "api.yaml's info.version at inputs.pinned-ref"
+        value: ${{ jobs.drift-check.outputs.pinned-version }}
+
+concurrency:
+  group: api-spec-drift-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Workflow-level GITHUB_TOKEN scope. STRICTLY READ-ONLY -- this workflow
+# only ever reads public content (wxyc-shared's main SHA and api.yaml at two
+# refs) and writes nothing anywhere. Do not add a write scope "just in
+# case": per CLAUDE.md's Tag Stability Policy, reusable-workflow permissions
+# intersect (caller AND callee) at job dispatch, so a caller that hardened
+# to `contents: read` would startup_failure the moment this file asked for
+# more, with no jobs and no obvious error in the log (see
+# WXYC/Backend-Service#857). Escalating this floor in a future revision is
+# itself a breaking change under that policy and needs a gha/v2 cut, not an
+# edit here -- this file is new today and has no gha/v1 implications yet,
+# but say so up front so a future editor doesn't escalate it casually.
+permissions:
+  contents: read
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    outputs:
+      drift: ${{ steps.compare.outputs.drift }}
+      current-sha: ${{ steps.compare.outputs.current-sha }}
+      current-version: ${{ steps.compare.outputs.current-version }}
+      pinned-version: ${{ steps.compare.outputs.pinned-version }}
+    steps:
+      - name: Checkout wxyc-shared (for the comparison script)
+        uses: actions/checkout@v7
+        with:
+          repository: WXYC/wxyc-shared
+          ref: ${{ inputs.wxyc-shared-ref }}
+          path: wxyc-shared
+
+      # No auth needed for either fetch: `git ls-remote` over the smart
+      # HTTP protocol doesn't count against GitHub's REST API rate limit
+      # (unlike `gh api repos/.../commits/main`), and raw.githubusercontent.com
+      # serves public repo content unauthenticated -- the same fetch
+      # scripts/generate-python-models.sh's own download fallback makes.
+      - name: Resolve wxyc-shared:main's SHA and both api.yaml versions
+        id: fetch
+        run: |
+          set -euo pipefail
+          CURRENT_SHA="$(git ls-remote https://github.com/WXYC/wxyc-shared.git main | cut -f1)"
+          if [[ -z "$CURRENT_SHA" ]]; then
+            echo "::error::could not resolve WXYC/wxyc-shared:main's SHA via git ls-remote"
+            exit 1
+          fi
+          CURRENT_VERSION="$(curl -sSfL --max-time 30 --retry 3 "https://raw.githubusercontent.com/WXYC/wxyc-shared/main/api.yaml" | grep -m1 '^  version:' | awk '{print $2}')"
+          PINNED_VERSION="$(curl -sSfL --max-time 30 --retry 3 "https://raw.githubusercontent.com/WXYC/wxyc-shared/${{ inputs.pinned-ref }}/api.yaml" | grep -m1 '^  version:' | awk '{print $2}')"
+          {
+            echo "current-sha=$CURRENT_SHA"
+            echo "current-version=$CURRENT_VERSION"
+            echo "pinned-version=$PINNED_VERSION"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compare pinned api.yaml version against main
+        id: compare
+        run: |
+          bash wxyc-shared/scripts/check-spec-drift.sh \
+            "${{ inputs.pinned-ref }}" \
+            "${{ steps.fetch.outputs.pinned-version }}" \
+            "${{ steps.fetch.outputs.current-sha }}" \
+            "${{ steps.fetch.outputs.current-version }}"

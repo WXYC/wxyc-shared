@@ -104,6 +104,7 @@ jobs:
           npm run test:setup-script
           npm run test:drift-guard
           npm run test:python-codegen
+          npm run test:spec-drift-guard
 
       # Cross-service contract suite (see INVARIANTS.md, src/contracts.ts).
       # When $E2E_BASE_URL is unset, every test in the file is `skipIf`-ed
