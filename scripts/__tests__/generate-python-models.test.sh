@@ -14,8 +14,11 @@
 # downstream repos will call this script with (--input/--output), that the
 # datamodel-code-generator version is pinned in exactly one place here (the
 # reason #107 was sequenced ahead of #302's --strict-nullable fix), and that
-# --strict-nullable itself does NOT sneak in as part of this consolidation --
-# that flag is #302's deliberate, separately-reviewed change.
+# --strict-nullable IS passed (#302, landed after the consolidation): a
+# required + nullable property must generate as X | None while staying
+# required, or the contract's documented nulls are inexpressible in every
+# Python consumer. If test 15 or 31 goes red, the flag was dropped --
+# restore it; do not resolve toward the pre-#302 state.
 
 SCRIPT_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/generate-python-models.sh"
@@ -377,8 +380,9 @@ STUB
     # must not widen fields whose contract has no null.
     grep -qE '^ *name: str$' "$TEST_TEMP_DIR/out/models.py"
     # `genre` is required + nullable=true: WITH --strict-nullable the VALUE is
-    # nullable but the KEY stays required -- `str | None` with no default.
-    grep -qF 'genre: str | None' "$TEST_TEMP_DIR/out/models.py"
+    # nullable but the KEY stays required -- assert the exact emitted shape,
+    # `str | None = Field(...)` (the ellipsis is the required marker).
+    grep -qF 'genre: str | None = Field(...)' "$TEST_TEMP_DIR/out/models.py"
     # Required-but-nullable emits `= Field(...)` -- the ellipsis is pydantic's
     # REQUIRED marker, not a default. What must never appear is an actual None
     # default making the key optional (an implementer who expects `= None`
