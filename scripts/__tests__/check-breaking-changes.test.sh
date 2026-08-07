@@ -98,8 +98,10 @@ teardown() {
 # through the real flag, and they are written as a pair so that neither can pass
 # for the wrong reason. If the whitelist stops matching — a typo, an oasdiff
 # release that rewords a finding — the first goes red. If the whitelist starts
-# matching things it shouldn't, or the diff stops containing any breaking
-# change at all, the second goes red and the first becomes vacuous.
+# matching things it shouldn't, the second goes red and the first becomes
+# vacuous. The pair only has something to say while the whitelist carries a
+# live entry; with an empty whitelist the second skips (see below), because
+# "this diff is breaking" is a claim about the entries, not about api.yaml.
 
 setup_base() {
     command -v oasdiff > /dev/null || skip "oasdiff not installed"
@@ -109,6 +111,21 @@ setup_base() {
     if diff -q "$BASE_SPEC" "$REPO_ROOT/api.yaml" > /dev/null 2>&1; then
         skip "api.yaml identical to origin/main; nothing to suppress"
     fi
+}
+
+# Count the whitelist's live entries — every line that is neither a comment nor
+# blank. Zero is a legitimate steady state (the file's own header calls an
+# entry-free file of comments the floor), and it is what the file looks like
+# between the merge of one suppressed change and the next one that needs a
+# suppression.
+live_entry_count() {
+    local count=0 line
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line//[[:space:]]/}" ]] && continue
+        count=$((count + 1))
+    done < "$IGNORE_FILE"
+    echo "$count"
 }
 
 @test "the script exits 0 on the current diff, i.e. the whitelist entries match" {
@@ -122,6 +139,14 @@ setup_base() {
     # Proves the previous test is suppressing real ERR findings rather than
     # passing because the diff happens to be clean.
     setup_base
+    # ...but only when there is something to suppress. An empty whitelist has
+    # nothing to prove, and a PR that edits api.yaml without breaking anything
+    # (a description fix, say) is the ordinary case, not a suspicious one. Left
+    # unconditional, this assertion demanded that every api.yaml PR be breaking
+    # — the exact inversion of what the gate is for, and a red CI job with no
+    # actionable defect behind it.
+    [ "$(live_entry_count)" -gt 0 ] \
+        || skip "whitelist has no live entries; nothing to suppress on this diff"
     run oasdiff breaking "$BASE_SPEC" "$REPO_ROOT/api.yaml" --fail-on ERR
     [ "$status" -eq 1 ]
 }
