@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.32.0
+  version: 1.33.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4305,6 +4305,30 @@ components:
         library_id:
           type: integer
           description: Backend `wxyc_schema.library.id` (FK target).
+        legacy_release_id:
+          type: integer
+          nullable: true
+          description: >
+            The row's legacy MySQL `LIBRARY_RELEASE_ID` — Backend's
+            `library.legacy_release_id` column. This is the id space
+            library.db (and therefore LML's per-track store,
+            `lml_cache.compilation_track_identity`) is keyed by;
+            `library_id` above is Backend's own serial and is NOT in this
+            space, so without this field LML cannot join a row to its
+            per-track data at all (WXYC/library-metadata-lookup#1021,
+            WXYC/Backend-Service#1991). Optional and nullable — absent or
+            NULL means "no bridge available for this row": an un-upgraded
+            caller, or Backend's small residual of rows whose
+            `legacy_release_id` is NULL (ETL link-pass orphans). LML
+            answers such rows' `include_tracks: true` requests with the
+            not-yet-visited state (`tracks_attempted: false`, empty
+            `tracks`), so the consumer keeps re-asking rather than
+            mis-reading anything as resolved. Meaningful only alongside
+            `include_tracks: true`; harmless otherwise. Backend-authored
+            catalog adds mint `legacy_release_id` from a sequence floored
+            at 1,000,000 (WXYC/Backend-Service#1963), which flows into
+            library.db as its `id`, so the spaces stay joinable for
+            post-tubafrenzy rows too.
         artist_name:
           type: string
           description: Hint — Backend's denormalized artist name for the row.
