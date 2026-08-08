@@ -4,11 +4,16 @@ This is the shared library for WXYC services, published to GitHub Packages as `@
 
 ## Tag Stability Policy (READ BEFORE EDITING `.github/workflows/`)
 
-This repo publishes a reusable GitHub Actions workflow that other WXYC repos consume by tag:
+This repo publishes reusable GitHub Actions workflows that other WXYC repos consume by tag:
 
-- `check-charset-corpus-drift.yml` — consumed as `WXYC/wxyc-shared/.github/workflows/check-charset-corpus-drift.yml@gha/v1`
+- `check-charset-corpus-drift.yml` — consumed as `WXYC/wxyc-shared/.github/workflows/check-charset-corpus-drift.yml@gha/v1` (14 consumers as of 2026-08-07)
+- `check-api-spec-drift.yml` — consumed as `WXYC/wxyc-shared/.github/workflows/check-api-spec-drift.yml@gha/v1` (added by #323 for #319; no consumers yet — the Python services adopt it as part of library-metadata-lookup#1159 / request-o-matic#218)
 
 `gha/v1` is a **moving major tag**. It points at the latest commit on `main` that is non-breaking for the v1 contract. Consumers pin to `@gha/v1` to opt into compatible improvements; they pin to a SHA only if they want frozen behavior.
+
+**One tag covers every reusable workflow in this repo, but each workflow is its own contract.** That is a known wart, not a design: a `gha/v2` cut forced by a break in one workflow freezes `gha/v1` for consumers of the *other* workflows, so no future non-breaking improvement can reach them without violating the freeze. Splitting into per-workflow tags (`charset/v1`, `spec-drift/v1`) is the fix; it is deliberately not coupled to any one change. Until then, weigh a `v2` cut against every consumer set, not just the one whose workflow broke.
+
+**Pinning `@gha/v1` on `uses:` does not pin everything.** It pins the workflow YAML. The *script* the workflow executes comes from whatever the `wxyc-shared-ref` input says, which defaults to `main`. A consumer that pins `@gha/v1` and leaves `wxyc-shared-ref` unset therefore runs tagged YAML against main's script — 4 of the 14 charset consumers (request-o-matic, wikidata-cache, archive, wxyc-archive-search) are in that state as of 2026-08-07. Either set `wxyc-shared-ref: gha/v1` everywhere or drop the input; the mixed state means "pinned to `gha/v1`" is not a statement about what actually ran.
 
 ### Before changing any reusable workflow, decide: is this breaking?
 
@@ -21,6 +26,10 @@ A change is **breaking** if it does any of the following to a `workflow_call`-en
 5. Changes observable behavior consumers rely on — e.g. the job no longer fails on a condition it previously failed on, the runner OS major version bumps, a step that produced an artifact stops producing it.
 
 Anything else is **non-breaking**: bugfixes, perf work, internal refactors, *additive* optional inputs/outputs/secrets, dependency bumps that don't change observable behavior.
+
+**Rule 5 is about the runner OS, not about action majors.** An `actions/checkout@v6→v7` or `actions/setup-node@v6→v7` bump inside a reusable workflow is a dependency bump under the non-breaking list above, provided `runs-on` is unchanged and no input/secret/output/permission moved with it. This came up concretely: `gha/v1` sat at `1858cba` for 2.5 months while `main` carried exactly those two bumps (`484b3d8`, `867d35f`, both 2026-07-16), and reading rule 5 to cover them would have cost a `gha/v2` migration across 12 repos to deliver a zero-behavior change. Check `git diff gha/v1 origin/main -- .github/workflows/<file>.yml` before assuming a long tag lag means a large contract delta — most commits on `main` never touch a published workflow.
+
+**Adding a brand-new `workflow_call` file is additive and non-breaking — but the tag still has to move for anyone to reach it.** A file that does not exist at `gha/v1` makes `uses: …@gha/v1` fail at *workflow startup*, not at a step, so the consumer sees a run with no jobs rather than a useful error. "Additive, so no tag action needed" is the trap; the correct reading is "additive, so the non-breaking bump procedure applies." (WXYC/wxyc-shared#319's Constraints section originally said the former, and #323 said the latter — this paragraph is the reconciliation.)
 
 ### The bump procedure
 
@@ -39,7 +48,21 @@ git tag -a gha/v2 -m "v2: <one-line summary of what broke>" origin/main
 git push origin gha/v2
 ```
 
-Then file a migration ticket in every consumer repo that pins `@gha/v1` for this workflow. Search the org with `gh search code 'WXYC/wxyc-shared/.github/workflows/<file>.yml@gha/v1'` to find them.
+Then file a migration ticket in every consumer repo that pins `@gha/v1` for this workflow.
+
+**Do not size that migration with `gh search code`.** The code-search index lags and silently under-reports: on 2026-08-07 it returned 6 consumers of `check-charset-corpus-drift.yml` when the true count was 14 — it missed `wxyc-etl`, which publishes the org's *other* reusable workflow. Enumerate by walking every repo's workflow directory instead:
+
+```bash
+for r in $(gh repo list WXYC --limit 100 --json name --jq '.[].name'); do
+  gh api "repos/WXYC/$r/contents/.github/workflows" --jq '.[].path' 2>/dev/null \
+    | while read -r p; do
+        gh api "repos/WXYC/$r/contents/$p" --jq '.content' 2>/dev/null | base64 -d \
+          | grep -q 'wxyc-shared/.github/workflows/<file>.yml@' && echo "$r $p"
+      done
+done
+```
+
+A missed consumer is worse than a slow search: it stays on a frozen `gha/v1` after everyone else migrates, and nobody finds out until its next scheduled run fails.
 
 ### Why this matters
 
