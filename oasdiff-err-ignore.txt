@@ -32,29 +32,3 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
-
-# --- wxyc-shared#316 (api.yaml 1.34.0) ---
-# `LookupResponse.api_version` and `LookupResponse.identity` both gain
-# `nullable: true` (identity's lives on the referenced `LookupIdentityBlock`
-# schema rather than on the property itself — see that schema's description
-# for why: an `allOf`-wrapped nullable ref was tried first and produced a
-# spurious third finding, `response-required-property-removed` on
-# `identity/resolved`, which is not recorded here because it never
-# reproduced against the shape actually shipped in this entry). This is the
-# identical defect wxyc-shared#310 fixed on the sibling marker
-# `tracks_contract_version`, on the endpoint that supplied #310's precedent
-# in the first place: no `LookupResponse(...)` construction site in
-# library-metadata-lookup (`lookup/orchestrator.py` L1343/L1368/L1653,
-# `lookup/router.py` L690/L812) has ever set either field, not even when the
-# request sets `include_identity: true`, because neither side of the
-# cross-cache-identity feature is implemented in the producer yet. LML
-# serves `/lookup` through FastAPI's `response_model` with no
-# `response_model_exclude_none`, so both fields sit at their `None` default
-# and serialize as explicit `null` on every response — never an omitted key
-# — regardless of what the request set `include_identity` to. Declaring the
-# nullability corrects the schema toward a wire that already ships; it does
-# not change what any producer emits or what a decoder that survives
-# today's traffic has to handle.
-post /lookup the response property `api_version` became nullable for the status `200`
-post /lookup the response property `identity` became nullable for the status `200`
-
