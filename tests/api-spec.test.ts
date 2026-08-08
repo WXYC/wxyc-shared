@@ -50,7 +50,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.34.0');
+      expect(spec.info.version).toBe('1.35.0');
     });
 
     it('should have components section', () => {
@@ -753,6 +753,52 @@ describe('OpenAPI Specification', () => {
     it('notes on MetadataStatus that AlbumMetadataResponse shares it', () => {
       const metadataStatus = spec.components.schemas.MetadataStatus as SchemaProp;
       expect(metadataStatus.description ?? '').toMatch(/AlbumMetadataResponse/);
+    });
+
+    // The base-field read lives in the cache-MISS arm of the handler
+    // (proxy.controller.ts L660-668). On a hit the handler does
+    // `Object.assign(metadata, cachedEnrichment)` and never calls
+    // `selectLinkedFlowsheetRow` — and these three ARE memoized, because
+    // ALBUM_METADATA_BASE_FIELDS (L526) excludes only the request-echoed
+    // artistName/releaseTitle/trackTitle. So "read off the linked row on every
+    // request" is false, and a contract that implies it would declare a real
+    // production state impossible: for up to the 1h TTL after a DJ links a
+    // previously free-text play, the response can still omit all three.
+    it('documents the 1h memo, so the contract does not imply a fresh row read on every request', () => {
+      const description = (albumMetadataResponse() as { description?: string }).description ?? '';
+      expect(description).toMatch(/1h|one hour|TTL/i);
+      expect(description).toMatch(/cach|memo/i);
+      // The claim that must NOT survive: an unqualified "before any upstream
+      // lookup" reads as "on every request", which the cache-hit arm falsifies.
+      expect(description).not.toMatch(/before any upstream lookup is attempted/i);
+    });
+
+    it('scopes the base tier to all six fields BS treats as base, not just the three declared here', () => {
+      const description = (albumMetadataResponse() as { description?: string }).description ?? '';
+      // proxy.controller.ts L577-595 and L604-612 put artistName/releaseTitle/
+      // trackTitle in the same tier — artistName unconditionally. Declaring
+      // them is follow-up work, but this prose is the first place the contract
+      // *defines* the tier, so it must not define it by omission.
+      for (const name of ['artistName', 'releaseTitle', 'trackTitle']) {
+        expect(description, `base tier must name ${name}`).toMatch(new RegExp(`\`${name}\``));
+      }
+    });
+
+    it('does not claim metadataStatus is omitted for a null column, which the NOT NULL default makes unreachable', () => {
+      const description = albumMetadataResponse().properties?.metadataStatus?.description ?? '';
+      // Backend-Service/shared/database/src/schema.ts:1046 declares
+      // `metadata_status` .notNull().default('pending'), so a linked row always
+      // has a value. The recordLabel/labelId equivalents ARE reachable.
+      expect(description).toMatch(/NOT NULL/i);
+      expect(description).not.toMatch(/`metadata_status` is null/i);
+    });
+
+    it('states the memo as an omission path on each of the three fields', () => {
+      const schema = albumMetadataResponse();
+      for (const name of ['recordLabel', 'labelId', 'metadataStatus'] as const) {
+        const description = schema.properties?.[name]?.description ?? '';
+        expect(description, `${name} must name the memo as an omission path`).toMatch(/memo|cach/i);
+      }
     });
   });
 

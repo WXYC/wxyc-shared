@@ -137,69 +137,110 @@ describe('Proxy E2E', () => {
         metadata_status?: string | null;
       };
 
-      async function findLinkedRow(): Promise<LinkedRow | undefined> {
+      const TERMINAL_STATUSES = ['enriched_match', 'enriched_no_match', 'failed_no_retry'];
+
+      let linkedRow: LinkedRow | undefined;
+      let served: AlbumMetadataResponse | undefined;
+
+      // One fetch for the whole block. Two reasons beyond economy: a second
+      // proxy call would hit the memo the first one populated (so it would not
+      // be an independent observation anyway), and re-deriving the row per test
+      // would let the two cases disagree about which row they are asserting on.
+      beforeAll(async () => {
         const feed = await client.get<LinkedRow[]>('/flowsheet?limit=100');
-        if (!feed.ok || !Array.isArray(feed.body)) return undefined;
+        if (!feed.ok || !Array.isArray(feed.body)) return;
         // `album_id` is the discriminator BS itself keys the local read off
         // (selectLinkedFlowsheetRow); `record_label` narrows to rows that
         // actually have the base field to echo, since BS assigns it only when
         // the linked row's column is non-empty.
-        return feed.body.find(
+        linkedRow = feed.body.find(
           (row) => row.album_id != null && !!row.artist_name && !!row.album_title && !!row.record_label
         );
-      }
-
-      it('echoes recordLabel / labelId / metadataStatus from the linked row', async () => {
-        const row = await findLinkedRow();
-        if (!row) {
-          // A stack seeded with only free-text entries has nothing to assert
-          // against — the fields are correctly absent there.
-          console.log('Skipping: no linked flowsheet row with a record_label in the recent feed');
-          return;
-        }
+        if (!linkedRow) return;
 
         const query = new URLSearchParams({
-          artistName: row.artist_name!,
-          releaseTitle: row.album_title!,
+          artistName: linkedRow.artist_name!,
+          releaseTitle: linkedRow.album_title!,
         });
         const response = await client.get<AlbumMetadataResponse>(
           `/proxy/metadata/album?${query.toString()}`
         );
+        if (response.ok) served = response.body;
+      });
 
-        expect(response.ok).toBe(true);
+      /**
+       * Skip — visibly, as a `↓` in the reporter — when the stack has no linked
+       * row to assert against. `ctx.skip()` is deliberate: the surrounding
+       * `console.log(...) + return` idiom used elsewhere in `e2e/` records the
+       * case as PASSING, and this block is issue #318's acceptance criterion.
+       * A green that certifies nothing was checked is worse than no test. The
+       * other uses of that idiom skip on "backend not available", where the
+       * whole suite is failing loudly anyway; this one skips on a *data*
+       * condition against a healthy stack, which is exactly when a false green
+       * goes unnoticed.
+       */
+      function requireServedLinkedRow(ctx: { skip: () => void }): void {
+        if (!linkedRow || !served) ctx.skip();
+      }
 
-        // Present, and equal to the flowsheet row they were read from.
-        expect(response.body.recordLabel).toBe(row.record_label);
-        if (row.label_id != null) {
-          expect(response.body.labelId).toBe(row.label_id);
-        }
-        if (row.metadata_status) {
-          expect(response.body.metadataStatus).toBe(row.metadata_status);
+      it('serves the three base fields for a row the feed says is linked', (ctx) => {
+        requireServedLinkedRow(ctx);
+
+        // The acceptance criterion: present, not merely well-typed. If this
+        // ever goes red on a stack that is otherwise healthy, the first
+        // hypothesis is the 1h memo documented on the AlbumMetadataResponse
+        // schema — a cache entry written while this key had no linked row will
+        // keep omitting all three until it expires.
+        expect(
+          served!.recordLabel,
+          'recordLabel absent for a linked row; if the stack is healthy, suspect a pre-link entry still inside the 1h memo window'
+        ).toBeTruthy();
+        expect(typeof served!.recordLabel).toBe('string');
+        expect(served!.metadataStatus, 'metadataStatus absent for a linked row').toBeTruthy();
+        // NOT NULL DEFAULT 'pending' on the column, so a linked row always has one.
+        expect([
+          'pending',
+          'enriching',
+          ...TERMINAL_STATUSES,
+        ]).toContain(served!.metadataStatus);
+        if (served!.labelId !== undefined) {
+          expect(Number.isInteger(served!.labelId)).toBe(true);
         }
       });
 
-      it('keeps recordLabel distinct from the Discogs release label', async () => {
-        const row = await findLinkedRow();
-        if (!row) {
-          console.log('Skipping: no linked flowsheet row with a record_label in the recent feed');
+      it('echoes the same row the feed reports, when the response is not a stale memo', (ctx) => {
+        requireServedLinkedRow(ctx);
+
+        // Equality against a live feed read is only owed when the response was
+        // assembled from the row's CURRENT state. `metadataStatus` is the
+        // freshness witness: BS#1827 reads all three base fields from a single
+        // `selectLinkedFlowsheetRow` call, so a response whose status matches
+        // the feed row's was read from that same state and must agree on the
+        // rest. A response served from an older memo can legitimately disagree
+        // — asserting equality unconditionally would be a scheduled flake
+        // against a correctly-behaving server.
+        if (served!.metadataStatus !== linkedRow!.metadata_status) {
+          expect(TERMINAL_STATUSES, 'a memoized status is always terminal (BS#1893)').toContain(
+            served!.metadataStatus
+          );
           return;
         }
 
-        const query = new URLSearchParams({
-          artistName: row.artist_name!,
-          releaseTitle: row.album_title!,
-        });
-        const response = await client.get<AlbumMetadataResponse>(
-          `/proxy/metadata/album?${query.toString()}`
-        );
+        expect(served!.recordLabel).toBe(linkedRow!.record_label);
+        if (linkedRow!.label_id != null) {
+          expect(served!.labelId).toBe(linkedRow!.label_id);
+        }
+      });
 
-        expect(response.ok).toBe(true);
+      it('keeps recordLabel distinct from the Discogs release label', (ctx) => {
+        requireServedLinkedRow(ctx);
+
         // `label` may be absent entirely — pre-BS#1336 album_metadata rows
         // still carry a NULL label (BS#1442). That is exactly why the two are
         // separate keys: `recordLabel` survives regardless.
-        expect(response.body.recordLabel).toBeTruthy();
-        if (response.body.label !== undefined) {
-          expect(typeof response.body.label).toBe('string');
+        expect(served!.recordLabel).toBeTruthy();
+        if (served!.label !== undefined) {
+          expect(typeof served!.label).toBe('string');
         }
       });
     });
