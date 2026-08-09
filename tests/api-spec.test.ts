@@ -74,7 +74,12 @@ describe('OpenAPI Specification', () => {
         ...((schema.allOf as unknown[] | undefined) ?? []).flatMap(walk),
       ];
     }
-    return walk(spec.components.schemas[schemaName]);
+    // De-duplicated: composition here is a lattice, not a tree — two allOf
+    // branches can reach the same field block (that is the whole point of
+    // `FlowsheetEntryFields`), and a raw concat would then report a key twice
+    // and fail an equality assertion for a reason that has nothing to do with
+    // the contract.
+    return [...new Set(walk(spec.components.schemas[schemaName]))];
   }
 
   describe('Structure', () => {
@@ -377,12 +382,16 @@ describe('OpenAPI Specification', () => {
     describe('GET /flowsheet/range (Phase 4 — wiki#91 / #329)', () => {
       function rangeGet(): {
         security?: unknown[];
+        description?: string;
         parameters?: Array<{ name: string; in: string; required?: boolean; schema?: { type?: string } }>;
         responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
       } {
-        const path = spec.paths['/flowsheet/range'] as { get?: ReturnType<typeof rangeGet> };
-        expect(path?.get).toBeDefined();
-        return path.get as ReturnType<typeof rangeGet>;
+        const path = spec.paths['/flowsheet/range'] as { get?: ReturnType<typeof rangeGet> } | undefined;
+        // Throw rather than expect-then-dereference: an absent path would make
+        // every test in this block report a TypeError instead of the missing
+        // endpoint.
+        if (!path?.get) throw new Error('/flowsheet/range is missing from api.yaml');
+        return path.get;
       }
 
       it('is public — no auth, matching its sibling /flowsheet/search', () => {
@@ -412,9 +421,41 @@ describe('OpenAPI Specification', () => {
         );
       });
 
-      it('documents the 31-day window ceiling that bounds this unauthenticated route', () => {
-        const description = (spec.paths['/flowsheet/range'] as { get: { description?: string } }).get.description ?? '';
-        expect(description).toMatch(/31 days/);
+      it('documents the 8-day window ceiling that bounds this unpaginated unauthenticated route', () => {
+        const description = rangeGet().description ?? '';
+        expect(description).toMatch(/8 days/);
+        const badRequest = rangeGet().responses?.['400'] as { description?: string } | undefined;
+        expect(badRequest?.description).toMatch(/8 days/);
+      });
+
+      // Each of these three is a documented invariant of the underlying tables
+      // that a reader of the plan alone would get wrong, and that all three
+      // consumers would then get wrong identically.
+      it('orders entries by add_time, and says why not play_order', () => {
+        const description = rangeGet().description ?? '';
+        // play_order is assigned per-show by two independent writers, so it
+        // interleaves the many shows a window spans (2026-05-01 incident).
+        expect(description).toMatch(/`add_time` ascending/);
+        expect(description).toMatch(/[Nn]ot by `play_order`/);
+        expect(String(propertyOf('FlowsheetRangeResponse', 'entries')?.description)).toMatch(/NOT by `play_order`/);
+      });
+
+      it('forbids reading a null end_time as "on the air"', () => {
+        // A dropped show_end delivery leaves end_time NULL permanently, so
+        // treating NULL as open-ended makes every orphaned historical show
+        // intersect every window forever.
+        expect(rangeGet().description ?? '').toMatch(/does not\s+mean "on the air"/);
+        expect(String(propertyOf('FlowsheetRangeShow', 'end_time')?.description)).toMatch(/two.*causes/s);
+      });
+
+      it('warns that show_end markers can be absent, so grouping keys on show_id', () => {
+        expect(String(propertyOf('FlowsheetRangeResponse', 'entries')?.description)).toMatch(/Segment on `show_id`/);
+      });
+
+      it('warns that breakpoint rows land in the window before the hour they mark', () => {
+        // add_time is the logging instant, ~1 min before the hour in
+        // radio_hour — the BS#1448 / BS#1449 off-by-one-hour class.
+        expect(rangeGet().description ?? '').toMatch(/radio_hour/);
       });
 
       it('envelopes shows and entries, both required', () => {

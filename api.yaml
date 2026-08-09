@@ -413,9 +413,13 @@ components:
           format: date-time
           nullable: true
           description: >-
-            When the DJ signed off (ISO 8601), or `null` for a show still on
-            air — which is the normal case for a window ending at "now", and
-            also occurs on historical rows whose sign-off was never recorded.
+            When the DJ signed off (ISO 8601), or `null`. Null has **two**
+            causes and they are not distinguishable from this field alone: the
+            show is genuinely on the air, or its `show_end` delivery was
+            dropped and the column stayed null permanently (nothing re-closes
+            it on a schedule). Do not render a null `end_time` as "on air now";
+            compare `start_time` against the present, or read the `show_end`
+            marker row in `entries`, which is the second independent signal.
 
     FlowsheetRangeResponse:
       description: >-
@@ -437,9 +441,15 @@ components:
         entries:
           type: array
           description: >-
-            Every flowsheet row in the window, ordered by `play_order` ascending
-            (chronological). Includes the `show_start` / `show_end` marker rows,
-            so a consumer can segment the stream without joining `shows`.
+            Every flowsheet row in the window, ordered by `add_time` ascending
+            and tie-broken on `id` — NOT by `play_order`, which is per-show and
+            interleaves a multi-show window (see the endpoint description).
+            Includes the `show_start` / `show_end` marker rows. Those markers
+            are a convenience, not a guarantee: a show whose `show_end`
+            delivery was dropped has no closing marker (the same failure that
+            leaves `FlowsheetRangeShow.end_time` null), so a consumer that
+            segments purely on markers will run one show's entries into the
+            next. Segment on `show_id` and treat the markers as labels.
           items:
             $ref: '#/components/schemas/FlowsheetRangeEntry'
 
@@ -7542,20 +7552,49 @@ paths:
         **Window semantics.** `start` and `end` are epoch **milliseconds**, not
         ISO strings — they match the `dayStart` convention the `archive` app
         already computes. The window is half-open, `[start, end)`, evaluated
-        against each entry's `add_time`. `entries` therefore never
-        double-counts a row across two adjacent windows. `shows` uses *overlap*
-        rather than containment: a show is returned when
+        against each entry's `add_time`, so `entries` never double-counts a row
+        across two adjacent windows.
+
+        One consequence to design around rather than discover: `add_time` is the
+        instant a row was *logged*, and a breakpoint row is logged roughly a
+        minute **before** the hour it marks (its true hour lives in
+        `radio_hour`). An hour-aligned window therefore reports each hour's
+        breakpoint in the *previous* window — for a midnight-aligned day, the
+        00:00 marker arrives with the day before. This is the off-by-one-hour
+        class BS#1448 / BS#1449 fixed at the rendering layer; consumers that
+        draw hour markers should key on `radio_hour`, not on which window the
+        row arrived in.
+
+        `shows` uses *overlap* rather than containment: a show is returned when
         `[start_time, end_time)` intersects the window, so a show spanning
-        midnight appears in both days' responses. A show still on air
-        (`end_time: null`) is treated as extending to the present.
+        midnight appears in both days' responses. **A `null` `end_time` does not
+        mean "on the air"** and must not be treated as extending to now — a
+        show whose `show_end` delivery was dropped keeps `end_time` NULL
+        permanently, and reading NULL as open-ended would make every one of
+        those orphaned historical shows intersect every window forever. An
+        open-ended show is included only when its `start_time` falls inside the
+        window; a genuinely live show satisfies that on the windows a listener
+        actually asks for.
+
+        **Ordering.** `entries` is ordered by `add_time` ascending, tie-broken
+        on `id` ascending. **Not by `play_order`** — that column is assigned
+        independently per show by the tubafrenzy webhook path and the dj-site
+        insert path, so it is only meaningful within one show and repeats
+        across the many shows a window spans. Ordering a multi-show window by
+        it interleaves the shows. `id` is globally monotonic, which is why it
+        is the tie-break (same reason `getEntriesByShow` needs one — see the
+        2026-05-01 reordering incident).
 
         **Bounded on purpose.** This is an unauthenticated route over a 2.6M-row
         table, so an unbounded window is a trivially available denial of
-        service. Windows longer than **31 days** are rejected with `400`. That
-        ceiling clears both real consumers with room to spare — 24h for the
-        `archive` daily playlist and 7d for the `wxyc.org` historical-archive
-        page — and is deliberately not exactly 7d, because a week spanning the
-        autumn DST transition is 7d + 1h and would otherwise fail.
+        service. Windows longer than **8 days** are rejected with `400`. That
+        covers both real consumers — 24h for the `archive` daily playlist and
+        7d for the `wxyc.org` historical-archive page — with a day of slack,
+        deliberately not exactly 7d because a week spanning the autumn DST
+        transition is 7d + 1h and would otherwise fail. The ceiling is this
+        tight because the response is unpaginated: it bounds the row count, and
+        therefore the response size, not just the time span. Month- and
+        year-scale analytical reads are explicitly **not** this endpoint's job.
 
         An empty window is a normal result: `200` with
         `{"shows": [], "entries": []}`, never `404`.
@@ -7587,7 +7626,7 @@ paths:
         '400':
           description: >-
             `start` or `end` missing or not an integer, `end` not strictly
-            greater than `start`, or the window longer than 31 days.
+            greater than `start`, or the window longer than 8 days.
           content:
             application/json:
               schema:
