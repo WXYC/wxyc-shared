@@ -205,120 +205,243 @@ components:
         show_id:
           type: integer
 
+    FlowsheetEntryFields:
+      description: >-
+        Every non-identity field of a v1 flowsheet row. Factored out of
+        `FlowsheetEntryResponse` so `FlowsheetRangeEntry` can carry the identical
+        field set while relaxing `show_id` to nullable — the two response shapes
+        must not drift, because iOS V2 decodes both with one decoder
+        (tubafrenzy-decommissioning plan §2.5, consumer #3). Not referenced
+        directly by any path; compose it with an identity block instead.
+      type: object
+      required:
+        - request_flag
+      properties:
+        # Song entry fields
+        album_id:
+          type: integer
+        track_title:
+          type: string
+        album_title:
+          type: string
+        artist_name:
+          type: string
+        record_label:
+          type: string
+        label_id:
+          type: integer
+        rotation_id:
+          type: integer
+        rotation_bin:
+          $ref: '#/components/schemas/RotationBin'
+        request_flag:
+          type: boolean
+        segue:
+          type: boolean
+        # Message/breakpoint fields
+        message:
+          type: string
+        # Metadata fields (from cache)
+        artwork_url:
+          type: string
+          nullable: true
+        discogs_url:
+          type: string
+          nullable: true
+        release_year:
+          type: integer
+          nullable: true
+        discogsUnavailable:
+          type: boolean
+          description: >-
+            Rides the same MD-set "not on Discogs" flag as the Album
+            surfaces (see `Album.discogsUnavailable`), non-nullable to
+            match them. Deliberately camelCase — unlike its snake_case
+            siblings in this block — to match Backend's
+            `withDiscogsUnavailableCamelCase` serializer. Contract-first:
+            the V2 flowsheet album embed will carry this field once the
+            BS-emit piece (WXYC/Backend-Service#1908) lands; it is not
+            emitted there yet.
+        discogsUnavailableNote:
+          type: string
+          nullable: true
+          maxLength: 500
+          description: Optional free-text reason for `discogsUnavailable`.
+        spotify_url:
+          type: string
+          nullable: true
+        apple_music_url:
+          type: string
+          nullable: true
+        youtube_music_url:
+          type: string
+          nullable: true
+        bandcamp_url:
+          type: string
+          nullable: true
+        soundcloud_url:
+          type: string
+          nullable: true
+        artist_bio:
+          type: string
+          nullable: true
+        artist_wikipedia_url:
+          type: string
+          nullable: true
+        track_position:
+          type: string
+          nullable: true
+          description: >
+            Track position on the release (e.g., "A1", "B2", "5"). Populated when the
+            flowsheet entry was created via the dj-site picker after release selection
+            (catalog-track-search plan §5.3 / Track 3). String-typed to match Discogs's
+            `release_track.position`. Null for free-text entries and legacy rows.
+        metadata_status:
+          $ref: '#/components/schemas/MetadataStatus'
+        # Projection-parity fields (BS#1513 / BS#1534). These ride the
+        # flowsheet mutation echoes and the liveFs:update SSE payload via
+        # Backend's CLIENT_FACING_FLOWSHEET_COLUMNS allow-list, but were
+        # previously undeclared here. Optional: absent/nullable on some rows.
+        entry_type:
+          $ref: '#/components/schemas/FlowsheetEntryType'
+        add_time:
+          type: string
+          format: date-time
+          description: The instant this row was logged (ISO 8601).
+        radio_hour:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Top-of-hour a breakpoint row marks (ISO 8601), sourced from
+            tubafrenzy's RADIO_HOUR. Null on non-breakpoint rows and rows
+            predating the producer rollout. Mirrors the V2 breakpoint entry.
+        dj_name:
+          type: string
+          nullable: true
+          description: >-
+            Resolved public display name of the DJ on the row's show. Nullable
+            per the PII-safe resolution chain (BS#1371): user.djName ->
+            shows.legacy_dj_name -> null; never the real-name PII column.
+
     FlowsheetEntryResponse:
       description: Flowsheet entry as returned by the API with all possible fields
       allOf:
         - $ref: '#/components/schemas/FlowsheetEntryBase'
-        - type: object
-          required:
-            - request_flag
-          properties:
-            # Song entry fields
-            album_id:
-              type: integer
-            track_title:
-              type: string
-            album_title:
-              type: string
-            artist_name:
-              type: string
-            record_label:
-              type: string
-            label_id:
-              type: integer
-            rotation_id:
-              type: integer
-            rotation_bin:
-              $ref: '#/components/schemas/RotationBin'
-            request_flag:
-              type: boolean
-            segue:
-              type: boolean
-            # Message/breakpoint fields
-            message:
-              type: string
-            # Metadata fields (from cache)
-            artwork_url:
-              type: string
-              nullable: true
-            discogs_url:
-              type: string
-              nullable: true
-            release_year:
-              type: integer
-              nullable: true
-            discogsUnavailable:
-              type: boolean
-              description: >-
-                Rides the same MD-set "not on Discogs" flag as the Album
-                surfaces (see `Album.discogsUnavailable`), non-nullable to
-                match them. Deliberately camelCase — unlike its snake_case
-                siblings in this block — to match Backend's
-                `withDiscogsUnavailableCamelCase` serializer. Contract-first:
-                the V2 flowsheet album embed will carry this field once the
-                BS-emit piece (WXYC/Backend-Service#1908) lands; it is not
-                emitted there yet.
-            discogsUnavailableNote:
-              type: string
-              nullable: true
-              maxLength: 500
-              description: Optional free-text reason for `discogsUnavailable`.
-            spotify_url:
-              type: string
-              nullable: true
-            apple_music_url:
-              type: string
-              nullable: true
-            youtube_music_url:
-              type: string
-              nullable: true
-            bandcamp_url:
-              type: string
-              nullable: true
-            soundcloud_url:
-              type: string
-              nullable: true
-            artist_bio:
-              type: string
-              nullable: true
-            artist_wikipedia_url:
-              type: string
-              nullable: true
-            track_position:
-              type: string
-              nullable: true
-              description: >
-                Track position on the release (e.g., "A1", "B2", "5"). Populated when the
-                flowsheet entry was created via the dj-site picker after release selection
-                (catalog-track-search plan §5.3 / Track 3). String-typed to match Discogs's
-                `release_track.position`. Null for free-text entries and legacy rows.
-            metadata_status:
-              $ref: '#/components/schemas/MetadataStatus'
-            # Projection-parity fields (BS#1513 / BS#1534). These ride the
-            # flowsheet mutation echoes and the liveFs:update SSE payload via
-            # Backend's CLIENT_FACING_FLOWSHEET_COLUMNS allow-list, but were
-            # previously undeclared here. Optional: absent/nullable on some rows.
-            entry_type:
-              $ref: '#/components/schemas/FlowsheetEntryType'
-            add_time:
-              type: string
-              format: date-time
-              description: The instant this row was logged (ISO 8601).
-            radio_hour:
-              type: string
-              format: date-time
-              nullable: true
-              description: >-
-                Top-of-hour a breakpoint row marks (ISO 8601), sourced from
-                tubafrenzy's RADIO_HOUR. Null on non-breakpoint rows and rows
-                predating the producer rollout. Mirrors the V2 breakpoint entry.
-            dj_name:
-              type: string
-              nullable: true
-              description: >-
-                Resolved public display name of the DJ on the row's show. Nullable
-                per the PII-safe resolution chain (BS#1371): user.djName ->
-                shows.legacy_dj_name -> null; never the real-name PII column.
+        - $ref: '#/components/schemas/FlowsheetEntryFields'
+
+    FlowsheetRangeEntryBase:
+      description: >-
+        Identity block for `GET /flowsheet/range`. Identical to
+        `FlowsheetEntryBase` except that `show_id` is nullable — see that
+        property's description. Kept separate rather than relaxing
+        `FlowsheetEntryBase` in place so the other flowsheet paths' documented
+        shapes are untouched by this endpoint.
+      type: object
+      required:
+        - id
+        - play_order
+        - show_id
+      properties:
+        id:
+          type: integer
+        play_order:
+          type: integer
+        show_id:
+          type: integer
+          nullable: true
+          description: >-
+            The show this entry belongs to, or `null` for an **unattributed**
+            entry — a row that exists with no linked show. 20 of 2,619,011 rows
+            are in that state (2005-02-06 → 2026-04-21), and the Phase 0 audit
+            for the tubafrenzy decommissioning decided against backfilling them,
+            so this endpoint returns them rather than dropping them. Consumers
+            that group entries by show must render an unattributed bucket; they
+            must not assume every entry joins to a member of `shows`, and must
+            not crash on the null. The key is always present.
+
+    FlowsheetRangeEntry:
+      description: >-
+        A flowsheet row as returned by `GET /flowsheet/range`. Carries the exact
+        field set of `FlowsheetEntryResponse` (both compose
+        `FlowsheetEntryFields`) and differs from it in one respect: `show_id` is
+        nullable. Field parity is a contract requirement, not a coincidence —
+        iOS V2 decodes this endpoint and `GET /flowsheet` with a single decoder
+        (tubafrenzy-decommissioning plan §2.5, consumer #3).
+      allOf:
+        - $ref: '#/components/schemas/FlowsheetRangeEntryBase'
+        - $ref: '#/components/schemas/FlowsheetEntryFields'
+
+    FlowsheetRangeShow:
+      description: >-
+        Show metadata for one show overlapping a `GET /flowsheet/range` window.
+        A deliberately public-safe projection of the `shows` row: it carries the
+        DJ's public handle but no user id and no real-name column. Distinct from
+        `Show`, which exposes `primary_dj_id` and is used on authenticated
+        surfaces.
+      type: object
+      required:
+        - id
+        - start_time
+      properties:
+        id:
+          type: integer
+          description: >-
+            Matches `FlowsheetRangeEntry.show_id` for every entry belonging to
+            this show.
+        show_name:
+          type: string
+          nullable: true
+          description: Specialty-show name, or `null` for a regular show.
+        dj_name:
+          type: string
+          nullable: true
+          description: >-
+            Resolved public display name of the show's DJ. Same PII-safe
+            resolution chain as `FlowsheetEntryFields.dj_name` (BS#1371):
+            per-show override -> `user.djName` -> `shows.legacy_dj_name`
+            (tubafrenzy's `DJ_HANDLE`) -> null. Never the real-name column.
+        specialty_id:
+          type: integer
+          nullable: true
+        start_time:
+          type: string
+          format: date-time
+          description: When the DJ signed on (ISO 8601).
+        end_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            When the DJ signed off (ISO 8601), or `null` for a show still on
+            air — which is the normal case for a window ending at "now", and
+            also occurs on historical rows whose sign-off was never recorded.
+
+    FlowsheetRangeResponse:
+      description: >-
+        Response body of `GET /flowsheet/range`. `shows` is a deliberate
+        superset: consumers that only need the entry stream (which carries
+        inline `show_start` / `show_end` markers in `entry_type`) can ignore it.
+      type: object
+      required:
+        - shows
+        - entries
+      properties:
+        shows:
+          type: array
+          description: >-
+            Every show overlapping the window, ordered by `start_time` ascending.
+            Empty when the window contains no shows.
+          items:
+            $ref: '#/components/schemas/FlowsheetRangeShow'
+        entries:
+          type: array
+          description: >-
+            Every flowsheet row in the window, ordered by `play_order` ascending
+            (chronological). Includes the `show_start` / `show_end` marker rows,
+            so a consumer can segment the stream without joining `shows`.
+          items:
+            $ref: '#/components/schemas/FlowsheetRangeEntry'
 
     FlowsheetSongEntry:
       description: Song entry in the flowsheet
@@ -7406,6 +7529,69 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ShowPlaylist'
+
+  /flowsheet/range:
+    get:
+      summary: Get flowsheet entries and show metadata for a time window
+      description: |
+        Public, unauthenticated, date-windowed read of the flowsheet. Successor
+        to tubafrenzy's `GET /playlists/dailyEntries?dayStart=<epoch>`, which
+        dies at the tubafrenzy cutover; specified in
+        [`plans/tubafrenzy-decommissioning.md` §2.5](https://github.com/WXYC/wiki/blob/main/plans/tubafrenzy-decommissioning.md).
+
+        **Window semantics.** `start` and `end` are epoch **milliseconds**, not
+        ISO strings — they match the `dayStart` convention the `archive` app
+        already computes. The window is half-open, `[start, end)`, evaluated
+        against each entry's `add_time`. `entries` therefore never
+        double-counts a row across two adjacent windows. `shows` uses *overlap*
+        rather than containment: a show is returned when
+        `[start_time, end_time)` intersects the window, so a show spanning
+        midnight appears in both days' responses. A show still on air
+        (`end_time: null`) is treated as extending to the present.
+
+        **Bounded on purpose.** This is an unauthenticated route over a 2.6M-row
+        table, so an unbounded window is a trivially available denial of
+        service. Windows longer than **31 days** are rejected with `400`. That
+        ceiling clears both real consumers with room to spare — 24h for the
+        `archive` daily playlist and 7d for the `wxyc.org` historical-archive
+        page — and is deliberately not exactly 7d, because a week spanning the
+        autumn DST transition is 7d + 1h and would otherwise fail.
+
+        An empty window is a normal result: `200` with
+        `{"shows": [], "entries": []}`, never `404`.
+      security: []
+      parameters:
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Inclusive start of the window, epoch milliseconds (UTC).
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: >-
+            Exclusive end of the window, epoch milliseconds (UTC). Must be
+            strictly greater than `start`.
+      responses:
+        '200':
+          description: Shows and entries for the window.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlowsheetRangeResponse'
+        '400':
+          description: >-
+            `start` or `end` missing or not an integer, `end` not strictly
+            greater than `start`, or the window longer than 31 days.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /flowsheet/search:
     get:

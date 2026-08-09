@@ -33,6 +33,50 @@ describe('OpenAPI Specification', () => {
     spec = parse(content) as OpenAPISpec;
   });
 
+  // Composed schemas in this spec are `allOf: [<identity block>, <field block>]`
+  // and either branch may be a `$ref` rather than an inline object —
+  // `FlowsheetEntryResponse` and `FlowsheetRangeEntry` both share their field
+  // block that way, so that the two can never drift apart. A walk that only
+  // reads inline `properties`/`required` off the immediate branches silently
+  // finds nothing on those, which reads as "the field isn't declared" rather
+  // than "the helper can't see it". These two follow `$ref` instead.
+  function deref(node: unknown, seen = new Set<string>()): Record<string, unknown> | undefined {
+    if (!node || typeof node !== 'object') return undefined;
+    const schema = node as Record<string, unknown>;
+    const ref = schema.$ref;
+    if (typeof ref !== 'string') return schema;
+    if (seen.has(ref)) return undefined;
+    seen.add(ref);
+    return deref(spec.components.schemas[ref.split('/').pop() as string], seen);
+  }
+
+  function propertyOf(schemaName: string, prop: string): Record<string, unknown> | undefined {
+    function walk(node: unknown): Record<string, unknown> | undefined {
+      const schema = deref(node);
+      if (!schema) return undefined;
+      const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
+      if (properties?.[prop]) return properties[prop];
+      for (const branch of (schema.allOf as unknown[] | undefined) ?? []) {
+        const found = walk(branch);
+        if (found) return found;
+      }
+      return undefined;
+    }
+    return walk(spec.components.schemas[schemaName]);
+  }
+
+  function requiredKeysOf(schemaName: string): string[] {
+    function walk(node: unknown): string[] {
+      const schema = deref(node);
+      if (!schema) return [];
+      return [
+        ...((schema.required as string[] | undefined) ?? []),
+        ...((schema.allOf as unknown[] | undefined) ?? []).flatMap(walk),
+      ];
+    }
+    return walk(spec.components.schemas[schemaName]);
+  }
+
   describe('Structure', () => {
     it('should be valid OpenAPI 3.0', () => {
       expect(spec.openapi).toMatch(/^3\.0/);
@@ -144,17 +188,7 @@ describe('OpenAPI Specification', () => {
     });
 
     describe('track_position field (catalog-track-search Track 3 / E6)', () => {
-      function getProperty(schemaName: string, prop: string): Record<string, unknown> | undefined {
-        const schema = spec.components.schemas[schemaName] as
-          | { properties?: Record<string, Record<string, unknown>>; allOf?: Array<{ properties?: Record<string, Record<string, unknown>> }> }
-          | undefined;
-        if (!schema) return undefined;
-        if (schema.properties?.[prop]) return schema.properties[prop];
-        for (const branch of schema.allOf ?? []) {
-          if (branch.properties?.[prop]) return branch.properties[prop];
-        }
-        return undefined;
-      }
+      const getProperty = propertyOf;
 
       // String-typed to match Discogs's `release_track.position` (vinyl "A1",
       // CD "5", multi-disc "1-12"). FlowsheetEntryBase + FlowsheetSongEntry
@@ -248,17 +282,7 @@ describe('OpenAPI Specification', () => {
     });
 
     describe('metadata_status field (BS#891 / Epic C)', () => {
-      function getProperty(schemaName: string, prop: string): Record<string, unknown> | undefined {
-        const schema = spec.components.schemas[schemaName] as
-          | { properties?: Record<string, Record<string, unknown>>; allOf?: Array<{ properties?: Record<string, Record<string, unknown>> }> }
-          | undefined;
-        if (!schema) return undefined;
-        if (schema.properties?.[prop]) return schema.properties[prop];
-        for (const branch of schema.allOf ?? []) {
-          if (branch.properties?.[prop]) return branch.properties[prop];
-        }
-        return undefined;
-      }
+      const getProperty = propertyOf;
 
       it('should define MetadataStatus enum with all 5 BS-side values', () => {
         const metadataStatus = spec.components.schemas.MetadataStatus as { type?: string; enum?: string[] };
@@ -280,11 +304,7 @@ describe('OpenAPI Specification', () => {
       });
 
       it('FlowsheetEntryResponse should not require metadata_status (absent on non-track / pre-Epic-C rows)', () => {
-        const schema = spec.components.schemas.FlowsheetEntryResponse as {
-          allOf?: Array<{ required?: string[] }>;
-          required?: string[];
-        };
-        const required = [...(schema.required ?? []), ...(schema.allOf ?? []).flatMap((b) => b.required ?? [])];
+        const required = requiredKeysOf('FlowsheetEntryResponse');
         expect(required).not.toContain('metadata_status');
       });
 
@@ -295,11 +315,7 @@ describe('OpenAPI Specification', () => {
       });
 
       it('FlowsheetV2TrackEntry should not require metadata_status', () => {
-        const schema = spec.components.schemas.FlowsheetV2TrackEntry as {
-          allOf?: Array<{ required?: string[] }>;
-          required?: string[];
-        };
-        const required = [...(schema.required ?? []), ...(schema.allOf ?? []).flatMap((b) => b.required ?? [])];
+        const required = requiredKeysOf('FlowsheetV2TrackEntry');
         expect(required).not.toContain('metadata_status');
       });
     });
@@ -312,25 +328,9 @@ describe('OpenAPI Specification', () => {
       // add_time, radio_hour, and dj_name — fields that rode the wire but were
       // undeclared here, so the SSOT under-described its own payload. They are
       // optional (absent/nullable on some rows), so none is added to `required`.
-      function getProperty(schemaName: string, prop: string): Record<string, unknown> | undefined {
-        const schema = spec.components.schemas[schemaName] as
-          | { properties?: Record<string, Record<string, unknown>>; allOf?: Array<{ properties?: Record<string, Record<string, unknown>> }> }
-          | undefined;
-        if (!schema) return undefined;
-        if (schema.properties?.[prop]) return schema.properties[prop];
-        for (const branch of schema.allOf ?? []) {
-          if (branch.properties?.[prop]) return branch.properties[prop];
-        }
-        return undefined;
-      }
+      const getProperty = propertyOf;
 
-      function requiredKeys(schemaName: string): string[] {
-        const schema = spec.components.schemas[schemaName] as {
-          allOf?: Array<{ required?: string[] }>;
-          required?: string[];
-        };
-        return [...(schema.required ?? []), ...(schema.allOf ?? []).flatMap((b) => b.required ?? [])];
-      }
+      const requiredKeys = requiredKeysOf;
 
       it('declares entry_type via the FlowsheetEntryType enum', () => {
         const entryType = getProperty('FlowsheetEntryResponse', 'entry_type');
@@ -365,6 +365,109 @@ describe('OpenAPI Specification', () => {
         for (const field of ['entry_type', 'add_time', 'radio_hour', 'dj_name']) {
           expect(required).not.toContain(field);
         }
+      });
+    });
+
+    // Successor to tubafrenzy's `/playlists/dailyEntries`, which dies at the
+    // 2026-08-31 cutover (WXYC/wiki#91 Phase 4, WXYC/wxyc-shared#329). Three
+    // consumers get built against this shape at roughly the same time — the
+    // `archive` daily playlist, the wxyc.org historical-archive page, and iOS
+    // V2 — so it is pinned here rather than reverse-engineered from whichever
+    // ships first.
+    describe('GET /flowsheet/range (Phase 4 — wiki#91 / #329)', () => {
+      function rangeGet(): {
+        security?: unknown[];
+        parameters?: Array<{ name: string; in: string; required?: boolean; schema?: { type?: string } }>;
+        responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+      } {
+        const path = spec.paths['/flowsheet/range'] as { get?: ReturnType<typeof rangeGet> };
+        expect(path?.get).toBeDefined();
+        return path.get as ReturnType<typeof rangeGet>;
+      }
+
+      it('is public — no auth, matching its sibling /flowsheet/search', () => {
+        expect(rangeGet().security).toEqual([]);
+      });
+
+      it('requires start and end as epoch-millisecond integers', () => {
+        const params = rangeGet().parameters ?? [];
+        for (const name of ['start', 'end']) {
+          const param = params.find((p) => p.name === name);
+          expect(param, `missing query param ${name}`).toBeDefined();
+          expect(param?.in).toBe('query');
+          expect(param?.required).toBe(true);
+          expect(param?.schema?.type).toBe('integer');
+          // Epoch ms overflows int32 (has since 1970 + 24.8 days).
+          expect(param?.schema).toMatchObject({ format: 'int64' });
+        }
+      });
+
+      it('returns FlowsheetRangeResponse on 200 and ApiErrorResponse on 400', () => {
+        const responses = rangeGet().responses ?? {};
+        expect(responses['200']?.content?.['application/json']?.schema?.$ref).toBe(
+          '#/components/schemas/FlowsheetRangeResponse'
+        );
+        expect(responses['400']?.content?.['application/json']?.schema?.$ref).toBe(
+          '#/components/schemas/ApiErrorResponse'
+        );
+      });
+
+      it('documents the 31-day window ceiling that bounds this unauthenticated route', () => {
+        const description = (spec.paths['/flowsheet/range'] as { get: { description?: string } }).get.description ?? '';
+        expect(description).toMatch(/31 days/);
+      });
+
+      it('envelopes shows and entries, both required', () => {
+        expect(requiredKeysOf('FlowsheetRangeResponse').sort()).toEqual(['entries', 'shows']);
+        expect(propertyOf('FlowsheetRangeResponse', 'entries')).toMatchObject({
+          items: { $ref: '#/components/schemas/FlowsheetRangeEntry' },
+        });
+        expect(propertyOf('FlowsheetRangeResponse', 'shows')).toMatchObject({
+          items: { $ref: '#/components/schemas/FlowsheetRangeShow' },
+        });
+      });
+
+      // 20 of 2,619,011 rows have no linked show and Phase 0 decided against a
+      // backfill, so the null reaches the wire. Both consumers that group by
+      // show are the likely defect site.
+      it('declares entries[].show_id nullable, present, and names the unattributed case', () => {
+        const showId = propertyOf('FlowsheetRangeEntry', 'show_id');
+        expect(showId?.type).toBe('integer');
+        expect(showId?.nullable).toBe(true);
+        expect(String(showId?.description)).toMatch(/unattributed/i);
+        // Nullable value, still-present key — the `--strict-nullable` idiom.
+        expect(requiredKeysOf('FlowsheetRangeEntry')).toContain('show_id');
+      });
+
+      // iOS V2 decodes this endpoint and GET /flowsheet with one decoder
+      // (tubafrenzy-decommissioning plan §2.5, consumer #3), so the two entry
+      // shapes may differ in show_id's nullability and in nothing else. Both
+      // compose FlowsheetEntryFields to make that structural; this pins it.
+      it('carries the exact field set of FlowsheetEntryResponse', () => {
+        function fieldNames(schemaName: string): string[] {
+          function walk(node: unknown): string[] {
+            const schema = deref(node);
+            if (!schema) return [];
+            return [
+              ...Object.keys((schema.properties as Record<string, unknown> | undefined) ?? {}),
+              ...((schema.allOf as unknown[] | undefined) ?? []).flatMap(walk),
+            ];
+          }
+          return [...new Set(walk(spec.components.schemas[schemaName]))].sort();
+        }
+        expect(fieldNames('FlowsheetRangeEntry')).toEqual(fieldNames('FlowsheetEntryResponse'));
+        expect(requiredKeysOf('FlowsheetRangeEntry').sort()).toEqual(
+          requiredKeysOf('FlowsheetEntryResponse').sort()
+        );
+      });
+
+      // Public, unauthenticated surface: the show projection carries the DJ's
+      // handle, never a user id or the real-name column (BS#1371).
+      it('projects shows without primary_dj_id, with a nullable resolved dj_name', () => {
+        expect(propertyOf('FlowsheetRangeShow', 'primary_dj_id')).toBeUndefined();
+        expect(propertyOf('FlowsheetRangeShow', 'dj_name')).toMatchObject({ type: 'string', nullable: true });
+        expect(propertyOf('FlowsheetRangeShow', 'end_time')).toMatchObject({ nullable: true });
+        expect(requiredKeysOf('FlowsheetRangeShow').sort()).toEqual(['id', 'start_time']);
       });
     });
   });
@@ -607,17 +710,8 @@ describe('OpenAPI Specification', () => {
     });
 
     describe('FlowsheetEntryResponse (api.yaml piece of Backend-Service#1908)', () => {
-      function getProperty(prop: string): SchemaProp | undefined {
-        const schema = spec.components.schemas.FlowsheetEntryResponse as {
-          properties?: Record<string, SchemaProp>;
-          allOf?: Array<{ properties?: Record<string, SchemaProp> }>;
-        };
-        if (schema.properties?.[prop]) return schema.properties[prop];
-        for (const branch of schema.allOf ?? []) {
-          if (branch.properties?.[prop]) return branch.properties[prop];
-        }
-        return undefined;
-      }
+      const getProperty = (prop: string): SchemaProp | undefined =>
+        propertyOf('FlowsheetEntryResponse', prop) as SchemaProp | undefined;
 
       it('gains discogsUnavailable as a non-nullable boolean matching the other Album surfaces, camelCase deliberately unlike its snake_case siblings', () => {
         const prop = getProperty('discogsUnavailable');
