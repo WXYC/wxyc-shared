@@ -106,7 +106,7 @@
     "type": "git",
     "url": "git+https://github.com/WXYC/wxyc-shared.git"
   },
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },
