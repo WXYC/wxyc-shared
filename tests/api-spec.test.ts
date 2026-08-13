@@ -2002,6 +2002,88 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  // AppConfig is served unauthenticated from GET /config at app bootstrap and
+  // is the only remote-config surface the mobile clients have. Two properties
+  // here are load-bearing beyond their shape, so they get their own pins:
+  // the exact key spellings (frozen against a consumer that decodes them by
+  // literal name) and their absence from `required` (see the block comment on
+  // the non-required test below for why that one is a safety property, not a
+  // style choice). Decision trail: #338, WXYC/Backend-Service#2111,
+  // WXYC/wxyc-ios-64#912.
+  describe('AppConfig donate fields (#338 / BS#2111)', () => {
+    interface AppConfigSchema {
+      required?: string[];
+      properties: Record<string, { type?: string; description?: string; nullable?: boolean }>;
+    }
+
+    const appConfig = (): AppConfigSchema => spec.components.schemas.AppConfig as AppConfigSchema;
+
+    it('declares donateUrl as a string', () => {
+      const field = appConfig().properties.donateUrl;
+      expect(field).toBeDefined();
+      expect(field.type).toBe('string');
+    });
+
+    it('declares donateEnabled as a boolean', () => {
+      const field = appConfig().properties.donateEnabled;
+      expect(field).toBeDefined();
+      expect(field.type).toBe('boolean');
+    });
+
+    // The constraint the whole slice rests on. iOS's AppConfig decoder is
+    // hand-written and returns a wholesale hardcoded default on ANY decode
+    // failure — silently discarding the remote PostHog key and apiBaseUrl
+    // along with the donate fields. Promoting either field into `required`
+    // arms that cascade on every version skew (backend rollback, stale cached
+    // /config response, an iOS build shipping ahead of the backend deploy).
+    // Nothing else in CI catches the promotion: oasdiff treats adding a
+    // required response property as non-breaking, so this assertion is the
+    // only guard. Non-required means a skewed client still decodes the
+    // response, keeps its remote PostHog key and apiBaseUrl, and merely falls
+    // through to its own compile-time donate default — rather than losing
+    // every remote value at once. See WXYC/wxyc-ios-64#912 and this repo's
+    // #338.
+    it('keeps both donate fields out of required, so a skewed client keeps its remote config instead of falling back wholesale', () => {
+      const required = appConfig().required ?? [];
+      expect(required).not.toContain('donateUrl');
+      expect(required).not.toContain('donateEnabled');
+      // The pre-existing four are untouched by the donate slice.
+      expect(required).toEqual(['posthogApiKey', 'posthogHost', 'requestOMaticUrl', 'apiBaseUrl']);
+    });
+
+    // Backend-Service serves donateUrl as '' (never null) when DONATE_URL is
+    // unset — BS#2111 reads it as `process.env.DONATE_URL || ''`. So the
+    // field is neither nullable nor `format: uri`: '' is a valid value on the
+    // wire and would fail uri validation. Clients collapse '' and absent to
+    // the same "no remote destination" reading and fall through to their
+    // compile-time fallback.
+    it('documents the empty-string-when-unset wire value without declaring nullable or a uri format', () => {
+      const field = appConfig().properties.donateUrl;
+      expect(field.description ?? '').toMatch(/empty string/i);
+      expect(field.nullable).toBeUndefined();
+      expect(field).not.toHaveProperty('format');
+    });
+
+    // `false` hides the entry point; absent does NOT mean hidden. The
+    // dark-ship guarantee is carried by the client's own bootstrap default,
+    // not by omission, so the description must not promise hide-on-absent.
+    it('documents donateEnabled as hide-on-false, client-default-on-absent', () => {
+      const description = appConfig().properties.donateEnabled.description ?? '';
+      expect(description).toMatch(/false/);
+      expect(description).toMatch(/absent/i);
+      expect(description).toMatch(/default/i);
+    });
+
+    // The key spellings are frozen against WXYC/wxyc-ios-64#913, whose
+    // hand-written decoder matches on these literals; renaming either side
+    // alone silently decodes to nil rather than failing loudly.
+    it('freezes the key spellings the iOS consumer decodes', () => {
+      expect(Object.keys(appConfig().properties)).toEqual(
+        expect.arrayContaining(['donateUrl', 'donateEnabled'])
+      );
+    });
+  });
+
   describe('API Endpoints', () => {
     it('should define /flowsheet endpoint', () => {
       expect(spec.paths['/flowsheet']).toBeDefined();
