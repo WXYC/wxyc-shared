@@ -2056,7 +2056,7 @@ describe('OpenAPI Specification', () => {
     // field is neither nullable nor `format: uri`: '' is a valid value on the
     // wire and would fail uri validation. Clients collapse '' and absent to
     // the same "no remote destination" reading and fall through to their
-    // compile-time fallback.
+    // own fallback.
     it('documents the empty-string-when-unset wire value without declaring nullable or a uri format', () => {
       const field = appConfig().properties.donateUrl;
       expect(field.description ?? '').toMatch(/empty string/i);
@@ -2064,14 +2064,51 @@ describe('OpenAPI Specification', () => {
       expect(field).not.toHaveProperty('format');
     });
 
+    // The two env vars are independent on one deploy, so enabled-with-no-URL
+    // is reachable. iOS resolves it via a fallback ladder that always ends at
+    // a compile-time URL, but nothing structural stops another client from
+    // rendering an enabled button with no destination — the contract has to
+    // say which field decides what.
+    it('resolves the enabled-with-unusable-url state rather than leaving it to each client', () => {
+      const description = appConfig().properties.donateUrl.description ?? '';
+      expect(description).toMatch(/MUST NOT render/);
+      expect(description).toMatch(/independent variables/i);
+    });
+
     // `false` hides the entry point; absent does NOT mean hidden. The
-    // dark-ship guarantee is carried by the client's own bootstrap default,
-    // not by omission, so the description must not promise hide-on-absent.
-    it('documents donateEnabled as hide-on-false, client-default-on-absent', () => {
+    // dark-ship guarantee is carried by each client's own bootstrap default,
+    // not by omission, so the description must not promise hide-on-absent —
+    // the sole frozen consumer resolves absent to *visible*
+    // (`donateEnabled ?? true` in wxyc-ios-64#913).
+    it('documents donateEnabled as hide-on-false, client-default-on-absent, and absence as explicitly not a kill switch', () => {
       const description = appConfig().properties.donateEnabled.description ?? '';
       expect(description).toMatch(/false/);
       expect(description).toMatch(/absent/i);
       expect(description).toMatch(/default/i);
+      expect(description).toMatch(/NOT a kill switch/i);
+    });
+
+    // The propagation floor is ~1h of public cache plus an unbounded
+    // in-process cache, so `false` is a deploy-time switch. BS#2111 documents
+    // this and so does the iOS PR; api.yaml is what the Android and website
+    // implementers read instead, so it has to carry it too.
+    it('warns that false propagates on a deploy-time, cache-bounded schedule rather than instantly', () => {
+      const description = appConfig().properties.donateEnabled.description ?? '';
+      expect(description).toMatch(/max-age=3600/);
+      expect(description).toMatch(/deploy-time/i);
+    });
+
+    // Guards the fix for the trap, not just the wording: a schema-level
+    // `default` would make openapi-typescript emit the property as
+    // non-optional even though it is absent from `required` — the exact
+    // cascade the non-required constraint exists to prevent. Same precedent
+    // as BulkResolveLibrariesRequest.include_tracks.
+    it('declares no schema-level default on either field, and records why', () => {
+      expect(appConfig().properties.donateEnabled).not.toHaveProperty('default');
+      expect(appConfig().properties.donateUrl).not.toHaveProperty('default');
+      expect(appConfig().properties.donateEnabled.description ?? '').toMatch(
+        /no schema-level `default`/
+      );
     });
 
     // The key spellings are frozen against WXYC/wxyc-ios-64#913, whose
