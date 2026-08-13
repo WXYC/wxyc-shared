@@ -82,6 +82,22 @@ teardown() {
     [[ "$output" == *"could not read info.version"* ]]
 }
 
+@test "exits 1 on a comment-only api.yaml edit without a bump (byte-level rule)" {
+    mkdir -p "$TEST_TEMP_DIR/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
+    cp "$REPO_ROOT/api.yaml" "$TEST_TEMP_DIR/api.yaml"
+    # CLAUDE.md's rule text says a #-comment edit inside api.yaml counts as
+    # content. Pin that against a future swap of the whole-file diff for a
+    # semantic/comment-stripping comparison, which would make the documented
+    # rule silently false.
+    cp "$REPO_ROOT/api.yaml" "$TEST_TEMP_DIR/base.yaml"
+    echo "# test-only trailing comment" >> "$TEST_TEMP_DIR/api.yaml"
+
+    run bash "$TEST_TEMP_DIR/scripts/check-version-bump.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"content changed but info.version"* ]]
+}
+
 @test "exits 1 when content changed and info.version moved backwards" {
     mkdir -p "$TEST_TEMP_DIR/scripts"
     cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
