@@ -1,12 +1,14 @@
 name: API Version Bump Check
 
 # Fails any PR that changes api.yaml's CONTENT without also moving
-# info.version. See CLAUDE.md's "Version bump gate" section and #347: four
-# of the five most recent api.yaml-touching commits before this check landed
-# at an unchanged info.version, including one that added a whole path and
-# schema (363718c). scripts/check-version-bump.sh does the actual
-# comparison; this workflow just wires it into pull_request the same way
-# breaking-changes.yml wires up oasdiff.
+# info.version forward. See CLAUDE.md's "Version bump gate" section and
+# #347: all five of the most recent api.yaml-touching commits before this
+# check landed at an unchanged info.version, including one that added a
+# whole path and schema (363718c). scripts/check-version-bump.sh does the
+# actual comparison; this workflow wires it into pull_request the same way
+# breaking-changes.yml wires up oasdiff — including resolving the PR's own
+# base ref rather than assuming origin/main, so a stacked PR is compared
+# against the base it will actually merge into.
 
 on:
   pull_request:
@@ -27,4 +29,11 @@ jobs:
           fetch-depth: 0
 
       - name: Check info.version moved with api.yaml content
-        run: bash scripts/check-version-bump.sh
+        # BASE_REF goes through env, never inline into the script text —
+        # branch names are caller-controlled (see the ${{ }} discipline in
+        # CLAUDE.md's reusable-workflow section).
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git show "origin/${BASE_REF}:api.yaml" > "${RUNNER_TEMP}/base-api.yaml"
+          bash scripts/check-version-bump.sh "${RUNNER_TEMP}/base-api.yaml"
