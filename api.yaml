@@ -6560,10 +6560,35 @@ components:
       properties:
         discogsApiKey:
           type: string
-          description: Discogs API consumer key, for clients that call Discogs directly.
+          description: >
+            Discogs API consumer key, for clients that call Discogs
+            directly. Backend-Service serves an empty string (`''`) — never
+            `null`, never an omitted key — whenever its `DISCOGS_API_KEY`
+            variable is unset
+            (`process.env.DISCOGS_API_KEY || ''` in
+            config.controller.ts's `getSecrets`), the same fallback shape
+            `AppConfig.donateUrl` documents. Unlike `donateUrl`, there is
+            no client-side substitute for a missing credential: a client
+            that reads `''` here cannot call Discogs directly and must
+            fall back to a server-proxied path instead. Both fields stay
+            `required` because the handler always emits both keys via that
+            fallback, so a spec-conformant producer never omits either;
+            should a future producer ever omit one anyway, a strict
+            consumer's decode of the whole `AppSecrets` object fails,
+            which is the intended trade — a torn set of credentials (one
+            present, one silently missing) is worse than a loud decode
+            failure that surfaces the deploy misconfiguration immediately.
         discogsApiSecret:
           type: string
-          description: Discogs API consumer secret, for clients that call Discogs directly.
+          description: >
+            Discogs API consumer secret, for clients that call Discogs
+            directly. Same empty string (`''`) wire value when unset as
+            `discogsApiKey` (`process.env.DISCOGS_API_SECRET || ''`) and
+            the same required-together rationale: this field only carries
+            meaning paired with `discogsApiKey`, so both are `required`
+            and a producer omitting either arms a decode failure by
+            design rather than a client silently attempting a call with
+            half a credential pair.
 
     TrackListItem:
       type: object
@@ -9662,7 +9687,14 @@ paths:
         Returns API credentials for third-party services (e.g. Discogs) that
         the app needs to call directly. Requires device session
         authentication — unlike `/config`, this is not public bootstrap
-        config.
+        config. Served `Cache-Control: private, max-age=3600` — private
+        because the response carries per-deploy credentials that must not
+        be stored by a shared/intermediate cache, unlike `/config`'s
+        `public, max-age=3600`. The 1-hour bound applies to credential
+        rotation the same way it applies to `AppConfig.donateEnabled`: a
+        client caching this response for its process lifetime can keep
+        using a rotated-out credential for up to an hour after rotation,
+        so rotation is a deploy-time operation, not an instant one.
       security:
         - BearerAuth: []
       responses:
