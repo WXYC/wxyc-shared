@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.35.0
+  version: 1.36.0
   contact:
     name: WXYC
     url: https://wxyc.org
