@@ -2172,6 +2172,43 @@ describe('OpenAPI Specification', () => {
         path.get!.responses?.['200']?.content?.['application/json']?.schema;
       expect(responseSchema?.$ref).toBe('#/components/schemas/AppSecrets');
     });
+
+    // Backend-Service serves both fields as '' (never null, never omitted)
+    // when their env var is unset — config.controller.ts reads
+    // `process.env.DISCOGS_API_KEY || ''` / `process.env.DISCOGS_API_SECRET
+    // || ''`, the same fallback shape #338/BS#2111 documented for
+    // donateUrl. Unlike donateUrl, this field carries no fallback-worthy
+    // "absent means use my own default" reading — an empty credential is
+    // simply an unusable one, so the description says so rather than
+    // instructing a client-side substitution.
+    it('documents the empty-string-when-unset wire value for both fields', () => {
+      const schema = appSecrets();
+      expect(schema.properties.discogsApiKey?.description ?? '').toMatch(/empty string/i);
+      expect(schema.properties.discogsApiSecret?.description ?? '').toMatch(/empty string/i);
+    });
+
+    // Unlike the donate fields (#338), both fields here stay required: the
+    // handler always emits both keys (via `|| ''`), so a spec-conformant
+    // producer never triggers the failure mode. The description has to say
+    // what happens if a *future* producer ever omits one anyway, since that
+    // is the scenario `required` arms.
+    it('justifies the required choice and states the decode consequence of a producer omitting a field', () => {
+      const description = appSecrets().properties.discogsApiKey?.description ?? '';
+      expect(description).toMatch(/required/i);
+      expect(description).toMatch(/decode/i);
+    });
+
+    // No counterpart to /config's 3600s public-cache note existed here
+    // before this ticket. Backend-Service marks the response
+    // `private, max-age=3600` (config.controller.ts getSecrets) — private
+    // because it carries per-deploy credentials that must not be cached by
+    // a shared proxy, unlike /config's public bootstrap data.
+    it('states the response cache semantics on the path description', () => {
+      const path = spec.paths['/config/secrets'] as { get?: { description?: string } };
+      const description = path.get?.description ?? '';
+      expect(description).toMatch(/private/i);
+      expect(description).toMatch(/max-age=3600/);
+    });
   });
 
   describe('API Endpoints', () => {
