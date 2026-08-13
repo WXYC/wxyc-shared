@@ -861,6 +861,15 @@ describe('OpenAPI Specification', () => {
         const prop = propertyOf('FlowsheetCreateSongFromCatalog', 'track_position');
         expect(String(prop?.description)).not.toMatch(/no resolvable identity/);
       });
+
+      // Read-side mirror of the write-side clause above: freeform (LML-only)
+      // rows can now carry a real track_position through
+      // FlowsheetCreateSongFreeform, so "no resolvable identity" is no
+      // longer a valid null-case on the V2 read response either.
+      it('drops the now-inaccurate "no resolvable identity" clause from FlowsheetV2TrackEntry', () => {
+        const prop = propertyOf('FlowsheetV2TrackEntry', 'track_position');
+        expect(String(prop?.description)).not.toMatch(/no resolvable identity/);
+      });
     });
   });
 
