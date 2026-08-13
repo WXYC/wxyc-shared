@@ -6552,6 +6552,19 @@ components:
             variable flips. Anything needing a faster kill than that
             belongs at the destination, not here.
 
+    AppSecrets:
+      type: object
+      required:
+        - discogsApiKey
+        - discogsApiSecret
+      properties:
+        discogsApiKey:
+          type: string
+          description: Discogs API consumer key, for clients that call Discogs directly.
+        discogsApiSecret:
+          type: string
+          description: Discogs API consumer secret, for clients that call Discogs directly.
+
     TrackListItem:
       type: object
       required:
@@ -9641,6 +9654,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppConfig'
+
+  /config/secrets:
+    get:
+      summary: Get third-party API credentials
+      description: >
+        Returns API credentials for third-party services (e.g. Discogs) that
+        the app needs to call directly. Requires device session
+        authentication — unlike `/config`, this is not public bootstrap
+        config.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Third-party API credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppSecrets'
 
   /proxy/artwork/search:
     get:

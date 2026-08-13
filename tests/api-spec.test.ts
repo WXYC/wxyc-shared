@@ -2121,6 +2121,59 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  // AppSecrets is served from GET /config/secrets, the authenticated sibling
+  // of the unauthenticated GET /config above. Shape mirrors Backend-Service's
+  // AppSecrets interface (apps/backend/controllers/config.controller.ts) —
+  // no credential values appear anywhere in this spec, only the response
+  // shape. Decision trail: #341, #338/#339 (the AppConfig precedent).
+  describe('AppSecrets / GET /config/secrets (#341)', () => {
+    interface AppSecretsSchema {
+      required?: string[];
+      properties: Record<string, { type?: string; description?: string }>;
+    }
+
+    const appSecrets = (): AppSecretsSchema =>
+      spec.components.schemas.AppSecrets as AppSecretsSchema;
+
+    it('defines the AppSecrets schema', () => {
+      expect(appSecrets()).toBeDefined();
+    });
+
+    it('declares discogsApiKey and discogsApiSecret as required strings', () => {
+      const schema = appSecrets();
+      expect(schema.properties.discogsApiKey?.type).toBe('string');
+      expect(schema.properties.discogsApiSecret?.type).toBe('string');
+      expect(schema.required).toEqual(
+        expect.arrayContaining(['discogsApiKey', 'discogsApiSecret'])
+      );
+    });
+
+    // Field names are frozen against the live wire — iOS decodes them by
+    // literal name in AppConfiguration.fetchSecrets.
+    it('freezes the key spellings the iOS consumer decodes', () => {
+      expect(Object.keys(appSecrets().properties)).toEqual(
+        expect.arrayContaining(['discogsApiKey', 'discogsApiSecret'])
+      );
+    });
+
+    it('defines GET /config/secrets requiring bearer auth', () => {
+      const path = spec.paths['/config/secrets'] as {
+        get?: {
+          security?: Array<Record<string, unknown>>;
+          responses?: Record<string, { content?: { 'application/json'?: { schema?: { $ref?: string } } } }>;
+        };
+      };
+      expect(path).toBeDefined();
+      expect(path.get).toBeDefined();
+      // Explicitly declared (not just inherited) so codegen consumers don't
+      // mistake this for public bootstrap config like /config.
+      expect(path.get!.security).toEqual([{ BearerAuth: [] }]);
+      const responseSchema =
+        path.get!.responses?.['200']?.content?.['application/json']?.schema;
+      expect(responseSchema?.$ref).toBe('#/components/schemas/AppSecrets');
+    });
+  });
+
   describe('API Endpoints', () => {
     it('should define /flowsheet endpoint', () => {
       expect(spec.paths['/flowsheet']).toBeDefined();
