@@ -2206,8 +2206,14 @@ describe('OpenAPI Specification', () => {
     it('states the response cache semantics on the path description', () => {
       const path = spec.paths['/config/secrets'] as { get?: { description?: string } };
       const description = path.get?.description ?? '';
-      expect(description).toMatch(/private/i);
-      expect(description).toMatch(/max-age=3600/);
+      // Pin the header literal itself, not just its words: /private/i alone
+      // is satisfied by surrounding prose, so a flip of the documented
+      // header to `public` would slip through a looser match.
+      expect(description).toMatch(/Cache-Control:\s*private,\s*max-age=3600/);
+      // And pin the rotation bound as a floor ("an hour or more"), so a
+      // later edit can't quietly turn it back into a ceiling — decoded
+      // credentials outlive the HTTP cache for the process lifetime.
+      expect(description).toMatch(/an hour or more/i);
     });
   });
 

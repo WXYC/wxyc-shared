@@ -6564,9 +6564,9 @@ components:
             Discogs API consumer key, for clients that call Discogs
             directly. Backend-Service serves an empty string (`''`) — never
             `null`, never an omitted key — whenever its `DISCOGS_API_KEY`
-            variable is unset
-            (`process.env.DISCOGS_API_KEY || ''` in
-            config.controller.ts's `getSecrets`), the same fallback shape
+            variable is unset (WXYC/wxyc-shared#348 records the
+            provenance; the Backend-Service handler falls back
+            `process.env.DISCOGS_API_KEY || ''`), the same fallback shape
             `AppConfig.donateUrl` documents. Unlike `donateUrl`, there is
             no client-side substitute for a missing credential: a client
             that reads `''` here cannot call Discogs directly and must
@@ -6576,8 +6576,12 @@ components:
             should a future producer ever omit one anyway, a strict
             consumer's decode of the whole `AppSecrets` object fails,
             which is the intended trade — a torn set of credentials (one
-            present, one silently missing) is worse than a loud decode
-            failure that surfaces the deploy misconfiguration immediately.
+            present, one silently missing) is worse than a whole-object
+            decode failure at the decode site. In practice that surfaces
+            as a logged decode error and a degraded (server-proxied)
+            Discogs path, not a crash — but it is still a diagnosable
+            deploy misconfiguration, where half a credential pair would
+            fail only at Discogs's door with an opaque 401.
         discogsApiSecret:
           type: string
           description: >
@@ -9690,11 +9694,16 @@ paths:
         config. Served `Cache-Control: private, max-age=3600` — private
         because the response carries per-deploy credentials that must not
         be stored by a shared/intermediate cache, unlike `/config`'s
-        `public, max-age=3600`. The 1-hour bound applies to credential
-        rotation the same way it applies to `AppConfig.donateEnabled`: a
-        client caching this response for its process lifetime can keep
-        using a rotated-out credential for up to an hour after rotation,
-        so rotation is a deploy-time operation, not an instant one.
+        `public, max-age=3600`. The 1-hour bound governs HTTP-level cache
+        freshness only — it is a floor on rotation latency, not a ceiling.
+        Like `AppConfig`, clients may hold the decoded credentials for the
+        life of a process (the iOS app fetches secrets once per launch and
+        builds its Discogs client from them permanently), so a rotated-out
+        credential can remain in use for an hour or more, until every
+        client process relaunches or re-fetches. Rotation is therefore not
+        contained by this TTL: treat the old credential as live until it
+        is revoked at the provider, and pair any rotation with server-side
+        revocation rather than waiting out the cache.
       security:
         - BearerAuth: []
       responses:
