@@ -58,6 +58,7 @@
     "test:breaking-guard": "bats scripts/__tests__/check-breaking-changes.test.sh",
     "test:python-codegen": "bats scripts/__tests__/generate-python-models.test.sh",
     "test:spec-drift-guard": "bats scripts/__tests__/check-spec-drift.test.sh",
+    "test:version-bump-guard": "bats scripts/__tests__/check-version-bump.test.sh",
     "test:bs-lml-gate": "bats scripts/__tests__/bs-lml-gate/*.test.sh",
     "lint": "tsc --noEmit --declaration false --declarationMap false",
     "lint:e2e": "tsc -p tsconfig.e2e.json",
@@ -67,7 +68,8 @@
     "generate:swift": "openapi-generator-cli generate -i api.yaml -g swift6 -o generated/swift -c openapi-config/swift6.yaml --skip-validate-spec",
     "generate:python": "bash scripts/generate-python-models.sh --output generated/python/models.py",
     "generate:kotlin": "openapi-generator-cli generate -i api.yaml -g kotlin -o generated/kotlin -c openapi-config/kotlin.yaml --skip-validate-spec",
-    "check:breaking": "bash scripts/check-breaking-changes.sh"
+    "check:breaking": "bash scripts/check-breaking-changes.sh",
+    "check:version-bump": "bash scripts/check-version-bump.sh"
   },
   "files": [
     "dist",

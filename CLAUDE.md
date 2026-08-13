@@ -235,6 +235,18 @@ Both sides pass `--err-ignore oasdiff-err-ignore.txt`, a whitelist of findings t
 - **Entries are verbatim oasdiff message text.** A substring won't match. An oasdiff release that rewords a finding silently un-matches its entry, so a red job after an oasdiff upgrade means re-pasting the new wording, not re-litigating the change.
 - **The file is not an escape hatch for real breaks.** A genuine breaking change gets a contract-version conversation, not a line in the whitelist.
 
+## Version bump gate
+
+**Any content change to `api.yaml` must move `info.version` (line ~9).** `check-version-bump.yml` fails a PR that changes `api.yaml`'s content without also changing `info.version` — additive path/schema/field → minor, description/docs-only → patch. A PR that leaves `api.yaml`'s content byte-identical (only comments elsewhere, or no touch at all) never trips this gate, regardless of what `info.version` says.
+
+This exists because `info.version` had stopped meaning anything: a survey of five consecutive `api.yaml`-touching commits found four landed at an unchanged `1.35.0`, including `363718c`, which added a whole path (`/config/secrets`) and schema (`AppSecrets`) with no version move at all. Downstream consumers record `info.version` as a human-readable identity of "what shape did I generate against" (see WXYC/wxyc-ios-64's `contract-version.json`) — a version that doesn't move makes that identity false. `363718c` is reconciled by this PR's own version bump (`1.35.0` → `1.36.0`), which covers both its change and this one; there is no separate retroactive commit.
+
+Run `npm run check:version-bump` locally before opening a PR that touches `api.yaml`, the same way `npm run check:breaking` is run before the breaking-change gate. Like `check-spec-drift.sh` (#319), the decision is driven by comparing `api.yaml`'s content against the base ref, not by trusting a version string in isolation — the difference here is that this gate *fails the job*, where the spec-drift check is deliberately informational only (it answers a different question: "is a *consumer's pin* stale", not "did *this PR* forget to bump").
+
+`tests/api-spec.test.ts` pins the current `info.version` as a literal sentinel (`pins info.version to the released contract version`) — bumping the version means updating that literal in the same PR, or the test suite (not just CI) tells you the bump didn't happen.
+
+When two contract PRs touch `api.yaml` in parallel worktrees, only the one that actually lands first needs to bump against the version the other started from — the second one bumps again when it rebases, because the merge queue serializes and the gate re-checks content against whatever is on `main` at merge time. Don't pre-emptively bump on behalf of a sibling PR you can see is coming; let its own author's PR do that when it rebases.
+
 ## Testing
 
 ```bash
