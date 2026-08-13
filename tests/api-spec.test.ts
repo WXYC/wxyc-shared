@@ -781,6 +781,76 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  // #340. dj-site's tracklist reads resolve in the legacy_release_id space
+  // (dj-site#1179), but none of catalog/bin/rotation carried that field, so
+  // the client couldn't send the right id. Adds legacy_release_id to all four
+  // response surfaces in one pass (partial coverage leaves the dj-site fix
+  // unimplementable for bin/rotation rows), and track_position to the
+  // freeform flowsheet-create branch (LML-only rows with no library linkage
+  // still carry a Discogs release_track.position).
+  describe('legacy_release_id + track_position (#340)', () => {
+    type SchemaProp = {
+      type?: string;
+      nullable?: boolean;
+    };
+    type Schema = {
+      properties?: Record<string, SchemaProp>;
+      required?: string[];
+    };
+
+    describe('legacy_release_id', () => {
+      it('is optional on AlbumSearchResult, non-nullable', () => {
+        const schema = spec.components.schemas.AlbumSearchResult as Schema;
+        const prop = schema.properties?.legacy_release_id;
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('integer');
+        expect(prop?.nullable).toBeUndefined();
+        expect(schema.required ?? []).not.toContain('legacy_release_id');
+      });
+
+      it('is optional on BinLibraryDetails, non-nullable', () => {
+        const schema = spec.components.schemas.BinLibraryDetails as Schema;
+        const prop = schema.properties?.legacy_release_id;
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('integer');
+        expect(prop?.nullable).toBeUndefined();
+        expect(schema.required ?? []).not.toContain('legacy_release_id');
+      });
+
+      it('is optional and nullable on Rotation (library-unlinked rows have no legacy id)', () => {
+        const schema = spec.components.schemas.Rotation as Schema;
+        const prop = schema.properties?.legacy_release_id;
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('integer');
+        expect(prop?.nullable).toBe(true);
+        expect(schema.required ?? []).not.toContain('legacy_release_id');
+      });
+
+      it('is optional on AlbumInfoResponse (allOf-composed), non-nullable', () => {
+        const prop = propertyOf('AlbumInfoResponse', 'legacy_release_id') as SchemaProp | undefined;
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('integer');
+        expect(prop?.nullable).toBeUndefined();
+        expect(requiredKeysOf('AlbumInfoResponse')).not.toContain('legacy_release_id');
+      });
+    });
+
+    describe('track_position', () => {
+      it('is declared as an optional string on FlowsheetCreateSongFreeform', () => {
+        const schema = spec.components.schemas.FlowsheetCreateSongFreeform as Schema;
+        const prop = schema.properties?.track_position;
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('string');
+        expect(schema.required ?? []).not.toContain('track_position');
+      });
+
+      it('drops the now-inaccurate "no resolvable identity" clause from FlowsheetCreateSongFromCatalog', () => {
+        const prop = propertyOf('FlowsheetCreateSongFromCatalog', 'track_position');
+        expect(String(prop?.description)).not.toMatch(/no resolvable identity/);
+      });
+    });
+  });
+
   // wxyc-shared#318. WXYC/Backend-Service#1827 (merged as #1838) added three
   // "local-first base fields" to GET /proxy/metadata/album — durable BS state
   // read off the linked flowsheet row, so an LML timeout can blank
