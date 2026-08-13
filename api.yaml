@@ -6511,6 +6511,12 @@ components:
         apiBaseUrl:
           type: string
           description: Backend API base URL
+        donateUrl:
+          type: string
+          description: Canonical hosted donation page URL for the "Support the station" entry point. The backend serves '' when unset; clients should treat an empty string the same as an absent field.
+        donateEnabled:
+          type: boolean
+          description: Whether clients should show the donate entry point. Clients hide it when this is false. An absent field means the client applies its own default.
 
     TrackListItem:
       type: object
