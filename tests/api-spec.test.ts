@@ -832,6 +832,19 @@ describe('OpenAPI Specification', () => {
         expect(prop?.type).toBe('integer');
         expect(prop?.nullable).toBeUndefined();
         expect(requiredKeysOf('AlbumInfoResponse')).not.toContain('legacy_release_id');
+
+        // propertyOf() walks every allOf branch and returns the first match,
+        // so the assertions above alone can't distinguish "declared on this
+        // response's own branch" from "hoisted onto the shared Album base" --
+        // which every other Album consumer (e.g. POST /library's 200
+        // response) would then inherit too. Pin the placement directly:
+        // legacy_release_id must live on AlbumInfoResponse's own inline
+        // allOf branch, and must NOT appear on Album itself.
+        type AllOfSchema = { allOf?: Array<{ properties?: Record<string, SchemaProp> }> };
+        const albumInfoResponse = spec.components.schemas.AlbumInfoResponse as AllOfSchema;
+        expect(albumInfoResponse.allOf?.[1]?.properties?.legacy_release_id).toBeDefined();
+        expect(albumInfoResponse.allOf?.[1]?.properties?.legacy_release_id?.type).toBe('integer');
+        expect(propertyOf('Album', 'legacy_release_id')).toBeUndefined();
       });
     });
 
