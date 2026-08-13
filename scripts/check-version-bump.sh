@@ -4,8 +4,9 @@
 # base spec but info.version did not move.
 #
 # Context (#347): info.version does not reliably move with content. A survey
-# of five consecutive api.yaml-touching commits found four landed at an
-# unchanged 1.35.0, including 363718c, which added a whole path
+# of five consecutive api.yaml-touching commits found all five landed at an
+# unchanged 1.35.0 (the last bump before them was 8c35e97, 1.34.0 -> 1.35.0),
+# including 363718c, which added a whole path
 # (/config/secrets) and schema (AppSecrets). Downstream consumers (see
 # WXYC/wxyc-ios-64#919) record info.version as a human-readable identity of
 # "what shape did I generate against" -- a version that doesn't move makes
@@ -91,6 +92,17 @@ if [[ "$BASE_VERSION" == "$CURRENT_VERSION" ]]; then
     echo -e "${yellow}Bump info.version (line ~9) before merging:"
     echo "  - additive path/schema/field -> minor"
     echo -e "  - description/docs-only change -> patch${reset}"
+    exit 1
+fi
+
+# Inequality alone is not enough: a rebase's ours/theirs inversion (the
+# intuitive "keep mine" during a version-line conflict), or a partial revert,
+# can restore an OLDER number over changed content -- re-publishing a version
+# string already used for a different shape, the exact falsehood this gate
+# exists to remove. Require strictly forward motion.
+if ! printf '%s\n%s\n' "$BASE_VERSION" "$CURRENT_VERSION" | sort -V -C; then
+    echo -e "\n${red}api.yaml content changed but info.version moved backwards ($BASE_VERSION -> $CURRENT_VERSION).${reset}"
+    echo -e "${yellow}The new version must sort after the base's ($BASE_VERSION) -- a lower or reused number republishes an already-used identity for a different shape. If this is a rebase conflict resolution, take the higher version and raise it.${reset}"
     exit 1
 fi
 

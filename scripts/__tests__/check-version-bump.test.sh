@@ -6,7 +6,7 @@
 # Or directly: npx bats scripts/__tests__/check-version-bump.test.sh
 #
 # Context (#347): api.yaml's info.version does not reliably move with
-# content -- four of the five most recent api.yaml-touching commits landed
+# content -- all five of the most recent api.yaml-touching commits landed
 # at an unchanged 1.35.0, including one that added a whole path and schema.
 # This script is the enforcement half of the fix (see CLAUDE.md's "Version
 # bump gate" section): fail when a base..current diff shows content changed
@@ -82,6 +82,21 @@ teardown() {
     [[ "$output" == *"could not read info.version"* ]]
 }
 
+@test "exits 1 when content changed and info.version moved backwards" {
+    mkdir -p "$TEST_TEMP_DIR/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
+    cp "$REPO_ROOT/api.yaml" "$TEST_TEMP_DIR/api.yaml"
+    # The rebase ours/theirs-inversion scenario: base carries a higher
+    # version than the current spec, and content differs. Mere inequality
+    # must not pass -- the version has to sort forward.
+    sed 's/^  version:.*/  version: 99.0.0/' "$REPO_ROOT/api.yaml" > "$TEST_TEMP_DIR/base.yaml"
+    echo "x-test-marker: base" >> "$TEST_TEMP_DIR/base.yaml"
+
+    run bash "$TEST_TEMP_DIR/scripts/check-version-bump.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"backwards"* ]]
+}
+
 @test "warns and exits 0 when no base spec is available and none is given" {
     mkdir -p "$TEST_TEMP_DIR/scripts"
     cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/scripts/"
@@ -94,11 +109,15 @@ teardown() {
 
 # --- end-to-end, against the real repo history ---
 
-@test "the script exits 0 on the current diff against origin/main" {
+@test "the script reaches a decision on the current diff against origin/main" {
     command -v git > /dev/null || skip "git not available"
     git -C "$REPO_ROOT" show origin/main:api.yaml > /dev/null 2>&1 \
         || skip "no origin/main api.yaml to diff against"
 
+    # Assert the script RAN (no exit-2 error), not that the branch is
+    # compliant: on a mid-flight branch whose api.yaml legitimately hasn't
+    # been bumped yet, exit 1 is the script working as designed, and a
+    # unit-test failure here would misread branch state as a script bug.
     run "$SCRIPT_PATH"
-    [ "$status" -eq 0 ]
+    [ "$status" -ne 2 ]
 }
