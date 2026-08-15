@@ -1,7 +1,8 @@
 # OpenAPI Generator config for Swift (swift6 generator)
 # Models-only output written to generated/swift (gitignored, in-repo).
-# Reference/diff aid for the Swift consumers (wxyc-dj-ios, wxyc-ios-64), which
-# currently hand-maintain their DTOs; see the Code Generation section of CLAUDE.md.
+# wxyc-ios-64 vendors this generated output directly (Shared/WXYCAPIModels/);
+# wxyc-dj-ios still hand-maintains its own DTOs, until its adoption PR lands.
+# See the Code Generation section of CLAUDE.md.
 #
 # NOTE: generateApis: false does NOT suppress the APIs/ dir under the swift6
 # generator -- it still emits DefaultAPI.swift etc. Fine for this in-repo
@@ -20,3 +21,18 @@ hashableModels: true
 identifiableModels: false      # REQUIRED -- see gotcha 1
 enumUnknownDefaultCase: true   # forward-compatible enums (unknownDefault case)
 oneOfUnknownDefaultCase: true
+
+# format: date -> CalendarDate (WXYC/wxyc-shared#351/#357). Foundation.Date is
+# an absolute instant; decoding a calendar date into one fabricates a UTC
+# anchor the value never had, which silently shifts the rendered day by one
+# for any client west of UTC and re-encodes as a date-time instead of the
+# bare wire string. This mapping is format-scoped, not base-type-scoped: it
+# retargets only the `format: date` sites and leaves every `format: date-time`
+# property on Foundation.Date, where it is correct (confirmed exhaustively
+# against all 43 date-time sites by the #355 spike). CalendarDate itself is
+# hand-vendored at openapi-config/swift-support/CalendarDate.swift and copied
+# into the generated tree by the postgenerate:swift npm hook, since
+# typeMappings only substitutes the type name -- it does not synthesize the
+# type.
+typeMappings:
+  date: CalendarDate

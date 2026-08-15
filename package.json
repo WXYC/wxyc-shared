@@ -66,6 +66,7 @@
     "generate": "npm run generate:typescript && npm run generate:python && npm run generate:swift && npm run generate:kotlin",
     "generate:typescript": "node scripts/generate-models.js",
     "generate:swift": "openapi-generator-cli generate -i api.yaml -g swift6 -o generated/swift -c openapi-config/swift6.yaml --skip-validate-spec",
+    "postgenerate:swift": "node scripts/copy-swift-support-files.js",
     "generate:python": "bash scripts/generate-python-models.sh --output generated/python/models.py",
     "generate:kotlin": "openapi-generator-cli generate -i api.yaml -g kotlin -o generated/kotlin -c openapi-config/kotlin.yaml --skip-validate-spec",
     "check:breaking": "bash scripts/check-breaking-changes.sh",

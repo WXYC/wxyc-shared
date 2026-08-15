@@ -85,6 +85,70 @@ describe("CLAUDE.md's codegen consumer table (#302)", () => {
   });
 });
 
+// Same precedent as #302 above, for the `generate:swift` row: it said
+// "Nobody" / "wxyc-dj-ios, wxyc-ios-64 hand-author types mirroring api.yaml",
+// which stopped being true once wxyc-ios-64 started vendoring this repo's
+// generated Swift output directly (WXYC/wxyc-ios-64#598) rather than
+// hand-authoring it — and WXYC/wxyc-shared#357 (CalendarDate) made the gap
+// concrete by giving that vendored output a real behavioral consumer.
+// wxyc-dj-ios still hand-authors its Swift DTOs until its own adoption PR
+// (WXYC/wxyc-dj-ios#79) lands, so the row must keep that half accurate too.
+describe("CLAUDE.md's codegen consumer table names the Swift consumer correctly (#357)", () => {
+  const claudeMd = readFileSync(join(__dirname, "..", "CLAUDE.md"), "utf-8");
+
+  /** The `| generate:swift | ... |` row of the "Output locations and consumers" table. */
+  const swiftRow = () => {
+    const row = claudeMd
+      .split("\n")
+      .find((line) => /^\|\s*`generate:swift`\s*\|/.test(line));
+    expect(row, "generate:swift row missing from the consumer table").toBeDefined();
+    return row as string;
+  };
+
+  it("names wxyc-ios-64 as a consumer of generated/swift/, not 'Nobody'", () => {
+    expect(swiftRow()).toMatch(/wxyc-ios-64/);
+    expect(swiftRow()).not.toMatch(/\|\s*Nobody\s*\|/);
+  });
+
+  it("does not claim wxyc-ios-64 hand-authors its Swift DTOs", () => {
+    // wxyc-ios-64 vendors generated output into Shared/WXYCAPIModels/; only
+    // wxyc-dj-ios still hand-authors, and only until its adoption PR lands.
+    // Isolate the wxyc-ios-64 clause (up to the `;`) in the "Where those
+    // types actually come from" cell, so a hand-author mention of the
+    // *other* consumer (wxyc-dj-ios) later in the same cell can't produce a
+    // false negative for this assertion.
+    const cells = swiftRow().split("|").map((c) => c.trim());
+    const whereFrom = cells[4];
+    expect(whereFrom, "unexpected table cell layout").toMatch(/wxyc-ios-64/);
+    const ios64Clause = whereFrom.split(";")[0];
+    expect(ios64Clause).not.toMatch(/hand-author/);
+  });
+});
+
+// #357's other two now-false claims, both about Swift specifically (Python's
+// equivalent claims are pinned by the #302 describe block above).
+describe("CLAUDE.md no longer claims Swift codegen changes reach no consumer (#357)", () => {
+  const claudeMd = readFileSync(join(__dirname, "..", "CLAUDE.md"), "utf-8");
+
+  it("does not claim editing codegen flags changes nothing for a Swift consumer", () => {
+    // The literal sentence #357 called out: wxyc-ios-64 vendors generate:swift's
+    // output directly, so editing this repo's Swift codegen flags is a real
+    // change for that repo, not a no-op.
+    expect(claudeMd).not.toMatch(
+      /changes nothing for any Python, Swift,? (?:and|or) Kotlin consumer/,
+    );
+  });
+
+  it("does not claim the hand-authored Swift types all live in the consumer repo", () => {
+    // The closing paragraph used to say this unconditionally; wxyc-ios-64 is
+    // the exception (it vendors generated output), so an unqualified version
+    // of this claim is false again.
+    expect(claudeMd).not.toMatch(
+      /For Swift\/Kotlin the hand-authored types live in the consumer repo/,
+    );
+  });
+});
+
 // The same claim lived in README.md's Contributing checklist, where a
 // contributor is more likely to meet it than in CLAUDE.md's reference table —
 // and a guard that reads only CLAUDE.md leaves the more-trafficked copy
