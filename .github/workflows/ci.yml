@@ -115,6 +115,32 @@ jobs:
       - name: Generate Python models
         run: npm run generate:python
 
+      # WXYC/wxyc-shared#357: typechecks the hand-vendored CalendarDate
+      # support file that `typeMappings: date=CalendarDate`
+      # (openapi-config/swift6.yaml) references. This repo's CI has no Java
+      # step and never runs `generate:swift` (see CLAUDE.md's Code
+      # Generation section) -- this step is the only place that would catch
+      # a CalendarDate edit that fails to compile before it reaches
+      # wxyc-ios-64's adoption PR, which is where the type's behavioral test
+      # suite actually lives.
+      #
+      # Runs via the official `swift` Docker image at an exact, pinned patch
+      # tag (not a floating `6.2` or `latest`) rather than a setup action, so
+      # the toolchain version can't drift between runs. `-swift-version 6
+      # -strict-concurrency=complete` are load-bearing, not decoration: a
+      # bare `swiftc` typechecks in Swift 5 mode, which would pass code that
+      # fails to compile in ios-64's swift-tools-version 6.2 / strict
+      # concurrency package. Only Foundation.Date/TimeZone/Calendar are used
+      # (swift-corelibs-foundation on Linux), so the full (non-`-slim`)
+      # image is required -- the `-slim` variant ships a runtime only, no
+      # `swiftc`.
+      - name: Typecheck CalendarDate.swift (Swift 6, strict concurrency)
+        run: |
+          docker run --rm \
+            -v "$PWD/openapi-config/swift-support:/support:ro" \
+            swift:6.2.4-noble \
+            swiftc -typecheck -swift-version 6 -strict-concurrency=complete /support/CalendarDate.swift
+
       - name: Build
         run: npm run build
 
