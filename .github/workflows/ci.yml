@@ -87,7 +87,7 @@ jobs:
       # datamodel-code-generator version in the script is authoritative rather
       # than whatever the runner happens to have on PATH.
       - name: Set up uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           # setup-uv's cache is ~/.cache/uv -- exactly where `uvx` lands its
           # fetches of datamodel-code-generator/ruff (and any uv-managed
