@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.38.0
+  version: 1.39.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -146,26 +146,19 @@ components:
                   - unavailable
                   - timeout
 
-    Genre:
-      type: string
-      enum:
-        - Blues
-        - Rock
-        - Electronic
-        - Hiphop
-        - Jazz
-        - Classical
-        - Reggae
-        - Soundtracks
-        - OCS
-        - Unknown
-
-    Format:
-      type: string
-      enum:
-        - Vinyl
-        - CD
-        - Unknown
+    # `Genre` and `Format` used to live here as closed enums. Both were
+    # transcribed from dj-site's own presentation-layer unions
+    # (lib/features/catalog/types.ts, written 2025-01, a year before this file
+    # existed) rather than from the database, and both carried dj-site's
+    # `Unknown` UI fallback sentinel — a value neither the `genres` nor the
+    # `format` table has ever held. `Genre` declared ten values while
+    # production has fifteen; `Format` declared `Vinyl | CD | Unknown` while
+    # the column holds `cd`, `vinyl`, `vinyl 12"`, `vinyl 7"`, `vinyl 10"`,
+    # `cdr`. Neither set is closed at runtime — `POST /library/genres` and
+    # `POST /library/formats` both append rows. `genre_name` is now
+    # `type: string` at its three use sites and `GET /library/genres` is the
+    # authoritative enumeration; a presentation-layer subset belongs in the
+    # consumer, with its own fallback, not in this file. See #367.
 
     RotationBin:
       type: string
@@ -1301,7 +1294,11 @@ components:
             - genre_name
           properties:
             genre_name:
-              $ref: '#/components/schemas/Genre'
+              type: string
+              description: >
+                Free-form: `genres.genre_name` is a `varchar(64)` in a lookup
+                table `POST /library/genres` appends to. `GET /library/genres`
+                is the authoritative enumeration (#367).
 
     Album:
       type: object
@@ -1878,6 +1875,14 @@ components:
 
     GenreEntry:
       type: object
+      description: >
+        One row of `GET /library/genres` — the authoritative enumeration of
+        the genres this station files under. Do not hardcode the set: it is a
+        lookup table `POST /library/genres` appends to, and a closed enum here
+        previously declared ten values while production held fifteen (#367).
+        As of 2026-08 those fifteen are Africa, Asia, Blues, Classical,
+        Comedy, Hiphop, Jazz, Latin, OCS, Reggae, Rock, Soundtracks, Spoken,
+        Xmas, Electronic — listed to orient a reader, not as a contract.
       required:
         - id
         - genre_name
@@ -1886,11 +1891,33 @@ components:
         id:
           type: integer
         genre_name:
-          $ref: '#/components/schemas/Genre'
+          type: string
         code_letters:
           type: string
 
-    AlbumInfoResponse:
+    AlbumDetail:
+      description: >
+        The album-detail response: one `wxyc_schema.library` row plus its
+        artist / format / genre joins, as `getAlbumFromDB` projects it.
+
+        FOUR operations return exactly this shape — `GET /library/info` (both
+        its `album_id` and its `legacy_release_id` branch), `PATCH
+        /library/{id}`, `PATCH /library/{id}/missing`, and `PATCH
+        /library/{id}/found`. The three PATCHes re-read through
+        `getAlbumFromDB` after their write, so there is one shape here, not
+        two. They previously pointed at `AlbumSearchResult` (#365), which
+        declares seven search-only properties no album-detail handler emits
+        (`album_dist`, `artist_dist`, `rotation_bin`, `rotation_id`,
+        `artwork_url`, `matched_via`, `matched_via_alias`) — do not re-point
+        a detail operation at it.
+
+        Named for the shape, not for one endpoint: this was
+        `AlbumInfoResponse`, which read as "the `/library/info` response"
+        while serving four.
+
+        Not to be confused with `Album`, which this composes: that is the
+        bare `library` row as `POST /library` returns it, unjoined and
+        unserialized.
       allOf:
         - $ref: '#/components/schemas/Album'
         - type: object
@@ -1902,35 +1929,75 @@ components:
           properties:
             artist_name:
               type: string
+              description: Joined from `artists.artist_name`.
+            alphabetical_name:
+              type: string
+              nullable: true
+              description: >
+                Joined from `artists.alphabetical_name` — the filing form
+                ("Beatles, The"), used for shelf order.
             code_letters:
               type: string
+              description: Joined from `artists.code_letters`.
+            code_artist_number:
+              type: integer
+              description: >
+                Joined from `genre_artist_crossreference.artist_genre_code` —
+                the artist's number *within* this release's genre, so the same
+                artist has a different one per genre. Part of the call number,
+                not an id.
             format_name:
               type: string
+              description: Joined from `format.format_name`.
             genre_name:
-              $ref: '#/components/schemas/Genre'
+              type: string
+              description: >
+                Joined from `genres.genre_name`, a `varchar(64)`. Free-form:
+                `GET /library/genres` is the authoritative enumeration (#367).
+            record_label:
+              type: string
+              nullable: true
+              description: >
+                The SAME column as `label` above — `getAlbumFromDB` projects
+                `library.label` twice, under both names, so both are always
+                present and always equal. Prefer `label`; `record_label` is
+                retained because consumers read it.
+            plays:
+              type: integer
+              description: Station play count for this release.
+            last_modified:
+              type: string
+              format: date-time
+              nullable: true
+            date_lost:
+              type: string
+              format: date
+              nullable: true
+              description: >
+                Set when a DJ flags the release missing from the stacks
+                (BS#393); cleared-by-superseding when it is found again. A
+                release is currently missing when `date_lost` is set and
+                `date_found` is either absent or earlier than it.
+            date_found:
+              type: string
+              format: date
+              nullable: true
+            on_streaming:
+              type: boolean
+              nullable: true
+              description: >
+                Whether the release resolved to a streaming service. `false`
+                is meaningful (checked, absent — the WXYC EXCLUSIVE case);
+                null means never checked.
             legacy_release_id:
               type: integer
               description: >
                 The library row's surrogate key (BS#1963), NOT NULL in the
-                database since migration 0137. Optional here (never
-                required) so the live openapi-compliance deploy gate stays
-                green across the publish -> BS-deploy window, matching the
-                CatalogExportRow and BulkResolveInput precedent.
-            rotation:
-              type: object
-              nullable: true
-              properties:
-                id:
-                  type: integer
-                rotation_bin:
-                  $ref: '#/components/schemas/RotationBin'
-                add_date:
-                  type: string
-                  format: date
-                kill_date:
-                  type: string
-                  format: date
-                  nullable: true
+                database since migration 0137. Optional here, never required,
+                matching the `CatalogExportRow` and `BulkResolveInput`
+                precedent.
+            reconciled_identity:
+              $ref: '#/components/schemas/ReconciledIdentity'
 
     TrackSearchResult:
       type: object
@@ -8556,12 +8623,13 @@ paths:
         fallback.
 
 
-        The two branches agree on the shape of a hit and disagree on a miss. An
-        unmatched `legacy_release_id` is a 404 — a library.db release not yet
-        synced into Backend Postgres. An unmatched `album_id` is a **200 with
-        an empty body**, which is also why this operation's declared 200 schema
-        does not describe that case. Do not port a `if (!body)` branch from one
-        to the other.
+        The two branches now agree on a miss as well: either unmatched
+        identifier is a 404. For `legacy_release_id` that means a library.db
+        release not yet synced into Backend Postgres; for `album_id`, no such
+        serial. Until WXYC/Backend-Service#2212 the `album_id` miss was a 200
+        carrying an empty body — a shape that satisfied this operation's own
+        declared 200 schema not at all, and that every consumer already routed
+        to its error path.
       security: []
       parameters:
         - name: album_id
@@ -8569,11 +8637,12 @@ paths:
           required: false
           description: >
             Backend's serial `wxyc_schema.library.id`. Optional: supply this or
-            `legacy_release_id`, not both. Parsed leniently, unlike the strict
-            sibling below: trailing garbage is truncated to a valid-looking id
-            and a repeated param takes the first, so a corrupted value resolves
-            a *different real release* rather than erroring
-            (WXYC/Backend-Service#2212). Send a bare integer.
+            `legacy_release_id`, not both. Parsed strictly, like the sibling
+            below: a canonical positive int4. Trailing garbage (`65880xyz`),
+            leading zeros, an explicit sign, whitespace, and a repeated param
+            are each a 400 — never a truncated id silently resolving a
+            *different real release*, which is what the bare `parseInt` here
+            did before WXYC/Backend-Service#2212.
           schema:
             type: integer
         - name: legacy_release_id
@@ -8592,17 +8661,19 @@ paths:
             type: integer
       responses:
         '200':
-          description: >
-            Album details. Also returned with an empty body when `album_id`
-            matches no row — see the operation description.
+          description: Album details.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AlbumInfoResponse'
+                $ref: '#/components/schemas/AlbumDetail'
         '400':
-          description: Both identifiers absent, or `legacy_release_id` present but not a positive integer
+          description: >
+            Both identifiers absent, or the supplied one is not a canonical
+            positive int4 — trailing garbage, leading zeros, an explicit sign,
+            surrounding whitespace, and a repeated param are each rejected on
+            both branches.
         '404':
-          description: '`legacy_release_id` matched no catalog row'
+          description: The supplied identifier matched no catalog row
 
   /library/labels:
     get:
@@ -8712,11 +8783,13 @@ paths:
               $ref: '#/components/schemas/UpdateAlbumRequest'
       responses:
         '200':
-          description: Successfully updated album
+          description: >
+            The updated album, re-read through `getAlbumFromDB` after the
+            write — the same shape `GET /library/info` serves.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AlbumSearchResult'
+                $ref: '#/components/schemas/AlbumDetail'
         '404':
           description: Album not found
           content:
@@ -8739,11 +8812,13 @@ paths:
             type: integer
       responses:
         '200':
-          description: Successfully marked album as missing
+          description: >
+            The album with `date_lost` set, re-read through `getAlbumFromDB`
+            after the write — the same shape `GET /library/info` serves.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AlbumSearchResult'
+                $ref: '#/components/schemas/AlbumDetail'
         '404':
           description: Album not found
           content:
@@ -8766,11 +8841,13 @@ paths:
             type: integer
       responses:
         '200':
-          description: Successfully marked album as found
+          description: >
+            The album with `date_found` set, re-read through `getAlbumFromDB`
+            after the write — the same shape `GET /library/info` serves.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AlbumSearchResult'
+                $ref: '#/components/schemas/AlbumDetail'
         '404':
           description: Album not found
           content:
