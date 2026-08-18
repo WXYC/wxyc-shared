@@ -2161,11 +2161,34 @@ describe('OpenAPI Specification', () => {
       expect(p!.required ?? false).toBe(false);
     });
 
-    it('documents the one-of rule and which param wins when both are sent', () => {
+    // Precedence is the claim the ticket said to verify against the handler,
+    // so it is the one that has to be pinned by more than a keyword: an edit
+    // inverting it to "album_id wins" would keep a bare /legacy_release_id/
+    // match green.
+    it('documents that legacy_release_id wins on presence, not on value', () => {
       const description = op().description ?? '';
-      expect(description).toMatch(/legacy_release_id/);
-      expect(description).toMatch(/album_id/);
-      expect(description).toMatch(/400/);
+      expect(description).toMatch(/`legacy_release_id` wins whenever it is \*present\*/);
+      expect(description).toMatch(/before looking at `album_id`/);
+      expect(description).toMatch(/400 only when \*\*both\*\* are absent/);
+    });
+
+    // The two branches differ on a miss, and the difference is the kind that
+    // silently breaks a consumer migrating a permalink from one to the other:
+    // an `if (!body)` empty-state branch simply stops firing once the 404
+    // arrives instead.
+    it('documents the miss contracts as different, not "the same shape"', () => {
+      const description = op().description ?? '';
+      expect(description).toMatch(/404/);
+      expect(description).toMatch(/200 with\s+an empty body/);
+      expect(description).not.toMatch(/Both responses are the same shape/);
+    });
+
+    // A 404 that only exists in prose is unreachable from a generated client —
+    // the exact complaint this ticket opens with, half-fixed.
+    it('declares the 400 and 404 the operation actually returns', () => {
+      const responses = (spec.paths['/library/info'] as { get: { responses?: Record<string, unknown> } })
+        .get.responses ?? {};
+      expect(Object.keys(responses).sort()).toEqual(['200', '400', '404']);
     });
   });
 
