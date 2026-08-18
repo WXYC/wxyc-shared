@@ -829,12 +829,14 @@ describe('OpenAPI Specification', () => {
         // response's own branch" from "hoisted onto the shared Album base" --
         // which every other Album consumer (e.g. POST /library's 200
         // response) would then inherit too. Pin the placement directly:
-        // legacy_release_id must live on AlbumDetail's own inline allOf
-        // branch, and must NOT appear on Album itself.
-        type AllOfSchema = { allOf?: Array<{ properties?: Record<string, SchemaProp> }> };
-        const albumDetail = spec.components.schemas.AlbumDetail as AllOfSchema;
-        expect(albumDetail.allOf?.[1]?.properties?.legacy_release_id).toBeDefined();
-        expect(albumDetail.allOf?.[1]?.properties?.legacy_release_id?.type).toBe('integer');
+        // AlbumDetail is flat, so this is a direct property. Album is the RAW
+        // row POST /library returns and must NOT carry it -- the two schemas
+        // deliberately no longer compose (see AlbumDetail's own description).
+        const albumDetail = spec.components.schemas.AlbumDetail as {
+          properties: Record<string, SchemaProp>;
+        };
+        expect(albumDetail.properties.legacy_release_id).toBeDefined();
+        expect(albumDetail.properties.legacy_release_id.type).toBe('integer');
         expect(propertyOf('Album', 'legacy_release_id')).toBeUndefined();
       });
     });
@@ -2228,21 +2230,8 @@ describe('OpenAPI Specification', () => {
       'matched_via_alias',
     ];
 
-    const detailProperties = (): Record<string, unknown> => {
-      const schema = spec.components.schemas.AlbumDetail as {
-        allOf: Array<{ $ref?: string; properties?: Record<string, unknown> }>;
-      };
-      const merged: Record<string, unknown> = {};
-      for (const member of schema.allOf) {
-        const resolved = member.$ref
-          ? (spec.components.schemas[member.$ref.split('/').pop()!] as {
-              properties?: Record<string, unknown>;
-            })
-          : member;
-        Object.assign(merged, resolved.properties ?? {});
-      }
-      return merged;
-    };
+    const detailProperties = (): Record<string, unknown> =>
+      (spec.components.schemas.AlbumDetail as { properties: Record<string, unknown> }).properties;
 
     it.each(SEARCH_ONLY)('AlbumDetail does not declare the search-only property %s', (prop) => {
       expect(detailProperties()).not.toHaveProperty(prop);
@@ -2252,6 +2241,20 @@ describe('OpenAPI Specification', () => {
     // `rotation` object AlbumInfoResponse carried described nothing.
     it('drops the rotation object no handler returns', () => {
       expect(detailProperties()).not.toHaveProperty('rotation');
+    });
+
+    // Load-bearing, not stylistic. The breaking-change gate's oasdiff compares
+    // allOf branches one at a time, so an allOf-composed AlbumDetail read as
+    // "removed ten required properties" on each of the three PATCHes it
+    // replaced AlbumSearchResult on -- 30 errors for a change that removes
+    // nothing. Reintroducing the composition would redden the gate again.
+    it('stays a flat object rather than an allOf composition', () => {
+      const schema = spec.components.schemas.AlbumDetail as {
+        type?: string;
+        allOf?: unknown;
+      };
+      expect(schema.type).toBe('object');
+      expect(schema.allOf).toBeUndefined();
     });
 
     it('reuses the existing ReconciledIdentity schema rather than inlining it', () => {
@@ -2319,11 +2322,8 @@ describe('OpenAPI Specification', () => {
         {
           label: 'AlbumDetail',
           get: () =>
-            (
-              spec.components.schemas.AlbumDetail as {
-                allOf: Array<{ properties?: Record<string, { type?: string }> }>;
-              }
-            ).allOf.find((m) => m.properties?.genre_name)!.properties!.genre_name,
+            (spec.components.schemas.AlbumDetail as { properties: Record<string, { type?: string }> })
+              .properties.genre_name,
         },
       ];
 

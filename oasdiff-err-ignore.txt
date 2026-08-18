@@ -32,3 +32,41 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
+
+# --- wxyc-shared#365: the three PATCH 200s move from AlbumSearchResult to
+# AlbumDetail, which declares six columns nullable that AlbumSearchResult
+# declared non-nullable.
+#
+# The wire did not change. All six are nullable in Postgres today --
+# `shared/database/src/schema.ts`'s `library` table declares `album_artist`,
+# `label`, `label_id`, `date_lost`, `date_found` and `on_streaming` with no
+# `.notNull()`, and `getAlbumFromDB` projects each one straight through. A
+# client generated against the old spec was already receiving nulls its types
+# said were impossible; these entries cover a spec correcting itself toward
+# what the server has always sent, which is the opposite of a break.
+#
+# The keys themselves stay required where they were required -- `required` in
+# OpenAPI is key presence, not value non-nullity, and the projection always
+# selects these columns. Only the value's nullability is being described
+# honestly for the first time.
+#
+# Prune after this lands: 18 entries, one per (operation, property) pair, all
+# inert the moment the diff is on main.
+PATCH /library/{id} the response property `album_artist` became nullable for the status `200`
+PATCH /library/{id} the response property `date_found` became nullable for the status `200`
+PATCH /library/{id} the response property `date_lost` became nullable for the status `200`
+PATCH /library/{id} the response property `label_id` became nullable for the status `200`
+PATCH /library/{id} the response property `label` became nullable for the status `200`
+PATCH /library/{id} the response property `on_streaming` became nullable for the status `200`
+PATCH /library/{id}/found the response property `album_artist` became nullable for the status `200`
+PATCH /library/{id}/found the response property `date_found` became nullable for the status `200`
+PATCH /library/{id}/found the response property `date_lost` became nullable for the status `200`
+PATCH /library/{id}/found the response property `label_id` became nullable for the status `200`
+PATCH /library/{id}/found the response property `label` became nullable for the status `200`
+PATCH /library/{id}/found the response property `on_streaming` became nullable for the status `200`
+PATCH /library/{id}/missing the response property `album_artist` became nullable for the status `200`
+PATCH /library/{id}/missing the response property `date_found` became nullable for the status `200`
+PATCH /library/{id}/missing the response property `date_lost` became nullable for the status `200`
+PATCH /library/{id}/missing the response property `label_id` became nullable for the status `200`
+PATCH /library/{id}/missing the response property `label` became nullable for the status `200`
+PATCH /library/{id}/missing the response property `on_streaming` became nullable for the status `200`
