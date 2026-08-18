@@ -99,7 +99,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.36.1');
+      expect(spec.info.version).toBe('1.37.0');
     });
 
     it('should have components section', () => {
@@ -2044,6 +2044,80 @@ describe('OpenAPI Specification', () => {
       const description = schema.properties.matched_via.description ?? '';
       expect(description).toContain('catalog-track-search plan §5.1');
       expect(description).not.toContain('multi-location union');
+    });
+  });
+
+  // LibrarySearchItem carries two ids through a three-step, three-deploy
+  // sequence (WXYC/Backend-Service#2167 -> WXYC/dj-site#1224 ->
+  // WXYC/Backend-Service#2168) that moves `id` out of library.db's legacy
+  // space and into Backend's serial `library.id`. The spaces are numerically
+  // coextensive but unrelated: 87.7% of ids resolve to a *different real
+  // release* in the opposite one (WXYC/dj-site#1179), so a consumer that
+  // guesses wrong writes a silently wrong album link rather than missing.
+  // Nothing in the wire shape distinguishes them — only these descriptions
+  // do, which is why they are pinned rather than left to prose.
+  describe('LibrarySearchItem id spaces (WXYC/Backend-Service#2167, step 1 of 3)', () => {
+    type SchemaProp = {
+      type?: string;
+      nullable?: boolean;
+      description?: string;
+    };
+    type Schema = {
+      properties?: Record<string, SchemaProp>;
+      required?: string[];
+    };
+    const item = () => spec.components.schemas.LibrarySearchItem as Schema;
+
+    it('adds legacy_release_id as an optional nullable integer', () => {
+      const field = item().properties?.legacy_release_id;
+      expect(field).toBeDefined();
+      expect(field!.type).toBe('integer');
+      expect(field!.nullable).toBe(true);
+      expect(item().required ?? []).not.toContain('legacy_release_id');
+    });
+
+    // Same openapi-typescript `defaultNonNullable` trap the BulkResolveInput
+    // bridge field documents: a schema-level default emits the TS property
+    // non-optional despite its absence from `required`.
+    it('does not give legacy_release_id a schema-level default', () => {
+      expect(item().properties?.legacy_release_id).not.toHaveProperty('default');
+    });
+
+    it('documents legacy_release_id as the library.db producer key, not the Backend serial', () => {
+      const description = item().properties?.legacy_release_id?.description ?? '';
+      expect(description).toMatch(/LIBRARY_RELEASE\.ID/);
+      expect(description).toMatch(/library\.db/);
+      expect(description).toMatch(/library\.id/);
+    });
+
+    // Present-but-null, not optional. Across the four generated targets that
+    // is the smaller delta for every client: the property stays non-optional
+    // and gains a nullable value, rather than every consumer having to handle
+    // an absent key. `--strict-nullable` is what makes it expressible in the
+    // Python models (see CLAUDE.md).
+    it('makes id nullable while keeping it in required', () => {
+      const field = item().properties?.id;
+      expect(field!.type).toBe('integer');
+      expect(field!.nullable).toBe(true);
+      expect(item().required ?? []).toContain('id');
+    });
+
+    it('documents which space id is in, and confines the null to the Backend rewrite path', () => {
+      const description = item().properties?.id?.description ?? '';
+      expect(description).toMatch(/library\.id/);
+      // The null is a property of Backend's proxy rewrite, not of LML.
+      expect(description).toMatch(/proxy\/library\/search/);
+      expect(description).toMatch(/never emits null/);
+    });
+
+    // library_url embeds the LEGACY id in its path and always will — the
+    // dj-site front door it points at is the legacy resolver. Once step 3
+    // moves `id` to serial, a description that calls that path segment "the
+    // legacy library `id`" is pointing at the wrong field.
+    it('does not let library_url describe its path segment as this row id', () => {
+      const description = item().properties?.library_url?.description ?? '';
+      expect(description).toMatch(/legacy_release_id/);
+      expect(description).not.toMatch(/resolves the legacy\s+library `id`/);
     });
   });
 
