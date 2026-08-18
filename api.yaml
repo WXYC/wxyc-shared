@@ -1896,6 +1896,7 @@ components:
           type: string
 
     AlbumDetail:
+      type: object
       description: >
         The album-detail response: one `wxyc_schema.library` row plus its
         artist / format / genre joins, as `getAlbumFromDB` projects it.
@@ -1915,89 +1916,154 @@ components:
         `AlbumInfoResponse`, which read as "the `/library/info` response"
         while serving four.
 
-        Not to be confused with `Album`, which this composes: that is the
-        bare `library` row as `POST /library` returns it, unjoined and
-        unserialized.
-      allOf:
-        - $ref: '#/components/schemas/Album'
-        - type: object
-          required:
-            - artist_name
-            - code_letters
-            - format_name
-            - genre_name
-          properties:
-            artist_name:
-              type: string
-              description: Joined from `artists.artist_name`.
-            alphabetical_name:
-              type: string
-              nullable: true
-              description: >
-                Joined from `artists.alphabetical_name` — the filing form
-                ("Beatles, The"), used for shelf order.
-            code_letters:
-              type: string
-              description: Joined from `artists.code_letters`.
-            code_artist_number:
-              type: integer
-              description: >
-                Joined from `genre_artist_crossreference.artist_genre_code` —
-                the artist's number *within* this release's genre, so the same
-                artist has a different one per genre. Part of the call number,
-                not an id.
-            format_name:
-              type: string
-              description: Joined from `format.format_name`.
-            genre_name:
-              type: string
-              description: >
-                Joined from `genres.genre_name`, a `varchar(64)`. Free-form:
-                `GET /library/genres` is the authoritative enumeration (#367).
-            record_label:
-              type: string
-              nullable: true
-              description: >
-                The SAME column as `label` above — `getAlbumFromDB` projects
-                `library.label` twice, under both names, so both are always
-                present and always equal. Prefer `label`; `record_label` is
-                retained because consumers read it.
-            plays:
-              type: integer
-              description: Station play count for this release.
-            last_modified:
-              type: string
-              format: date-time
-              nullable: true
-            date_lost:
-              type: string
-              format: date
-              nullable: true
-              description: >
-                Set when a DJ flags the release missing from the stacks
-                (BS#393); cleared-by-superseding when it is found again. A
-                release is currently missing when `date_lost` is set and
-                `date_found` is either absent or earlier than it.
-            date_found:
-              type: string
-              format: date
-              nullable: true
-            on_streaming:
-              type: boolean
-              nullable: true
-              description: >
-                Whether the release resolved to a streaming service. `false`
-                is meaningful (checked, absent — the WXYC EXCLUSIVE case);
-                null means never checked.
-            legacy_release_id:
-              type: integer
-              description: >
-                The library row's surrogate key (BS#1963), NOT NULL in the
-                database since migration 0137. Optional here, never required,
-                matching the `CatalogExportRow` and `BulkResolveInput`
-                precedent.
-            reconciled_identity:
-              $ref: '#/components/schemas/ReconciledIdentity'
+        Deliberately FLAT rather than `allOf: [Album, …]`, though it began
+        that way and every property below `format_id` is also on `Album`. Two
+        reasons. The differ compares `allOf` branches one at a time, so
+        re-pointing the three PATCHes here from the flat `AlbumSearchResult`
+        read as "removed ten required properties" three times over and
+        reddened the breaking-change gate for a change that removes nothing.
+        And the composition was only half true: `Album` is the RAW inserted
+        row `POST /library` returns — snake_case `discogs_unavailable`, no
+        joins, no `reconciled_identity` — while this is the serialized,
+        joined read shape. Sharing a base implied an equivalence the two do
+        not have (see WXYC/Backend-Service#2216).
+      required:
+        - id
+        - artist_id
+        - album_title
+        - code_number
+        - genre_id
+        - format_id
+        - add_date
+        - artist_name
+        - code_letters
+        - code_artist_number
+        - format_name
+        - genre_name
+        - label
+      properties:
+        id:
+          type: integer
+          description: Backend's serial `wxyc_schema.library.id`.
+        artist_id:
+          type: integer
+        album_title:
+          type: string
+        code_number:
+          type: integer
+        genre_id:
+          type: integer
+        format_id:
+          type: integer
+        label:
+          type: string
+          nullable: true
+          description: >
+            `library.label`. Nullable in the database; the key is always
+            present because the projection always selects it.
+        record_label:
+          type: string
+          nullable: true
+          description: >
+            The SAME column as `label` — `getAlbumFromDB` projects
+            `library.label` twice, under both names, so both are always
+            present and always equal. Prefer `label`; `record_label` is
+            retained because consumers read it (#373).
+        label_id:
+          type: integer
+          nullable: true
+        add_date:
+          type: string
+          format: date-time
+        disc_quantity:
+          type: integer
+          nullable: true
+        alternate_artist_name:
+          type: string
+          nullable: true
+        album_artist:
+          type: string
+          nullable: true
+          description: Credited album artist for compilations (e.g., "Kruder & Dorfmeister" on a DJ-Kicks release filed under Various Artists).
+        artist_name:
+          type: string
+          description: Joined from `artists.artist_name`.
+        alphabetical_name:
+          type: string
+          nullable: true
+          description: >
+            Joined from `artists.alphabetical_name` — the filing form
+            ("Beatles, The"), used for shelf order.
+        code_letters:
+          type: string
+          description: Joined from `artists.code_letters`.
+        code_artist_number:
+          type: integer
+          description: >
+            Joined from `genre_artist_crossreference.artist_genre_code` — the
+            artist's number *within* this release's genre, so the same artist
+            has a different one per genre. Part of the call number, not an id.
+        format_name:
+          type: string
+          description: Joined from `format.format_name`.
+        genre_name:
+          type: string
+          description: >
+            Joined from `genres.genre_name`, a `varchar(64)`. Free-form:
+            `GET /library/genres` is the authoritative enumeration (#367).
+        plays:
+          type: integer
+          description: Station play count for this release.
+        last_modified:
+          type: string
+          format: date-time
+        date_lost:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            Set when a DJ flags the release missing from the stacks (BS#393).
+            A release is currently missing when `date_lost` is set and
+            `date_found` is either absent or earlier than it.
+        date_found:
+          type: string
+          format: date-time
+          nullable: true
+        on_streaming:
+          type: boolean
+          nullable: true
+          description: >
+            Whether the release resolved to a streaming service. `false` is
+            meaningful (checked, absent — the WXYC EXCLUSIVE case); null means
+            never checked.
+        legacy_release_id:
+          type: integer
+          description: >
+            The library row's surrogate key (BS#1963), NOT NULL in the
+            database since migration 0137. Optional here, never required,
+            matching the `CatalogExportRow` and `BulkResolveInput` precedent.
+        discogsUnavailable:
+          type: boolean
+          description: |
+            MD-set marker indicating this release is intentionally not on
+            Discogs (embargoed promo, audience-segment release, etc.). When
+            true, the LML runtime-lookup chokepoint does not attempt Discogs
+            resolution for this release. See WXYC/wiki plans/rotation-discogs-unavailable.md.
+        discogsUnavailableNote:
+          type: string
+          nullable: true
+          maxLength: 500
+          description: Optional free-text reason for `discogsUnavailable`.
+        lastDiscogsRecheckAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Stamped on every recheck attempt by the
+            `library-discogs-unavailable-recheck` cron. Read-only from the
+            client side.
+        reconciled_identity:
+          $ref: '#/components/schemas/ReconciledIdentity'
 
     TrackSearchResult:
       type: object
