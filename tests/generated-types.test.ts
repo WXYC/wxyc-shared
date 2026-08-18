@@ -35,8 +35,6 @@ import {
   type TrackMatchHint,
   RotationBin,
   DayOfWeek,
-  Genre,
-  Format,
   RequestStatus,
   MetadataSource,
   MetadataStatus,
@@ -440,16 +438,9 @@ describe('Generated TypeScript Types', () => {
       expect(DayOfWeek.Saturday).toBe('Saturday');
     });
 
-    it('should define Genre values', () => {
-      expect(Genre.Rock).toBe('Rock');
-      expect(Genre.Jazz).toBe('Jazz');
-      expect(Genre.Electronic).toBe('Electronic');
-    });
-
-    it('should define Format values', () => {
-      expect(Format.Vinyl).toBe('Vinyl');
-      expect(Format.CD).toBe('CD');
-    });
+    // `Genre` and `Format` no longer generate a const object: #367 deleted
+    // both components, so there is nothing here to export. Their absence is
+    // pinned in tests/api-spec.test.ts, at the spec level where it is caused.
 
     it('should define RequestStatus values', () => {
       expect(RequestStatus.pending).toBe('pending');

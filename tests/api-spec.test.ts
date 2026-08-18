@@ -99,7 +99,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.38.0');
+      expect(spec.info.version).toBe('1.39.0');
     });
 
     it('should have components section', () => {
@@ -121,21 +121,11 @@ describe('OpenAPI Specification', () => {
       expect(spec.components.schemas.PaginationParams).toBeDefined();
     });
 
-    it('should define Genre enum', () => {
-      const genre = spec.components.schemas.Genre as { enum?: string[] };
-      expect(genre).toBeDefined();
-      expect(genre.enum).toContain('Rock');
-      expect(genre.enum).toContain('Jazz');
-      expect(genre.enum).toContain('Electronic');
-    });
-
-    it('should define Format enum', () => {
-      const format = spec.components.schemas.Format as { enum?: string[] };
-      expect(format).toBeDefined();
-      expect(format.enum).toContain('Vinyl');
-      expect(format.enum).toContain('CD');
-    });
-
+    // The `Genre` and `Format` enum assertions that used to sit here are gone
+    // with the components themselves (#367); "genre and format are open sets"
+    // below now pins their absence. RotationBin stays: unlike those two it is
+    // backed by a real Postgres enum type (`freq_enum`), so the database
+    // enforces the closed set the spec declares.
     it('should define RotationBin enum', () => {
       const rotationBin = spec.components.schemas.RotationBin as { enum?: string[] };
       expect(rotationBin).toBeDefined();
@@ -661,9 +651,10 @@ describe('OpenAPI Specification', () => {
       );
       // Matches libraryController.updateAlbum, which returns
       // libraryService.getAlbumFromDB() — the same call markMissing/markFound
-      // use, already documented as AlbumSearchResult on the sibling paths.
+      // and GET /library/info use. This said AlbumSearchResult until #365
+      // pointed all four at the one shape they actually share.
       expect(path.patch!.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
-        '#/components/schemas/AlbumSearchResult',
+        '#/components/schemas/AlbumDetail',
       );
       expect(path.patch!.responses?.['404']?.content?.['application/json']?.schema?.$ref).toBe(
         '#/components/schemas/ApiErrorResponse',
@@ -826,24 +817,24 @@ describe('OpenAPI Specification', () => {
         expect(schema.required ?? []).not.toContain('legacy_release_id');
       });
 
-      it('is optional on AlbumInfoResponse (allOf-composed), non-nullable', () => {
-        const prop = propertyOf('AlbumInfoResponse', 'legacy_release_id') as SchemaProp | undefined;
+      it('is optional on AlbumDetail (allOf-composed), non-nullable', () => {
+        const prop = propertyOf('AlbumDetail', 'legacy_release_id') as SchemaProp | undefined;
         expect(prop).toBeDefined();
         expect(prop?.type).toBe('integer');
         expect(prop?.nullable).toBeUndefined();
-        expect(requiredKeysOf('AlbumInfoResponse')).not.toContain('legacy_release_id');
+        expect(requiredKeysOf('AlbumDetail')).not.toContain('legacy_release_id');
 
         // propertyOf() walks every allOf branch and returns the first match,
         // so the assertions above alone can't distinguish "declared on this
         // response's own branch" from "hoisted onto the shared Album base" --
         // which every other Album consumer (e.g. POST /library's 200
         // response) would then inherit too. Pin the placement directly:
-        // legacy_release_id must live on AlbumInfoResponse's own inline
-        // allOf branch, and must NOT appear on Album itself.
+        // legacy_release_id must live on AlbumDetail's own inline allOf
+        // branch, and must NOT appear on Album itself.
         type AllOfSchema = { allOf?: Array<{ properties?: Record<string, SchemaProp> }> };
-        const albumInfoResponse = spec.components.schemas.AlbumInfoResponse as AllOfSchema;
-        expect(albumInfoResponse.allOf?.[1]?.properties?.legacy_release_id).toBeDefined();
-        expect(albumInfoResponse.allOf?.[1]?.properties?.legacy_release_id?.type).toBe('integer');
+        const albumDetail = spec.components.schemas.AlbumDetail as AllOfSchema;
+        expect(albumDetail.allOf?.[1]?.properties?.legacy_release_id).toBeDefined();
+        expect(albumDetail.allOf?.[1]?.properties?.legacy_release_id?.type).toBe('integer');
         expect(propertyOf('Album', 'legacy_release_id')).toBeUndefined();
       });
     });
@@ -2172,15 +2163,24 @@ describe('OpenAPI Specification', () => {
       expect(description).toMatch(/400 only when \*\*both\*\* are absent/);
     });
 
-    // The two branches differ on a miss, and the difference is the kind that
-    // silently breaks a consumer migrating a permalink from one to the other:
-    // an `if (!body)` empty-state branch simply stops firing once the 404
-    // arrives instead.
-    it('documents the miss contracts as different, not "the same shape"', () => {
+    // The two branches used to disagree on a miss — an unmatched album_id was
+    // a 200 with an empty body while its sibling 404'd. BS#2212 unified them.
+    // Pinned as a positive claim about agreement, plus a guard against the old
+    // empty-body wording creeping back in alongside it.
+    it('documents both branches 404ing a miss', () => {
       const description = op().description ?? '';
-      expect(description).toMatch(/404/);
-      expect(description).toMatch(/200 with\s+an empty body/);
-      expect(description).not.toMatch(/Both responses are the same shape/);
+      expect(description).toMatch(/either unmatched\s+identifier is a 404/);
+      expect(description).not.toMatch(/is a \*\*200 with\s+an empty body\*\*/);
+    });
+
+    // The defect BS#2212 fixed was silent: a truncated permalink resolved a
+    // real, different release. The spec previously advertised that lenient
+    // parse as intended behavior, so the wording is worth pinning.
+    it('documents album_id as strictly parsed, naming the trailing-garbage case', () => {
+      const description = param('album_id')?.description ?? '';
+      expect(description).toMatch(/[Pp]arsed strictly/);
+      expect(description).toMatch(/65880xyz/);
+      expect(description).not.toMatch(/[Pp]arsed leniently/);
     });
 
     // A 404 that only exists in prose is unreachable from a generated client —
@@ -2189,6 +2189,156 @@ describe('OpenAPI Specification', () => {
       const responses = (spec.paths['/library/info'] as { get: { responses?: Record<string, unknown> } })
         .get.responses ?? {};
       expect(Object.keys(responses).sort()).toEqual(['200', '400', '404']);
+    });
+  });
+
+  // WXYC/wxyc-shared#365: four operations return getAlbumFromDB's row verbatim
+  // and the spec modelled them with two schemas, one of them the catalog
+  // *search* row. #52 is the precedent this deliberately declines to repeat --
+  // it widened AlbumSearchResult to cover the missing/found endpoints, which
+  // fixed two fields and entrenched the mis-modelling.
+  describe('AlbumDetail is the one album-detail shape', () => {
+    type Op = { responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }> };
+    const okRef = (path: string, method: 'get' | 'patch') =>
+      ((spec.paths[path] as Record<string, Op>)[method].responses ?? {})['200']?.content?.[
+        'application/json'
+      ]?.schema?.$ref;
+
+    const DETAIL_OPERATIONS: Array<[string, 'get' | 'patch']> = [
+      ['/library/info', 'get'],
+      ['/library/{id}', 'patch'],
+      ['/library/{id}/missing', 'patch'],
+      ['/library/{id}/found', 'patch'],
+    ];
+
+    it.each(DETAIL_OPERATIONS)('%s %s returns AlbumDetail', (path, method) => {
+      expect(okRef(path, method)).toBe('#/components/schemas/AlbumDetail');
+    });
+
+    // The seven properties AlbumSearchResult declares that no album-detail
+    // handler emits. A future endpoint re-pointed at the search schema would
+    // silently re-admit all of them, which is the failure this pins shut.
+    const SEARCH_ONLY = [
+      'album_dist',
+      'artist_dist',
+      'rotation_bin',
+      'rotation_id',
+      'artwork_url',
+      'matched_via',
+      'matched_via_alias',
+    ];
+
+    const detailProperties = (): Record<string, unknown> => {
+      const schema = spec.components.schemas.AlbumDetail as {
+        allOf: Array<{ $ref?: string; properties?: Record<string, unknown> }>;
+      };
+      const merged: Record<string, unknown> = {};
+      for (const member of schema.allOf) {
+        const resolved = member.$ref
+          ? (spec.components.schemas[member.$ref.split('/').pop()!] as {
+              properties?: Record<string, unknown>;
+            })
+          : member;
+        Object.assign(merged, resolved.properties ?? {});
+      }
+      return merged;
+    };
+
+    it.each(SEARCH_ONLY)('AlbumDetail does not declare the search-only property %s', (prop) => {
+      expect(detailProperties()).not.toHaveProperty(prop);
+    });
+
+    // getAlbumFromDB projects no rotation columns at all, so the nested
+    // `rotation` object AlbumInfoResponse carried described nothing.
+    it('drops the rotation object no handler returns', () => {
+      expect(detailProperties()).not.toHaveProperty('rotation');
+    });
+
+    it('reuses the existing ReconciledIdentity schema rather than inlining it', () => {
+      expect(detailProperties().reconciled_identity).toEqual({
+        $ref: '#/components/schemas/ReconciledIdentity',
+      });
+    });
+
+    // #52 added these two to AlbumSearchResult for the missing/found endpoints.
+    // Those endpoints now point at AlbumDetail, but dj-site's
+    // catalogSearchQueryMatch derives "currently missing" from them on SEARCH
+    // rows, so they stay -- removing them here would be a real break.
+    it.each(['date_lost', 'date_found'])('AlbumSearchResult keeps %s for its search consumers', (prop) => {
+      const schema = spec.components.schemas.AlbumSearchResult as {
+        properties: Record<string, unknown>;
+      };
+      expect(schema.properties).toHaveProperty(prop);
+    });
+  });
+
+  // WXYC/wxyc-shared#367: `Genre` was a closed ten-value enum while production
+  // holds fifteen, and it declared an `Unknown` the genres table has never
+  // had -- because it was transcribed from dj-site's UI union, not the DB.
+  // `Format` was the same artifact, already orphaned.
+  describe('genre and format are open sets', () => {
+    it.each(['Genre', 'Format'])('deletes the %s pseudo-enum component', (name) => {
+      expect(spec.components.schemas).not.toHaveProperty(name);
+    });
+
+    it('leaves no $ref pointing at either deleted component', () => {
+      const source = JSON.stringify(spec);
+      expect(source).not.toMatch(/#\/components\/schemas\/Genre(?![A-Za-z])/);
+      expect(source).not.toMatch(/#\/components\/schemas\/Format(?![A-Za-z])/);
+    });
+
+    // The SSOT used to contradict itself: AlbumSearchResult.genre_name was a
+    // free string while AlbumInfoResponse.genre_name was the enum, for
+    // responses Backend serves from the identical projection.
+    it('types genre_name as a plain string everywhere it appears', () => {
+      const sites: Array<{ label: string; get: () => { type?: string; $ref?: string } }> = [
+        {
+          label: 'GenreEntry',
+          get: () =>
+            (spec.components.schemas.GenreEntry as { properties: Record<string, { type?: string }> })
+              .properties.genre_name,
+        },
+        {
+          label: 'ArtistWithGenre',
+          get: () =>
+            (
+              spec.components.schemas.ArtistWithGenre as {
+                allOf: Array<{ properties?: Record<string, { type?: string }> }>;
+              }
+            ).allOf.find((m) => m.properties?.genre_name)!.properties!.genre_name,
+        },
+        {
+          label: 'AlbumSearchResult',
+          get: () =>
+            (
+              spec.components.schemas.AlbumSearchResult as {
+                properties: Record<string, { type?: string }>;
+              }
+            ).properties.genre_name,
+        },
+        {
+          label: 'AlbumDetail',
+          get: () =>
+            (
+              spec.components.schemas.AlbumDetail as {
+                allOf: Array<{ properties?: Record<string, { type?: string }> }>;
+              }
+            ).allOf.find((m) => m.properties?.genre_name)!.properties!.genre_name,
+        },
+      ];
+
+      for (const site of sites) {
+        expect({ [site.label]: site.get().type }).toEqual({ [site.label]: 'string' });
+      }
+    });
+
+    // The list of current values lives in a description, and a description can
+    // rot. Naming the endpoint is what keeps a reader from treating the
+    // snapshot as the contract -- that is the whole remedy for this defect.
+    it('names GET /library/genres as the authoritative enumeration', () => {
+      const description =
+        (spec.components.schemas.GenreEntry as { description?: string }).description ?? '';
+      expect(description).toMatch(/GET \/library\/genres/);
     });
   });
 
