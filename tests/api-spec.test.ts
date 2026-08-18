@@ -2121,6 +2121,54 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  // GET /library/info takes two mutually-alternative identifiers, one per id
+  // space. External callers — LML's `library_url`, the request line, the
+  // wxyc.info permalink — hold the tubafrenzy legacy id; Backend's own clients
+  // hold the serial. Declaring only `album_id`, and declaring it required, made
+  // the legacy-keyed call the endpoint exists to serve inexpressible from a
+  // generated client and rejectable by a spec-following validator.
+  describe('/library/info identifier params', () => {
+    type Param = {
+      name: string;
+      in: string;
+      required?: boolean;
+      description?: string;
+      schema?: { type?: string };
+    };
+    const op = () =>
+      (spec.paths['/library/info'] as { get: { parameters?: Param[]; description?: string } }).get;
+    const param = (name: string) => op().parameters?.find((p) => p.name === name);
+
+    it('declares legacy_release_id as an optional integer query param', () => {
+      const p = param('legacy_release_id');
+      expect(p).toBeDefined();
+      expect(p!.in).toBe('query');
+      expect(p!.schema?.type).toBe('integer');
+      expect(p!.required ?? false).toBe(false);
+    });
+
+    it('names the id space legacy_release_id belongs to', () => {
+      const description = param('legacy_release_id')?.description ?? '';
+      expect(description).toMatch(/LIBRARY_RELEASE\.ID/);
+      expect(description).toMatch(/library\.id/);
+    });
+
+    // The server 400s only when BOTH are absent, so a spec that marks this one
+    // required contradicts the handler rather than merely under-describing it.
+    it('does not mark album_id required', () => {
+      const p = param('album_id');
+      expect(p).toBeDefined();
+      expect(p!.required ?? false).toBe(false);
+    });
+
+    it('documents the one-of rule and which param wins when both are sent', () => {
+      const description = op().description ?? '';
+      expect(description).toMatch(/legacy_release_id/);
+      expect(description).toMatch(/album_id/);
+      expect(description).toMatch(/400/);
+    });
+  });
+
   describe('Proxy Response Schemas', () => {
     it('should define AlbumMetadataResponse with enriched fields', () => {
       const schema = spec.components.schemas.AlbumMetadataResponse as {
