@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.39.0
+  version: 1.40.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -8601,7 +8601,12 @@ paths:
   /library/formats:
     get:
       summary: Get format list
-      security: []
+      # Inherits the document-level BearerAuth. It used to declare `security: []`
+      # while Backend served it behind `requirePermissions({ catalog: ['read'] })`
+      # (library.route.ts), so a generated client omitted the Authorization
+      # header and got the 401 the spec said was impossible — wxyc-shared#368.
+      # Its neighbour GET /library/genres really is public (BS#1682); formats
+      # was deliberately left gated in that same change and stays gated here.
       responses:
         '200':
           description: List of formats
@@ -8696,7 +8701,12 @@ paths:
         carrying an empty body — a shape that satisfied this operation's own
         declared 200 schema not at all, and that every consumer already routed
         to its error path.
-      security: []
+      # Inherits the document-level BearerAuth. It used to declare `security: []`
+      # while Backend served it behind `requirePermissions({ catalog: ['read'] })`
+      # (library.route.ts), so a generated client omitted the Authorization
+      # header and got the 401 the spec said was impossible — wxyc-shared#368.
+      # Backend's own apps/backend/app.yaml already had this right: it declares
+      # no operation-level security for this path.
       parameters:
         - name: album_id
           in: query
