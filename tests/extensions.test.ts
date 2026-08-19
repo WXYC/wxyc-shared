@@ -318,7 +318,3 @@ describe('Union Types', () => {
   });
 });
 
-// The `Mapped Types` describe covered WeeklySchedule, a `Record<DayOfWeek,
-// ScheduleShift[]>` over two schemas wxyc-shared#372 removed. Both hung off
-// GET /schedule/shifts, which nothing serves, and DayOfWeek disagreed with the
-// live `Schedule.day` on both its type and its week-start.

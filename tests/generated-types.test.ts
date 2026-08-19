@@ -154,10 +154,6 @@ describe('Generated TypeScript Types', () => {
     });
   });
 
-  // The `DJ` describe went with its schema in wxyc-shared#372: DJ and NewDJ
-  // were the shapes of GET /djs and /djs/register, none of which Backend has
-  // ever mounted, and NewDJ keyed on `cognito_user_name`, an auth system it no
-  // longer runs.
 
   describe('ScheduleShift', () => {
     it('takes the integer day the schedule column actually holds', () => {
