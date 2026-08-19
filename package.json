@@ -79,7 +79,7 @@
   ],
   "devDependencies": {
     "@openapitools/openapi-generator-cli": "^2.40.1",
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.2.0",
     "@vitest/coverage-v8": "^4.1.10",
     "bats": "^1.11.0",
     "better-auth": "^1.6.25",
