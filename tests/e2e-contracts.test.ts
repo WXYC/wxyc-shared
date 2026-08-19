@@ -401,9 +401,14 @@ describe('Cross-service contracts (E2E)', () => {
       const entryId = post.body.id;
       const showId = post.body.show_id;
 
-      // Fetch the show's entries via the v2 endpoint, which carries dj_name
-      // on show_start / dj_join markers (the show-block entries that scope
-      // every track row to a DJ).
+      // Fetch the show's entries in the V2 shape, which carries dj_name on
+      // show_start / dj_join markers (the show-block entries that scope every
+      // track row to a DJ).
+      //
+      // The path is plain /flowsheet, not /v2/flowsheet. `projectEntriesV2` is
+      // called by `getEntries`, the handler mounted at GET /flowsheet — no /v2
+      // router was ever mounted, so this request used to 404 (wxyc-shared#372
+      // deleted the two /v2/flowsheet* declarations for the same reason).
       // VIOLATION SYMPTOM: tubafrenzy mirror payload validation fails;
       // dj-site renders an empty DJ name; archive search drops the row.
       const v2 = await client.get<{
@@ -413,7 +418,7 @@ describe('Cross-service contracts (E2E)', () => {
           id?: number;
           show_id?: number | null;
         }>;
-      }>('/v2/flowsheet?limit=100');
+      }>('/flowsheet?limit=100');
       expect(v2.ok).toBe(true);
 
       const entries = v2.body.entries ?? [];

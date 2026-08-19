@@ -3,7 +3,6 @@
  *
  * Contains TypeScript-specific utilities that aren't expressible in OpenAPI:
  * - Generic types (PaginatedResponse<T>)
- * - Mapped types (WeeklySchedule)
  * - Union types (FlowsheetEntry)
  * - Type guards for runtime narrowing
  */
@@ -25,8 +24,6 @@ import type {
   FlowsheetV2TalksetEntry,
   FlowsheetV2BreakpointEntry,
   FlowsheetV2MessageEntry,
-  ScheduleShift,
-  DayOfWeek,
 } from '../generated/models/index.js';
 
 // =============================================================================
@@ -47,11 +44,6 @@ export interface PaginatedResponse<T> {
 // =============================================================================
 // Mapped Types (not expressible in OpenAPI)
 // =============================================================================
-
-/** Weekly schedule organized by day */
-export type WeeklySchedule = {
-  [K in DayOfWeek]: ScheduleShift[];
-};
 
 // =============================================================================
 // Union Types (not expressible in OpenAPI)

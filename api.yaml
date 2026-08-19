@@ -6,7 +6,15 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.41.0
+
+    This document spans two services. Every operation carries `x-wxyc-service`
+    naming the one that serves it: `backend-service` (api.wxyc.org, including
+    the `/auth/*` app on the same host) or `library-metadata-lookup` (a separate
+    host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
+    `servers:` block below names only Backend, so without that marker
+    reachability is not decidable from this document — which is how seventeen
+    operations came to be declared at paths nothing served (wxyc-shared#372).
+  version: 1.42.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -169,16 +177,15 @@ components:
         - S
       description: "Rotation bin levels: H=Heavy, M=Medium, L=Light, S=Single"
 
-    DayOfWeek:
-      type: string
-      enum:
-        - Sunday
-        - Monday
-        - Tuesday
-        - Wednesday
-        - Thursday
-        - Friday
-        - Saturday
+    # DayOfWeek was here (wxyc-shared#372): a closed enum of day names starting
+    # Sunday, referenced only by ScheduleShift.day and
+    # AddScheduleShiftRequest.day. It modelled the same `schedule.day` column as
+    # the live `Schedule.day` and disagreed with it twice over — string vs
+    # `{type: integer, minimum: 0, maximum: 6}`, and a week starting Sunday vs
+    # one starting Monday. The database settles it: `schedule.day` is a
+    # `smallint` and the schema comment reads `// days {0: mon, 1: tue, ... ,
+    # 6: sun}`. Both referents now carry that integer inline, so there is one
+    # model of the column and nothing left to reconcile.
 
     # ===================
     # Flowsheet Types
@@ -2361,30 +2368,13 @@ components:
     # DJ Types
     # ===================
 
-    DJ:
-      type: object
-      required:
-        - id
-        - dj_name
-      properties:
-        id:
-          type: integer
-        dj_name:
-          type: string
-        real_name:
-          type: string
-        email:
-          type: string
-
-    NewDJ:
-      type: object
-      properties:
-        cognito_user_name:
-          type: string
-        real_name:
-          type: string
-        dj_name:
-          type: string
+    # DJ and NewDJ were here, the request/response shapes of GET /djs,
+    # POST /djs/register and PATCH /djs/register. `dj_route` serves only
+    # /djs/bin and /djs/playlists; there has never been a bare GET /djs or any
+    # /djs/register. NewDJ's `cognito_user_name` named an auth system Backend
+    # replaced with better-auth long ago — the string appears nowhere in
+    # Backend-Service source — and no client in the org referenced either type.
+    # Removed with their operations in wxyc-shared#372.
 
     BinEntry:
       type: object
@@ -2548,6 +2538,25 @@ components:
     # Schedule Types
     # ===================
 
+    # `day` on both shapes below was `$ref: DayOfWeek` — a string enum of day
+    # names starting Sunday — until wxyc-shared#372. It is now the integer the
+    # column actually holds, matching `Schedule.day` in type and in week-start.
+    #
+    # These two are NOT phantom-only, which is worth stating because #372's
+    # write-up assumed they were: they are reachable from `POST /schedule`, a
+    # live route (`schedule_route.post('/', ...)` -> `addToSchedule`), as its
+    # request body and its response. Deleting them alongside GET
+    # /schedule/shifts would have stripped the declaration off a working
+    # endpoint, so the contradiction is resolved by reconciling `day` instead.
+    #
+    # Known remaining drift, deliberately left for its own ticket rather than
+    # redesigned here: the handler is `db.insert(schedule).values(...)` over a
+    # table whose columns are day/start_time/show_duration/specialty_id/
+    # assigned_dj_id/assigned_dj_id2, so `dj_id`, `dj_name`, `end_time` and
+    # `show_name` below do not exist on it and `show_duration` is missing.
+    # The response status is 201, not the 200 declared. #372 corrected the day
+    # model because that is the contradiction it was scoped to; the field set
+    # is a separate correction on a live contract.
     ScheduleShift:
       type: object
       required:
@@ -2565,7 +2574,10 @@ components:
         dj_name:
           type: string
         day:
-          $ref: '#/components/schemas/DayOfWeek'
+          type: integer
+          description: Day of the week 0 = Monday, 6 = Sunday
+          minimum: 0
+          maximum: 6
         start_time:
           type: string
           description: Time in HH:MM format
@@ -2588,7 +2600,10 @@ components:
         dj_id:
           type: integer
         day:
-          $ref: '#/components/schemas/DayOfWeek'
+          type: integer
+          description: Day of the week 0 = Monday, 6 = Sunday
+          minimum: 0
+          maximum: 6
         start_time:
           type: string
         end_time:
@@ -7599,7 +7614,21 @@ security:
 paths:
   /flowsheet:
     get:
+      x-wxyc-service: backend-service
       summary: Get flowsheet entries
+      description: |
+        This is also where the V2 projection ships. Backend names `/v2/flowsheet`
+        in three source comments and implements the discriminated-union shape as
+        `projectEntriesV2`, but calls it from `getEntries` — the handler mounted
+        right here, at plain `GET /flowsheet`. No `/v2` router was ever mounted
+        in `app.ts`, so the two `/v2/flowsheet*` declarations this spec used to
+        carry named nothing and were removed in wxyc-shared#372. Mounting the
+        prefix now would mean maintaining two paths to one projection for zero
+        callers; if that changes, add the path back at the moment it is built.
+
+        The `FlowsheetV2*` schemas remain declared under `components.schemas` —
+        they are the real wire shape and the generated DTOs consumers import,
+        and they outlive the path that never served them.
       security: []
       parameters:
         - name: limit
@@ -7638,6 +7667,7 @@ paths:
                   $ref: '#/components/schemas/FlowsheetEntryResponse'
 
     post:
+      x-wxyc-service: backend-service
       summary: Add entry to flowsheet
       requestBody:
         required: true
@@ -7657,6 +7687,7 @@ paths:
                 $ref: '#/components/schemas/FlowsheetEntryResponse'
 
     patch:
+      x-wxyc-service: backend-service
       summary: Update flowsheet entry
       requestBody:
         required: true
@@ -7673,6 +7704,7 @@ paths:
                 $ref: '#/components/schemas/FlowsheetEntryResponse'
 
     delete:
+      x-wxyc-service: backend-service
       summary: Delete flowsheet entry
       requestBody:
         required: true
@@ -7695,6 +7727,7 @@ paths:
 
   /flowsheet/latest:
     get:
+      x-wxyc-service: backend-service
       summary: Get the most recent flowsheet entry
       security: []
       responses:
@@ -7707,6 +7740,7 @@ paths:
 
   /flowsheet/join:
     post:
+      x-wxyc-service: backend-service
       summary: Start or join a show
       requestBody:
         required: true
@@ -7750,6 +7784,7 @@ paths:
 
   /flowsheet/end:
     post:
+      x-wxyc-service: backend-service
       summary: End or leave a show
       requestBody:
         required: true
@@ -7772,6 +7807,7 @@ paths:
 
   /flowsheet/djs-on-air:
     get:
+      x-wxyc-service: backend-service
       summary: Get list of DJs currently on air
       security: []
       responses:
@@ -7786,6 +7822,7 @@ paths:
 
   /flowsheet/on-air:
     get:
+      x-wxyc-service: backend-service
       summary: Get on-air status for DJ
       parameters:
         - name: dj_id
@@ -7807,6 +7844,7 @@ paths:
 
   /flowsheet/play-order:
     patch:
+      x-wxyc-service: backend-service
       summary: Update the play order of a flowsheet entry
       requestBody:
         required: true
@@ -7832,6 +7870,7 @@ paths:
 
   /flowsheet/playlist:
     get:
+      x-wxyc-service: backend-service
       summary: Get complete playlist for a show
       parameters:
         - name: show_id
@@ -7849,6 +7888,7 @@ paths:
 
   /flowsheet/range:
     get:
+      x-wxyc-service: backend-service
       summary: Get flowsheet entries and show metadata for a time window
       description: |
         Public, unauthenticated, date-windowed read of the flowsheet. Successor
@@ -7941,6 +7981,7 @@ paths:
 
   /flowsheet/search:
     get:
+      x-wxyc-service: backend-service
       summary: Search historical playlists
       description: Search flowsheet entries by artist, song, album, label, or DJ name
       security: []
@@ -7985,129 +8026,9 @@ paths:
   # Flowsheet V2 Endpoints
   # ===================
 
-  /v2/flowsheet:
-    get:
-      summary: Get V2 flowsheet entries (paginated, discriminated union)
-      description: |
-        Returns flowsheet entries as a discriminated union with entry_type field.
-        Each entry type has a well-defined shape instead of optional fields.
-      security: []
-      parameters:
-        - name: page
-          in: query
-          schema:
-            type: integer
-            minimum: 0
-            default: 0
-          description: Page number (0-indexed)
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 30
-          description: Number of entries per page
-      responses:
-        '200':
-          description: Paginated list of V2 flowsheet entries
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FlowsheetV2PaginatedResponse'
-
-  /v2/flowsheet/latest:
-    get:
-      summary: Get the most recent V2 flowsheet entry
-      security: []
-      responses:
-        '200':
-          description: Latest flowsheet entry in V2 format
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/FlowsheetV2TrackEntry'
-                  - $ref: '#/components/schemas/FlowsheetV2ShowStartEntry'
-                  - $ref: '#/components/schemas/FlowsheetV2ShowEndEntry'
-                  - $ref: '#/components/schemas/FlowsheetV2DJJoinEntry'
-                  - $ref: '#/components/schemas/FlowsheetV2DJLeaveEntry'
-                  - $ref: '#/components/schemas/FlowsheetV2TalksetEntry'
-                  - $ref: '#/components/schemas/FlowsheetV2BreakpointEntry'
-                  - $ref: '#/components/schemas/FlowsheetV2MessageEntry'
-                discriminator:
-                  propertyName: entry_type
-                  mapping:
-                    track: '#/components/schemas/FlowsheetV2TrackEntry'
-                    show_start: '#/components/schemas/FlowsheetV2ShowStartEntry'
-                    show_end: '#/components/schemas/FlowsheetV2ShowEndEntry'
-                    dj_join: '#/components/schemas/FlowsheetV2DJJoinEntry'
-                    dj_leave: '#/components/schemas/FlowsheetV2DJLeaveEntry'
-                    talkset: '#/components/schemas/FlowsheetV2TalksetEntry'
-                    breakpoint: '#/components/schemas/FlowsheetV2BreakpointEntry'
-                    message: '#/components/schemas/FlowsheetV2MessageEntry'
-
-  /djs:
-    get:
-      summary: Get DJ information
-      parameters:
-        - name: dj_id
-          in: query
-          schema:
-            type: integer
-        - name: cognito_user_name
-          in: query
-          schema:
-            type: string
-      responses:
-        '200':
-          description: DJ information
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/DJ'
-                  - $ref: '#/components/schemas/NewDJ'
-
-  /djs/register:
-    post:
-      summary: Register a new DJ
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/NewDJ'
-      responses:
-        '200':
-          description: Successfully registered DJ
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DJ'
-
-    patch:
-      summary: Update DJ information
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/NewDJ'
-      responses:
-        '200':
-          description: Successfully updated DJ
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DJ'
-
   /djs/bin:
     get:
+      x-wxyc-service: backend-service
       summary: Get DJ bin
       parameters:
         - name: dj_id
@@ -8123,6 +8044,7 @@ paths:
                 $ref: '#/components/schemas/DJBinResponse'
 
     post:
+      x-wxyc-service: backend-service
       summary: Add to DJ bin
       requestBody:
         required: true
@@ -8149,6 +8071,7 @@ paths:
                 $ref: '#/components/schemas/BinEntry'
 
     delete:
+      x-wxyc-service: backend-service
       summary: Remove from DJ bin
       requestBody:
         required: true
@@ -8172,6 +8095,7 @@ paths:
 
   /djs/playlists:
     get:
+      x-wxyc-service: backend-service
       summary: Get playlists for DJ
       responses:
         '200':
@@ -8185,6 +8109,7 @@ paths:
 
   /library:
     get:
+      x-wxyc-service: backend-service
       summary: Search for album
       # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
       security:
@@ -8217,6 +8142,7 @@ paths:
                   $ref: '#/components/schemas/AlbumSearchResult'
 
     post:
+      x-wxyc-service: backend-service
       summary: Add new album
       security:
         - BearerAuth: []
@@ -8236,6 +8162,7 @@ paths:
 
   /library/query:
     get:
+      x-wxyc-service: backend-service
       summary: Query the card catalog with a parsed query string and filters
       description: |
         Search the library by a query-builder-style expression (the same grammar
@@ -8316,6 +8243,7 @@ paths:
 
   /library/catalog:
     get:
+      x-wxyc-service: backend-service
       summary: Bulk catalog export for offline cloning (gzipped NDJSON)
       description: |
         Stream the entire WXYC library catalog as one gzipped, newline-delimited
@@ -8391,6 +8319,7 @@ paths:
 
   /library/catalog/compilation-tracks:
     get:
+      x-wxyc-service: backend-service
       summary: Bulk compilation-track (CTA) export for the library.db producer (gzipped NDJSON)
       description: |
         Stream every compilation_track_artist (CTA) row as one gzipped,
@@ -8539,6 +8468,7 @@ paths:
 
   /library/rotation:
     get:
+      x-wxyc-service: backend-service
       summary: Get rotation list
       # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
       security:
@@ -8554,6 +8484,7 @@ paths:
                   $ref: '#/components/schemas/Rotation'
 
     post:
+      x-wxyc-service: backend-service
       summary: Add new rotation
       security:
         - BearerAuth: []
@@ -8572,6 +8503,7 @@ paths:
                 $ref: '#/components/schemas/RotationEntry'
 
     patch:
+      x-wxyc-service: backend-service
       summary: Set rotation removal date
       security:
         - BearerAuth: []
@@ -8591,6 +8523,7 @@ paths:
 
   /library/artists:
     post:
+      x-wxyc-service: backend-service
       summary: Add new artist
       security:
         - BearerAuth: []
@@ -8610,6 +8543,7 @@ paths:
 
   /library/formats:
     get:
+      x-wxyc-service: backend-service
       summary: Get format list
       # Inherits the document-level BearerAuth. It used to declare `security: []`
       # while Backend served it behind `requirePermissions({ catalog: ['read'] })`
@@ -8628,6 +8562,7 @@ paths:
                   $ref: '#/components/schemas/FormatEntry'
 
     post:
+      x-wxyc-service: backend-service
       summary: Add new format
       security:
         - BearerAuth: []
@@ -8652,6 +8587,7 @@ paths:
 
   /library/genres:
     get:
+      x-wxyc-service: backend-service
       summary: Get genre list
       security: []
       responses:
@@ -8665,6 +8601,7 @@ paths:
                   $ref: '#/components/schemas/GenreEntry'
 
     post:
+      x-wxyc-service: backend-service
       summary: Add new genre
       security:
         - BearerAuth: []
@@ -8689,6 +8626,7 @@ paths:
 
   /library/info:
     get:
+      x-wxyc-service: backend-service
       summary: Get album information
       description: >
         Takes exactly one release identifier, in either id space: `album_id`
@@ -8761,13 +8699,18 @@ paths:
         '404':
           description: The supplied identifier matched no catalog row
 
-  /library/labels:
+  # Mounted at the document root, not under /library: app.ts does
+  # `app.use('/labels', labels_route)`. Declared here, beside the rest of the
+  # catalog surface it belongs to, because that is where a reader looks for it —
+  # the path is the contract, the position in this file is not.
+  /labels:
     get:
+      x-wxyc-service: backend-service
       summary: Get all labels
       tags:
         - Library
       security:
-        - bearerAuth: []
+        - BearerAuth: []
       parameters:
         - name: q
           in: query
@@ -8789,11 +8732,12 @@ paths:
                 items:
                   $ref: '#/components/schemas/Label'
     post:
+      x-wxyc-service: backend-service
       summary: Create a new label
       tags:
         - Library
       security:
-        - bearerAuth: []
+        - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -8808,44 +8752,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/Label'
 
-  /library/tracks:
-    get:
-      summary: Search for tracks
-      security: []
-      parameters:
-        - name: song
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: artist
-          in: query
-          schema:
-            type: string
-        - name: album
-          in: query
-          schema:
-            type: string
-        - name: label
-          in: query
-          schema:
-            type: string
-        - name: n
-          in: query
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: List of matching tracks
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/TrackSearchResult'
-
   /library/{id}:
     patch:
+      x-wxyc-service: backend-service
       summary: Update catalog album (partial)
       description: |
         True partial-update semantics (BS#1154): only fields present in the
@@ -8885,6 +8794,7 @@ paths:
 
   /library/{id}/missing:
     patch:
+      x-wxyc-service: backend-service
       summary: Mark album as missing from library
       tags:
         - Library
@@ -8914,6 +8824,7 @@ paths:
 
   /library/{id}/found:
     patch:
+      x-wxyc-service: backend-service
       summary: Mark album as found in library
       tags:
         - Library
@@ -8943,6 +8854,7 @@ paths:
 
   /library/{id}/compilation-tracks:
     get:
+      x-wxyc-service: backend-service
       summary: List the per-track artists on a V/A compilation release
       description: |
         Return the compilation_track_artist (CTA) rows stored for library
@@ -8975,6 +8887,7 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
 
     post:
+      x-wxyc-service: backend-service
       summary: Write per-track artists for a V/A compilation release (additive)
       description: |
         Append compilation_track_artist rows for library release `{id}` from an
@@ -9027,6 +8940,7 @@ paths:
 
   /library/{id}/compilation-tracks/discogs-suggestions:
     get:
+      x-wxyc-service: backend-service
       summary: Propose a compilation tracklist from the release's linked Discogs release
       description: |
         Autopopulate source (BS#1964). Resolve the Discogs release linked to
@@ -9072,6 +8986,7 @@ paths:
 
   /schedule:
     get:
+      x-wxyc-service: backend-service
       summary: Get schedule
       security: []
       responses:
@@ -9085,6 +9000,7 @@ paths:
                   $ref: '#/components/schemas/Schedule'
 
     post:
+      x-wxyc-service: backend-service
       summary: Add to schedule
       security:
         - BearerAuth: []
@@ -9102,50 +9018,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ScheduleShift'
 
-  /schedule/shifts:
-    get:
-      summary: Get schedule shifts
-      security: []
-      responses:
-        '200':
-          description: List of schedule shifts
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ScheduleShift'
-
-  /schedule/specialty:
-    get:
-      summary: Get specialty shows
-      security: []
-      responses:
-        '200':
-          description: List of specialty shows
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SpecialtyShow'
-
-  /requests:
-    get:
-      summary: Get song requests
-      responses:
-        '200':
-          description: List of song requests
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/EnhancedRequest'
-
+  # Singular: app.ts does `app.use('/request', request_line_route)` and the
+  # handler is `request_line_route.post('/', ...)` (requestLine.route.ts).
+  /request:
     post:
+      x-wxyc-service: backend-service
       summary: Submit a song request
-      security: []
       requestBody:
         required: true
         content:
@@ -9160,40 +9038,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/RequestSubmissionResponse'
 
-  /requests/{id}:
-    patch:
-      summary: Update request status
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - status
-              properties:
-                status:
-                  $ref: '#/components/schemas/RequestStatus'
-      responses:
-        '200':
-          description: Request updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SongRequest'
-
   # ===================
   # Concerts Endpoints (Backend-Service#1603)
   # ===================
 
   /concerts:
     get:
+      x-wxyc-service: backend-service
       summary: List upcoming concerts (On Tour feed)
       description: |
         Returns upcoming non-removed concerts, windowed on the venue-local
@@ -9272,6 +9123,7 @@ paths:
 
   /concerts/{id}:
     get:
+      x-wxyc-service: backend-service
       summary: Get a single concert by id (public share/deep-link read)
       description: |
         Returns one concert by its serial `id`, regardless of date. Unlike
@@ -9315,131 +9167,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
 
-  /album-reviews:
-    get:
-      summary: List archived DJ album-review submissions
-      description: |
-        Returns album-review submissions from the WXYC album-review Google
-        Form archive, ordered by `submitted_at` descending (nulls last),
-        paginated. Filterable by linked library album or by artist name
-        (normalized exact match).
-
-        Deliberately not `/reviews`, which is reserved for the in-app
-        Review model (ADR 0006, one-per-album, author-owned). Requires
-        anonymous session auth, matching the other iOS read surfaces.
-        Reviewer names are never included in responses.
-      parameters:
-        - name: album_id
-          in: query
-          schema:
-            type: integer
-          description: Return only submissions linked to this library album id.
-        - name: artist
-          in: query
-          schema:
-            type: string
-          description: >-
-            Artist-name filter; matched against the submission's normalized
-            artist name (case-insensitive, leading-"the"-insensitive).
-        - name: page
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            default: 1
-          description: Page number (1-indexed, per PaginationParams).
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 50
-          description: Page size (per PaginationParams).
-      responses:
-        '200':
-          description: >-
-            Paginated list of album-review submissions ordered by
-            submitted_at descending.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AlbumReviewsResponse'
-        '400':
-          description: Invalid query parameters
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiErrorResponse'
-        '401':
-          description: Authentication required
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiErrorResponse'
-        '403':
-          description: >
-            Forbidden — the session is banned or the bearer token carries no
-            `sub` claim (auth middleware gate).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiErrorResponse'
-
-  /metadata/album:
-    get:
-      summary: Get album metadata
-      parameters:
-        - name: album_id
-          in: query
-          required: true
-          schema:
-            type: integer
-        - name: force_refresh
-          in: query
-          schema:
-            type: boolean
-      responses:
-        '200':
-          description: Album metadata
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MetadataFetchResponse'
-
-  /metadata/artist:
-    get:
-      summary: Get artist metadata
-      parameters:
-        - name: artist_id
-          in: query
-          required: true
-          schema:
-            type: integer
-        - name: force_refresh
-          in: query
-          schema:
-            type: boolean
-      responses:
-        '200':
-          description: Artist metadata
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MetadataFetchResponse'
-
   # ============================
   # Lookup Service
   # ============================
 
-  /lookup:
+  /api/v1/lookup:
     post:
+      x-wxyc-service: library-metadata-lookup
       summary: Look up library items and artwork for a parsed song request
       description: >
         Accepts a parsed song request (artist, song, album) and searches the
         WXYC library catalog, resolves album names via Discogs, fetches artwork,
         and returns matching results with metadata.
-      security: []
+
+
+        Served by library-metadata-lookup, not Backend — see `x-wxyc-service`.
+        LML mounts `lookup_router` with `prefix="/api/v1"` and
+        `dependencies=[Depends(require_lml_key)]`, so this shares the bearer
+        posture of its six `/api/v1/*` siblings.
+      security:
+        - LMLBearerAuth: []
       tags:
         - lookup
       requestBody:
@@ -9464,6 +9211,7 @@ paths:
 
   /api/v1/identity/resolve:
     post:
+      x-wxyc-service: library-metadata-lookup
       summary: Mint or resolve a stable identity for a release
       description: >
         Resolves a `(kind, source, external_id)` triple to a stable
@@ -9527,6 +9275,7 @@ paths:
 
   /api/v1/identity/bulk-resolve-libraries:
     post:
+      x-wxyc-service: library-metadata-lookup
       summary: Bulk-resolve cross-cache identity for library rows
       description: >
         Per the cross-cache-identity architecture pivot
@@ -9634,6 +9383,7 @@ paths:
 
   /api/v1/artists/search-aliases/bulk:
     post:
+      x-wxyc-service: library-metadata-lookup
       summary: Bulk-fetch artist search aliases from all known sources.
       description: >
         Returns the union of alias variants LML can compose for each input
@@ -9696,6 +9446,7 @@ paths:
 
   /api/v1/artists/resolve/bulk:
     post:
+      x-wxyc-service: library-metadata-lookup
       summary: Bulk-resolve bare artist names to Discogs artist identities.
       description: >
         Resolves bare artist names — typically touring artists absent from
@@ -9810,6 +9561,7 @@ paths:
 
   /api/v1/artists/genres/bulk:
     post:
+      x-wxyc-service: library-metadata-lookup
       summary: Bulk artist-level Discogs genre/style aggregation.
       description: >
         Aggregates per-artist Discogs *genres* (coarse, top 1-2) and *styles*
@@ -9892,6 +9644,7 @@ paths:
 
   /api/v1/cache/refresh-for-identities:
     post:
+      x-wxyc-service: library-metadata-lookup
       summary: Warm LML's cache for a batch of release identity_ids
       description: >
         Source-agnostic cache warmer (LML#525). For each `identity_id` in
@@ -9965,6 +9718,7 @@ paths:
 
   /config:
     get:
+      x-wxyc-service: backend-service
       summary: Get app bootstrap configuration
       description: Returns non-sensitive configuration for app bootstrap. Unauthenticated.
       security: []
@@ -9978,6 +9732,7 @@ paths:
 
   /config/secrets:
     get:
+      x-wxyc-service: backend-service
       summary: Get third-party API credentials
       description: >
         Returns API credentials for third-party services (e.g. Discogs) that
@@ -10008,6 +9763,7 @@ paths:
 
   /proxy/artwork/search:
     get:
+      x-wxyc-service: backend-service
       summary: Search for album artwork
       description: Searches for album artwork via Discogs-backed ArtworkFinder. Requires anonymous session auth.
       parameters:
@@ -10044,6 +9800,7 @@ paths:
 
   /proxy/metadata/album:
     get:
+      x-wxyc-service: backend-service
       summary: Get album metadata
       description: Fetches album metadata from Discogs, Spotify, Apple Music, and search URL providers. Requires anonymous session auth.
       parameters:
@@ -10085,6 +9842,7 @@ paths:
 
   /proxy/metadata/artist:
     get:
+      x-wxyc-service: backend-service
       summary: Get artist metadata
       description: Fetches artist bio and Wikipedia URL from Discogs by artist ID. Requires anonymous session auth.
       parameters:
@@ -10122,6 +9880,7 @@ paths:
 
   /proxy/entity/resolve:
     get:
+      x-wxyc-service: backend-service
       summary: Resolve a Discogs entity
       description: Resolves a Discogs entity (artist, release, or master) by type and ID. Requires anonymous session auth.
       parameters:
@@ -10169,6 +9928,7 @@ paths:
 
   /proxy/spotify/track/{id}:
     get:
+      x-wxyc-service: backend-service
       summary: Get Spotify track metadata
       description: Fetches track metadata from Spotify using backend credentials. Requires anonymous session auth.
       parameters:
@@ -10212,6 +9972,7 @@ paths:
 
   /events/stream:
     get:
+      x-wxyc-service: backend-service
       summary: Subscribe to server-sent events (EventSource-friendly)
       description: >
         EventSource-friendly counterpart to `POST /events/register`. Native
@@ -10267,6 +10028,7 @@ paths:
 
   /auth/device/code:
     post:
+      x-wxyc-service: backend-service
       summary: Request a device + user code (RFC 8628 §3.2)
       description: >
         Starts the QR sign-in flow. The browser POSTs this, renders
@@ -10295,6 +10057,7 @@ paths:
 
   /auth/device/token:
     post:
+      x-wxyc-service: backend-service
       summary: Exchange a device_code for a session token (RFC 8628 §3.4)
       description: >
         The browser polls this until the DJ approves. Public (no session
@@ -10332,6 +10095,7 @@ paths:
 
   /auth/device:
     get:
+      x-wxyc-service: backend-service
       summary: Look up a device authorization by user_code
       description: >
         Returns the current status of a device authorization. A session is
@@ -10363,6 +10127,7 @@ paths:
 
   /auth/device/approve:
     post:
+      x-wxyc-service: backend-service
       summary: Approve a device authorization (iOS scanner)
       description: >
         Called by the iOS app carrying the DJ's session. Flips the device code
@@ -10408,6 +10173,7 @@ paths:
 
   /auth/device/deny:
     post:
+      x-wxyc-service: backend-service
       summary: Deny a device authorization (iOS scanner)
       description: >
         Called by the iOS app carrying the DJ's session to reject a scanned QR.

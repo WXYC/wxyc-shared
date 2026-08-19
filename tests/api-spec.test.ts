@@ -99,7 +99,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.41.0');
+      expect(spec.info.version).toBe('1.42.0');
     });
 
     it('should have components section', () => {
@@ -132,11 +132,35 @@ describe('OpenAPI Specification', () => {
       expect(rotationBin.enum).toEqual(['H', 'M', 'L', 'S']);
     });
 
-    it('should define DayOfWeek enum', () => {
-      const dayOfWeek = spec.components.schemas.DayOfWeek as { enum?: string[] };
-      expect(dayOfWeek).toBeDefined();
-      expect(dayOfWeek.enum).toContain('Monday');
-      expect(dayOfWeek.enum).toContain('Sunday');
+    // DayOfWeek was pinned here until #372 removed it. It was a closed enum of
+    // day names starting Sunday, and it modelled the same `schedule.day` column
+    // that the live `Schedule` schema models as `{type: integer, minimum: 0,
+    // maximum: 6}` starting Monday — a contradiction the spec carried in two
+    // places at once. The database settles it: `smallint`, and the schema
+    // comment reads `// days {0: mon, 1: tue, ... , 6: sun}`. Its two referents
+    // (ScheduleShift, AddScheduleShiftRequest) survive because `POST /schedule`
+    // uses them, so the enum went and they took the integer inline. The
+    // assertion below replaces the old one: one model of the column, everywhere
+    // it appears.
+    it('models schedule.day the way the database does, and only once', () => {
+      expect(spec.components.schemas.DayOfWeek).toBeUndefined();
+      // Every declaration of the column agrees: `smallint`, 0 = Monday.
+      const dayModels = ['Schedule', 'ScheduleShift', 'AddScheduleShiftRequest'].map((name) => {
+        const day = (
+          spec.components.schemas[name] as {
+            properties?: { day?: { type?: string; minimum?: number; maximum?: number } };
+          }
+        ).properties?.day;
+        return { name, type: day?.type, minimum: day?.minimum, maximum: day?.maximum };
+      });
+      for (const model of dayModels) {
+        expect(model, model.name).toEqual({
+          name: model.name,
+          type: 'integer',
+          minimum: 0,
+          maximum: 6,
+        });
+      }
     });
   });
 
@@ -1509,8 +1533,19 @@ describe('OpenAPI Specification', () => {
   });
 
   describe('DJ Schemas', () => {
-    it('should define DJ', () => {
-      expect(spec.components.schemas.DJ).toBeDefined();
+    // DJ and NewDJ were pinned here until #372. They were the shapes of
+    // GET /djs, POST /djs/register and PATCH /djs/register; `dj_route` mounts
+    // only /djs/bin and /djs/playlists, so none of those three has ever been
+    // served. NewDJ keyed on `cognito_user_name`, a string that appears nowhere
+    // in Backend-Service source — the auth system it named was replaced by
+    // better-auth long ago.
+    it('no longer defines the Cognito-era DJ registration shapes', () => {
+      expect(spec.components.schemas.DJ).toBeUndefined();
+      expect(spec.components.schemas.NewDJ).toBeUndefined();
+      // The surviving /djs surface is bin + playlists, and it has its own
+      // shapes — this is a deletion of dead types, not of the DJ concept.
+      expect(spec.components.schemas.BinEntry).toBeDefined();
+      expect(spec.components.schemas.DJPlaylistsResponse).toBeDefined();
     });
 
     it('should define BinEntry', () => {
@@ -1527,8 +1562,28 @@ describe('OpenAPI Specification', () => {
   });
 
   describe('Schedule Schemas', () => {
-    it('should define ScheduleShift', () => {
-      expect(spec.components.schemas.ScheduleShift).toBeDefined();
+    // ScheduleShift (and AddScheduleShiftRequest) were pinned here until #372.
+    // Both were reachable only from GET /schedule/shifts; schedule.route.ts
+    // serves GET/POST/PATCH/DELETE /schedule and nothing else.
+    // #372's write-up expected these two to be deleted alongside
+    // GET /schedule/shifts, on the reading that nothing else referenced them.
+    // They ARE referenced: `POST /schedule` — a live route — declares
+    // AddScheduleShiftRequest as its body and ScheduleShift as its response.
+    // Deleting them would have stripped a working endpoint of its declaration,
+    // so the contradiction was resolved the other way the ticket allowed, by
+    // reconciling `day` onto the model the column actually has.
+    it('keeps the shift shapes POST /schedule uses, on the database day model', () => {
+      for (const name of ['ScheduleShift', 'AddScheduleShiftRequest']) {
+        const day = (
+          spec.components.schemas[name] as {
+            properties: { day: { type?: string; minimum?: number; maximum?: number; $ref?: string } };
+          }
+        ).properties.day;
+        expect(day.$ref, `${name}.day must not reintroduce the DayOfWeek enum`).toBeUndefined();
+        expect(day.type, name).toBe('integer');
+        expect(day.minimum, name).toBe(0);
+        expect(day.maximum, name).toBe(6);
+      }
     });
 
     it('should define SpecialtyShow', () => {
@@ -2678,20 +2733,26 @@ describe('OpenAPI Specification', () => {
       expect(spec.paths['/library']).toBeDefined();
     });
 
-    it('should define /djs endpoint', () => {
-      expect(spec.paths['/djs']).toBeDefined();
+    // Was `/djs`, which nothing serves. `dj_route` mounts only these two.
+    it('should define the /djs endpoints dj_route actually serves', () => {
+      expect(spec.paths['/djs/bin']).toBeDefined();
+      expect(spec.paths['/djs/playlists']).toBeDefined();
     });
 
     it('should define /schedule endpoint', () => {
       expect(spec.paths['/schedule']).toBeDefined();
     });
 
-    it('should define /requests endpoint', () => {
-      expect(spec.paths['/requests']).toBeDefined();
+    // Singular. Was `/requests`, which nothing serves; Backend mounts
+    // request_line_route at `/request`.
+    it('should define /request endpoint', () => {
+      expect(spec.paths['/request']).toBeDefined();
     });
 
-    it('should define /metadata/album endpoint', () => {
-      expect(spec.paths['/metadata/album']).toBeDefined();
+    // Was `/metadata/album`, a duplicate declaration of a path that only ever
+    // existed under the `/proxy` prefix.
+    it('should define /proxy/metadata/album endpoint', () => {
+      expect(spec.paths['/proxy/metadata/album']).toBeDefined();
     });
 
     it('should define /events/stream as a public GET (no security)', () => {
@@ -3762,9 +3823,196 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  // --- #372: an operation is declared where it is actually served ---
+  //
+  // api.yaml is a multi-service document carrying a single-service `servers:`
+  // block — it declares https://api.wxyc.org and nothing else, while seven
+  // operations are served by library-metadata-lookup on a different host. With
+  // no per-operation marker saying which service owns a path, reachability is
+  // not decidable from the document alone, and that is the root cause of the
+  // defect class this block guards: seventeen operations were declared at paths
+  // nothing served, and nothing in the repo could tell.
+  //
+  // `x-wxyc-service` is that marker. Generators ignore unknown `x-` keys, so it
+  // carries no codegen risk in any of the five generating repos, and it makes
+  // the audit re-runnable from the document instead of reconstructed by hand.
+  //
+  // The audit itself, for whoever re-runs it — read-only, needs no credentials:
+  //
+  //   curl -s -o /dev/null -w '%{http_code}\n' "https://api.wxyc.org<path>"
+  //
+  // 401/403 means the route is MOUNTED: auth rejected the caller before routing
+  // could 404, so auth is the signal that the route exists, not an obstacle to
+  // probing for it. 200/400/422 likewise means mounted. Only a 404 with an HTML
+  // `Cannot GET` body means nothing is mounted there. Write methods are never
+  // probed against production; they are diffed against Backend's static route
+  // table instead — mount prefixes from `app.use('/x', x_route)` in
+  // apps/backend/app.ts, sub-paths from `<router>.<verb>('<subpath>')` across
+  // apps/backend/routes/*.ts, concatenated and compared to the declared set.
+  describe('Service ownership and route reachability (#372)', () => {
+    // The closed set. A third service earning operations in this document is a
+    // decision, not a typo, so it costs a line here.
+    const SERVICES = ['backend-service', 'library-metadata-lookup'] as const;
+
+    // library-metadata-lookup's operations, pinned exhaustively rather than by
+    // prefix. A prefix rule ("/api/v1/* is LML") would silently absorb a future
+    // Backend operation that happened to be versioned, which is precisely the
+    // kind of quiet drift the marker exists to stop.
+    const LML_OPERATIONS = [
+      'post /api/v1/artists/genres/bulk',
+      'post /api/v1/artists/resolve/bulk',
+      'post /api/v1/artists/search-aliases/bulk',
+      'post /api/v1/cache/refresh-for-identities',
+      'post /api/v1/identity/bulk-resolve-libraries',
+      'post /api/v1/identity/resolve',
+      'post /api/v1/lookup',
+    ] as const;
+
+    const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'];
+
+    function operations(): Array<[string, string, Record<string, unknown>]> {
+      const found: Array<[string, string, Record<string, unknown>]> = [];
+      for (const [path, item] of Object.entries(spec.paths)) {
+        for (const [method, operation] of Object.entries(item as Record<string, unknown>)) {
+          if (!HTTP_METHODS.includes(method)) continue;
+          found.push([method, path, operation as Record<string, unknown>]);
+        }
+      }
+      return found;
+    }
+
+    it('marks every operation with exactly one service from the closed set', () => {
+      const offenders: string[] = [];
+      for (const [method, path, operation] of operations()) {
+        const service = operation['x-wxyc-service'];
+        if (typeof service !== 'string') {
+          offenders.push(`${method} ${path}: x-wxyc-service is ${JSON.stringify(service)}`);
+          continue;
+        }
+        if (!(SERVICES as readonly string[]).includes(service)) {
+          offenders.push(`${method} ${path}: unknown service "${service}"`);
+        }
+      }
+      expect(offenders, offenders.join('\n')).toEqual([]);
+    });
+
+    it('attributes exactly the known seven operations to library-metadata-lookup', () => {
+      const lml = operations()
+        .filter(([, , op]) => op['x-wxyc-service'] === 'library-metadata-lookup')
+        .map(([method, path]) => `${method} ${path}`)
+        .sort();
+      expect(lml).toEqual([...LML_OPERATIONS].sort());
+    });
+
+    // The seventeen. Set out as a closed list so the audit is re-runnable: a
+    // re-declaration at any of these paths fails here and sends the author back
+    // to the probe rather than to a 404 in a generated client.
+    //
+    // Six were real routes declared at the wrong path and were corrected, not
+    // deleted (see the companion assertion below). Eleven were never built —
+    // eight unbuilt features and three survivals of the Cognito era, whose
+    // `cognito_user_name` query parameter names an auth system Backend has not
+    // run for years.
+    const UNREACHABLE_PATHS = [
+      '/album-reviews',
+      '/djs',
+      '/djs/register',
+      '/library/labels',
+      '/library/tracks',
+      '/lookup',
+      '/metadata/album',
+      '/metadata/artist',
+      '/requests',
+      '/requests/{id}',
+      '/schedule/shifts',
+      '/schedule/specialty',
+      '/v2/flowsheet',
+      '/v2/flowsheet/latest',
+    ] as const;
+
+    it('declares no path that production serves nothing at', () => {
+      const redeclared = UNREACHABLE_PATHS.filter((p) => spec.paths[p] !== undefined);
+      expect(
+        redeclared,
+        `re-declared phantom paths: ${redeclared.join(', ')} — re-run the probe before adding these back`
+      ).toEqual([]);
+    });
+
+    // The other half of the same claim. Deleting a phantom is only correct when
+    // the endpoint truly does not exist; where it does, the declaration moved to
+    // the serving path, and asserting the destinations keeps a future cleanup
+    // from "resolving" a phantom by deleting the corrected operation too.
+    it('declares the corrected Class A paths at the route that serves them', () => {
+      // GET+POST /labels (app.use('/labels', labels_route)), POST /request
+      // (singular, requestLine.route.ts), POST /api/v1/lookup (LML mounts
+      // lookup_router with prefix="/api/v1").
+      expect(spec.paths['/labels']).toBeDefined();
+      expect(spec.paths['/request']).toBeDefined();
+      expect(spec.paths['/api/v1/lookup']).toBeDefined();
+      // The two /metadata/* duplicates were deleted rather than moved: the
+      // proxy path they should have named was already declared separately.
+      expect(spec.paths['/proxy/metadata/album']).toBeDefined();
+      expect(spec.paths['/proxy/metadata/artist']).toBeDefined();
+    });
+
+    it('records on GET /flowsheet that the V2 shape ships on the V1 path', () => {
+      // Backend names `/v2/flowsheet` in three source comments and implements
+      // `projectEntriesV2`, but calls it from `getEntries` — the handler mounted
+      // at plain GET /flowsheet. The prefix was planned and never mounted, so
+      // the only place a reader can learn where V2 lives is this description.
+      const description = (spec.paths['/flowsheet'] as { get: { description?: string } }).get
+        .description;
+      expect(description).toBeDefined();
+      expect(description).toMatch(/v2/i);
+    });
+  });
+
   describe('Security', () => {
     it('should define BearerAuth security scheme', () => {
       expect(spec.components.securitySchemes?.BearerAuth).toBeDefined();
+    });
+
+    // --- #372: a security requirement has to name a scheme that exists ---
+    //
+    // Both /library/labels operations declared `security: [{ bearerAuth: [] }]`
+    // — lowercase `b`, against a components block that defines only `BearerAuth`
+    // and `LMLBearerAuth`. openapi-generator resolves the name by exact match
+    // and silently DROPS a requirement it cannot resolve, and generation runs
+    // with --skip-validate-spec, so nothing anywhere errored. The generated
+    // clients applied no auth at all to those two operations: the same failure
+    // mode as an undeclared `security: []`, reached by a typo.
+    //
+    // Silent is the whole problem, so the guard is a walk rather than an
+    // assertion about those two lines. It covers the document-level default and
+    // every operation-level override, which is every place a scheme name can
+    // appear.
+    it('names only schemes that components.securitySchemes defines', () => {
+      const defined = Object.keys(spec.components.securitySchemes ?? {});
+      const methods = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'];
+      const unresolved: string[] = [];
+
+      function check(where: string, security: unknown): void {
+        if (!Array.isArray(security)) return;
+        for (const requirement of security) {
+          if (requirement === null || typeof requirement !== 'object') continue;
+          for (const name of Object.keys(requirement as Record<string, unknown>)) {
+            if (!defined.includes(name)) unresolved.push(`${where}: "${name}"`);
+          }
+        }
+      }
+
+      check('document default', (spec as { security?: unknown }).security);
+      for (const [path, item] of Object.entries(spec.paths)) {
+        for (const [method, operation] of Object.entries(item as Record<string, unknown>)) {
+          if (!methods.includes(method)) continue;
+          check(`${method} ${path}`, (operation as { security?: unknown }).security);
+        }
+      }
+
+      expect(
+        unresolved,
+        `security requirements naming an undefined scheme (openapi-generator drops these silently, leaving the operation unauthenticated):\n  ${unresolved.join('\n  ')}\ndefined schemes: ${defined.join(', ')}`
+      ).toEqual([]);
     });
 
     // --- #368: `security: []` is a claim about the route, and it has to be true ---
@@ -3808,15 +4056,29 @@ describe('OpenAPI Specification', () => {
       ['get', '/flowsheet/range', 'public date-windowed read, BS#2062 — the tubafrenzy /playlists/dailyEntries successor'],
       ['get', '/flowsheet/search', 'public playlist-archive search'],
       ['get', '/library/genres', 'deliberately public per BS#1682 — station-wide reference data, and dj-site#1004 SSR cannot attach a JWT. POST /library/genres stays catalog:write'],
-      ['get', '/library/tracks', 'phantom path — no route is mounted here at all (wxyc-shared#372 class B). Left as declared; correcting the auth on a path that does not exist would only make the phantom harder to spot'],
-      ['post', '/lookup', 'served by library-metadata-lookup, not Backend — a different service with its own auth posture (see the servers: caveat in wxyc-shared#372)'],
-      ['post', '/requests', 'phantom path — Backend serves POST /request, singular (wxyc-shared#372 class A)'],
       ['get', '/schedule', 'no auth middleware on schedule_route.get("/")'],
-      ['get', '/schedule/shifts', 'phantom path (wxyc-shared#372 class B)'],
-      ['get', '/schedule/specialty', 'phantom path (wxyc-shared#372 class B)'],
-      ['get', '/v2/flowsheet', 'phantom path — no /v2 router is mounted in app.ts (wxyc-shared#372 class B)'],
-      ['get', '/v2/flowsheet/latest', 'phantom path (wxyc-shared#372 class B)'],
     ] as const;
+
+    // Seven lines left this list in #372, and none of them by being reviewed
+    // and approved — six named paths nothing served and were deleted, and the
+    // seventh was corrected. Worth recording, because "declared public" and
+    // "phantom" were compounding: an operation that 404s cannot be audited by
+    // the curl above (a phantom and a genuinely open route are both non-401),
+    // so the placeholder reasons here were unfalsifiable by the very method
+    // this list documents.
+    //
+    // Deleted with their paths: get /library/tracks, get /schedule/shifts,
+    // get /schedule/specialty, get /v2/flowsheet, get /v2/flowsheet/latest.
+    //
+    // Corrected rather than deleted, and no longer public in either case:
+    //   post /lookup    -> post /api/v1/lookup. LML mounts lookup_router with
+    //     dependencies=[Depends(require_lml_key)], so it takes LMLBearerAuth
+    //     like its six siblings. `security: []` understated it.
+    //   post /requests  -> post /request. The handler is
+    //     `request_line_route.post('/', requirePermissions({}), ...)`, which is
+    //     the third posture named in the note above: a JWT is required,
+    //     anonymous sessions are welcome. That is the global BearerAuth
+    //     default, not `security: []`, so the override is simply gone.
 
     // Two spellings make an operation anonymously callable, and a guard that
     // knows only one is a guard with a door in the back. `security: []` is the
