@@ -3731,6 +3731,7 @@ describe('OpenAPI Specification', () => {
     // still requires a Bearer token, so it belongs under the global default.
     const PUBLIC_OPERATIONS: ReadonlyArray<readonly [string, string, string]> = [
       // [method, path, why it is genuinely public]
+      ['get', '/auth/device', 'RFC 8628 status lookup — a session is optional by design: anonymous callers get the status, a signed-in DJ additionally claims the code for their account. Declared `security: [{}, { BearerAuth: [] }]`, the other spelling of anonymously-callable, and pinned in that exact shape by the device-flow describe further down'],
       ['post', '/auth/device/code', 'RFC 8628 device-code request — the whole point is that the device has no token yet'],
       ['post', '/auth/device/token', 'RFC 8628 token poll — same, this is where the token comes from'],
       ['get', '/concerts/{id}', 'deliberately public per BS#1694 / #236: the wxyc.org share Worker cannot mint anonymous sessions, and the response is publicly cacheable. Note the sibling GET /concerts is requirePermissions({}) and correctly does NOT appear here'],
@@ -3752,18 +3753,45 @@ describe('OpenAPI Specification', () => {
       ['get', '/v2/flowsheet/latest', 'phantom path (wxyc-shared#372 class B)'],
     ] as const;
 
+    // Two spellings make an operation anonymously callable, and a guard that
+    // knows only one is a guard with a door in the back. `security: []` is the
+    // blunt override. `security: [{}, { BearerAuth: [] }]` — a requirement
+    // list with an empty-object member — says "no credential also satisfies
+    // this", which is the same reachability with a different shape; GET
+    // /auth/device uses it deliberately. Match both, or the next endpoint
+    // written in the second style ships unreviewed past a green test.
+    function isAnonymouslyCallable(security: unknown): boolean {
+      if (!Array.isArray(security)) return false;
+      if (security.length === 0) return true;
+      return security.some((r) => r !== null && typeof r === 'object' && Object.keys(r).length === 0);
+    }
+
     function declaredPublicOperations(): string[] {
-      const methods = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
+      // All eight OpenAPI 3.0 operation keys. `trace` is here for the same
+      // reason the rest are: the value of this guard is exhaustiveness, and a
+      // list that is one key short is a list with an exemption in it.
+      const methods = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'];
       const found: string[] = [];
       for (const [path, item] of Object.entries(spec.paths)) {
         for (const [method, operation] of Object.entries(item as Record<string, unknown>)) {
           if (!methods.includes(method)) continue;
-          const security = (operation as { security?: unknown }).security;
-          if (Array.isArray(security) && security.length === 0) found.push(`${method} ${path}`);
+          if (isAnonymouslyCallable((operation as { security?: unknown }).security)) {
+            found.push(`${method} ${path}`);
+          }
         }
       }
       return found.sort();
     }
+
+    it('gives every allowlisted operation a written reason', () => {
+      // The third tuple element is the entire justification for an operation
+      // being on this list, and nothing above reads it — the type demands a
+      // string, not a non-empty one, so `''` would satisfy compiler and guard
+      // alike and quietly vacate the point of the list.
+      for (const [method, path, reason] of PUBLIC_OPERATIONS) {
+        expect(reason.trim(), `${method} ${path}`).not.toBe('');
+      }
+    });
 
     it('declares no operation public beyond the reviewed allowlist', () => {
       const allowed = PUBLIC_OPERATIONS.map(([method, path]) => `${method} ${path}`).sort();
@@ -3785,9 +3813,15 @@ describe('OpenAPI Specification', () => {
         expect(operation, route).toBeDefined();
         // Inheriting the document default is the fix — an explicit
         // `security: [{ BearerAuth: [] }]` would be equivalent, so accept
-        // either rather than pinning a formatting choice.
+        // either rather than pinning a formatting choice. Assert on the
+        // requirement NAMES only: pinning the whole object would also pin the
+        // scope list to empty, so a later, strictly more accurate
+        // `security: [{ BearerAuth: ['catalog:read'] }]` — the scoped style
+        // Backend's own app.yaml already uses on the /library/formats POST —
+        // would fail a test whose stated job is to not care about shape.
         if (operation!.security !== undefined) {
-          expect(operation!.security, route).toEqual([{ BearerAuth: [] }]);
+          const names = (operation!.security as Array<Record<string, unknown>>).flatMap((r) => Object.keys(r));
+          expect(names, route).toEqual(['BearerAuth']);
         }
       }
     });
