@@ -99,7 +99,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.40.0');
+      expect(spec.info.version).toBe('1.41.0');
     });
 
     it('should have components section', () => {
@@ -863,6 +863,71 @@ describe('OpenAPI Specification', () => {
         const prop = propertyOf('FlowsheetV2TrackEntry', 'track_position');
         expect(String(prop?.description)).not.toMatch(/no resolvable identity/);
       });
+    });
+  });
+
+  // #373. Both remaining `legacy_release_id` descriptions justified staying
+  // optional by citing "the live openapi-compliance deploy gate". That names a
+  // detector, not a reason — and the detector does not hold up either way it
+  // is read. `e2e/contract/openapi-compliance.test.ts` is real, but the only
+  // thing that ever runs it against a deployed stack is `bs-lml-gate.yml`,
+  // which has never fired once; and even if it fired, it validates
+  // `AlbumSearchResult` (via GET /library) and never `BinLibraryDetails`. So
+  // the citation was load-bearing for a reader — "a gate exists, sequence the
+  // publish around it" — while being unable to justify half the sites that
+  // carried it.
+  //
+  // The real reason sits upstream of any detector: `legacy_release_id` is
+  // emitted per-projection, not globally. `library.legacy_release_id` is NOT
+  // NULL in the database, but that is a claim about the column, while
+  // `required` in OpenAPI is a promise the key appears on the wire. Those come
+  // apart today: WXYC/Backend-Service#2167 is open precisely because the LML
+  // search-proxy rows behind `AlbumSearchResult` do not emit the column
+  // explicitly yet. Promoting either property now would be a promise the
+  // server does not keep on every path that returns these schemas.
+  //
+  // Scope for the negative half is the whole spec text rather than these two
+  // descriptions. The citation is copy-paste-shaped — it stood in three places
+  // until #365 rewrote `AlbumInfoResponse` into `AlbumDetail` and dropped the
+  // third — so a guard that reads only the two known sites would watch it
+  // reappear somewhere else in silence.
+  describe('legacy_release_id optionality is justified per-projection, not by a deploy gate (#373)', () => {
+    const SITES = ['AlbumSearchResult', 'BinLibraryDetails'] as const;
+
+    function justification(schemaName: string): string {
+      return String(propertyOf(schemaName, 'legacy_release_id')?.description ?? '');
+    }
+
+    it('cites the openapi-compliance gate nowhere in the spec', () => {
+      expect(specText).not.toMatch(/openapi-compliance/i);
+    });
+
+    it.each(SITES)('%s justifies optionality without appealing to a gate', (schemaName) => {
+      expect(justification(schemaName)).not.toMatch(/\bgate\b/i);
+    });
+
+    // The positive half. Deleting the false clause and leaving nothing behind
+    // would pass every assertion above while losing the fact this change
+    // exists to record — the same failure mode #365 left here to be fixed.
+    it.each(SITES)('%s names the per-projection emit as the reason', (schemaName) => {
+      const description = justification(schemaName);
+      expect(description).toMatch(/per-projection/i);
+      // The wire-vs-column distinction is the whole argument; without it the
+      // NOT NULL clause reads as an argument FOR `required`.
+      expect(description).toMatch(/wire/i);
+      // And the ticket whose closure unblocks the promotion, so the follow-up
+      // stays traceable from the spec rather than only from #373.
+      expect(description).toMatch(/Backend-Service#2167/);
+    });
+
+    it('states the reason in identical wording at both sites, so a reader sees one rule', () => {
+      const [first, ...rest] = SITES.map(justification);
+      expect(first).not.toBe('');
+      for (const other of rest) expect(other).toBe(first);
+    });
+
+    it.each(SITES)('leaves legacy_release_id optional on %s (promotion is gated on BS#2167)', (schemaName) => {
+      expect(requiredKeysOf(schemaName)).not.toContain('legacy_release_id');
     });
   });
 
