@@ -17,8 +17,6 @@ import {
   type FlowsheetEntry,
   type FlowsheetEntryResponse,
   type FlowsheetShowBlockEntry,
-  type WeeklySchedule,
-  type ScheduleShift,
 } from '../src/dtos/index.js';
 
 describe('Type Guards', () => {
@@ -320,44 +318,7 @@ describe('Union Types', () => {
   });
 });
 
-describe('Mapped Types', () => {
-  describe('WeeklySchedule', () => {
-    it('should have all days of the week', () => {
-      const schedule: WeeklySchedule = {
-        Sunday: [],
-        Monday: [],
-        Tuesday: [],
-        Wednesday: [],
-        Thursday: [],
-        Friday: [],
-        Saturday: [],
-      };
-
-      expect(Object.keys(schedule)).toHaveLength(7);
-    });
-
-    it('should accept schedule shifts for each day', () => {
-      const shift: ScheduleShift = {
-        id: 1,
-        dj_id: 100,
-        dj_name: 'Test DJ',
-        day: 'Monday',
-        start_time: '14:00',
-        end_time: '16:00',
-      };
-
-      const schedule: WeeklySchedule = {
-        Sunday: [],
-        Monday: [shift],
-        Tuesday: [],
-        Wednesday: [],
-        Thursday: [],
-        Friday: [],
-        Saturday: [],
-      };
-
-      expect(schedule.Monday).toHaveLength(1);
-      expect(schedule.Monday[0].dj_name).toBe('Test DJ');
-    });
-  });
-});
+// The `Mapped Types` describe covered WeeklySchedule, a `Record<DayOfWeek,
+// ScheduleShift[]>` over two schemas wxyc-shared#372 removed. Both hung off
+// GET /schedule/shifts, which nothing serves, and DayOfWeek disagreed with the
+// live `Schedule.day` on both its type and its week-start.

@@ -5,6 +5,7 @@
  */
 
 import type {
+  ScheduleShift,
   Artist,
   Album,
   AlbumSearchResult,
@@ -21,9 +22,7 @@ import type {
   Label,
   OnAirDJ,
   RotationEntry,
-  DJ,
   BinEntry,
-  ScheduleShift,
 } from '../dtos/index.js';
 
 // ============================================================================
@@ -246,12 +245,8 @@ export const testRotation: RotationEntry = {
 // DJs
 // ============================================================================
 
-export const testDJ: DJ = {
-  id: 1,
-  dj_name: 'DJ Test',
-  real_name: 'Test User',
-  email: 'test@wxyc.org',
-};
+// testDJ went with the `DJ` schema in wxyc-shared#372: its only referents were
+// GET /djs and /djs/register, none of which Backend has ever served.
 
 export const testBinEntry: BinEntry = {
   id: 1,
@@ -272,7 +267,10 @@ export const testScheduleShift: ScheduleShift = {
   id: 1,
   dj_id: 1,
   dj_name: 'DJ Test',
-  day: 'Monday',
+  // 0 = Monday. Was the string 'Monday' under the DayOfWeek enum, which
+  // wxyc-shared#372 removed for disagreeing with the column on both type and
+  // week-start.
+  day: 0,
   start_time: '14:00',
   end_time: '16:00',
 };

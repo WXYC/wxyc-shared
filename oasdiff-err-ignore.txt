@@ -32,3 +32,79 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
+
+# ---------------------------------------------------------------------------
+# wxyc-shared#372 — seventeen operations declared at paths nothing serves
+# ---------------------------------------------------------------------------
+#
+# Justification, common to every `api path removed without deprecation` entry
+# below: oasdiff's rule is static — it sees a path key disappear and calls it a
+# break — and it is right about the document and wrong about the wire. Each of
+# these paths returns 404 with an HTML `Cannot GET` body from api.wxyc.org
+# today, and did before this change. No client can be broken by the removal of
+# an operation that has never once returned a success; a client calling any of
+# these is already broken, and is better served by a compile error from a
+# regenerated stub than by a runtime 404. Re-runnable, read-only, no
+# credentials — 401/403 would mean the route is mounted and the entry is wrong:
+#
+#   curl -s -o /dev/null -w '%{http_code}\n' "https://api.wxyc.org<path>"
+#
+# Verified against the CI-pinned tufin/oasdiff:v1.26.1, not a local brew build
+# (1.29.1 here) — the two disagree on other rule families, and these messages
+# are matched verbatim.
+#
+# Six of the removals are re-declarations, not deletions: the operation moved
+# to the path that actually serves it, so the contract keeps the endpoint.
+#   get /library/labels, post /library/labels -> /labels
+#     (app.use('/labels', labels_route); /labels answers 401, i.e. mounted)
+#   post /requests -> post /request  (request_line_route.post('/', ...))
+#   post /lookup   -> post /api/v1/lookup
+#     (LML mounts lookup_router with prefix="/api/v1"; a different host, hence
+#      the x-wxyc-service marker this PR adds)
+#   get /metadata/album, get /metadata/artist: deleted outright rather than
+#     moved, because /proxy/metadata/{album,artist} were already declared
+#     separately — these two were duplicates of an existing declaration.
+get /album-reviews api path removed without deprecation
+get /djs api path removed without deprecation
+patch /djs/register api path removed without deprecation
+post /djs/register api path removed without deprecation
+get /library/labels api path removed without deprecation
+post /library/labels api path removed without deprecation
+get /library/tracks api path removed without deprecation
+post /lookup api path removed without deprecation
+get /metadata/album api path removed without deprecation
+get /metadata/artist api path removed without deprecation
+get /requests api path removed without deprecation
+post /requests api path removed without deprecation
+patch /requests/{id} api path removed without deprecation
+get /schedule/shifts api path removed without deprecation
+get /schedule/specialty api path removed without deprecation
+get /v2/flowsheet api path removed without deprecation
+get /v2/flowsheet/latest api path removed without deprecation
+
+# POST /schedule — `day` reconciled from a string enum to the integer column.
+#
+# Different justification from the removals above, because POST /schedule is a
+# LIVE route, and it is the one place #372's own write-up was wrong: it assumed
+# ScheduleShift and AddScheduleShiftRequest were reachable only from the phantom
+# GET /schedule/shifts. They are also the declared body and response of POST
+# /schedule, so they survive; only their `day` model changed.
+#
+# The removed string form has never been sendable. The handler is
+# `db.insert(schedule).values(body)` (schedule.service.ts) against
+# `day: smallint('day').notNull()` (shared/database/src/schema.ts), so a client
+# obeying the old declaration and posting `"Monday"` gets a Postgres
+# `invalid input syntax for type smallint`, not a 2xx. The enum contradicted the
+# sibling `Schedule` schema on the same column twice over — string vs integer,
+# and a week starting Sunday vs the database's `// days {0: mon, ... , 6: sun}`
+# — and the integer is the half that matches. This narrows the contract onto
+# the only values that ever worked; it does not narrow what the endpoint accepts.
+post /schedule removed the enum value `Friday` of the request property `day`
+post /schedule removed the enum value `Monday` of the request property `day`
+post /schedule removed the enum value `Saturday` of the request property `day`
+post /schedule removed the enum value `Sunday` of the request property `day`
+post /schedule removed the enum value `Thursday` of the request property `day`
+post /schedule removed the enum value `Tuesday` of the request property `day`
+post /schedule removed the enum value `Wednesday` of the request property `day`
+post /schedule the `day` request property `type` changed from `string` to `integer`
+post /schedule the `day` response's property `type` changed from `string` to `integer` for status `200`

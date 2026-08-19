@@ -20,10 +20,8 @@ import type {
   FlowsheetV2BreakpointEntry,
   FlowsheetV2MessageEntry,
   RotationEntry,
-  DJ,
   BinEntry,
   ScheduleShift,
-  DayOfWeek,
   SongRequest,
   ParsedSongRequest,
 } from '../dtos/index.js';
@@ -45,7 +43,6 @@ import {
   testV2BreakpointEntry,
   testV2MessageEntry,
   testRotation,
-  testDJ,
   testBinEntry,
   testScheduleShift,
 } from './fixtures.js';
@@ -262,13 +259,7 @@ export function createTestRotation(overrides: Partial<RotationEntry> = {}): Rota
 // DJs
 // ============================================================================
 
-export function createTestDJ(overrides: Partial<DJ> = {}): DJ {
-  return {
-    ...testDJ,
-    id: generateId(),
-    ...overrides,
-  };
-}
+// createTestDJ went with the `DJ` schema in wxyc-shared#372.
 
 export function createTestBinEntry(overrides: Partial<BinEntry> = {}): BinEntry {
   return {

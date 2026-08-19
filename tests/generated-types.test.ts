@@ -17,7 +17,6 @@ import {
   type Album,
   type AlbumSearchResult,
   type Label,
-  type DJ,
   type ScheduleShift,
   type SongRequest,
   type AlbumMetadataResponse,
@@ -34,7 +33,6 @@ import {
   type DiscogsWriterCredits,
   type TrackMatchHint,
   RotationBin,
-  DayOfWeek,
   RequestStatus,
   MetadataSource,
   MetadataStatus,
@@ -156,40 +154,26 @@ describe('Generated TypeScript Types', () => {
     });
   });
 
-  describe('DJ', () => {
-    it('should accept a DJ with all fields', () => {
-      const dj: DJ = {
-        id: 1,
-        dj_name: 'DJ Test',
-        real_name: 'John Doe',
-        email: 'test@wxyc.org',
-      };
-
-      expect(dj.dj_name).toBe('DJ Test');
-    });
-
-    it('should allow omitting optional fields', () => {
-      const dj: DJ = {
-        id: 2,
-        dj_name: 'Minimal DJ',
-      };
-
-      expect(dj.real_name).toBeUndefined();
-    });
-  });
+  // The `DJ` describe went with its schema in wxyc-shared#372: DJ and NewDJ
+  // were the shapes of GET /djs and /djs/register, none of which Backend has
+  // ever mounted, and NewDJ keyed on `cognito_user_name`, an auth system it no
+  // longer runs.
 
   describe('ScheduleShift', () => {
-    it('should accept DayOfWeek enum values', () => {
+    it('takes the integer day the schedule column actually holds', () => {
       const shift: ScheduleShift = {
         id: 1,
         dj_id: 100,
         dj_name: 'Test DJ',
-        day: DayOfWeek.Monday,
+        // 0 = Monday, per `// days {0: mon, ... , 6: sun}` on the table. This
+        // was `DayOfWeek.Monday` — the string 'Monday' — until #372 removed the
+        // enum for contradicting the column on type and week-start alike.
+        day: 0,
         start_time: '14:00',
         end_time: '16:00',
       };
 
-      expect(shift.day).toBe('Monday');
+      expect(shift.day).toBe(0);
     });
   });
 
@@ -430,12 +414,6 @@ describe('Generated TypeScript Types', () => {
       expect(RotationBin.M).toBe('M');
       expect(RotationBin.L).toBe('L');
       expect(RotationBin.S).toBe('S');
-    });
-
-    it('should define DayOfWeek values', () => {
-      expect(DayOfWeek.Sunday).toBe('Sunday');
-      expect(DayOfWeek.Monday).toBe('Monday');
-      expect(DayOfWeek.Saturday).toBe('Saturday');
     });
 
     // `Genre` and `Format` no longer generate a const object: #367 deleted
