@@ -16,7 +16,6 @@ import { createE2EClient, E2EClient, getE2EConfig } from '../setup.js';
 import type {
   FlowsheetEntryResponse,
   AlbumSearchResult,
-  ScheduleShift,
   FormatEntry,
   GenreEntry,
   OnAirDJ,
@@ -123,29 +122,6 @@ describe('Generated Type Parsing (E2E)', () => {
     });
   });
 
-  describe('ScheduleShift', () => {
-    it('parses real schedule shifts with day enum', async () => {
-      const response = await client.get<ScheduleShift[]>('/schedule/shifts');
-
-      if (!response.ok) {
-        console.log('Skipping: Backend not available');
-        return;
-      }
-
-      expect(Array.isArray(response.body)).toBe(true);
-
-      const validDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
-      for (const shift of response.body) {
-        expect(typeof shift.id).toBe('number');
-        expect(typeof shift.dj_id).toBe('number');
-        expect(typeof shift.dj_name).toBe('string');
-        expect(validDays).toContain(shift.day);
-        expect(typeof shift.start_time).toBe('string');
-        expect(typeof shift.end_time).toBe('string');
-      }
-    });
-  });
 
   describe('FormatEntry', () => {
     it('parses format entries', async () => {

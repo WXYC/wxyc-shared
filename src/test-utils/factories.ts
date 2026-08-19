@@ -259,7 +259,6 @@ export function createTestRotation(overrides: Partial<RotationEntry> = {}): Rota
 // DJs
 // ============================================================================
 
-// createTestDJ went with the `DJ` schema in wxyc-shared#372.
 
 export function createTestBinEntry(overrides: Partial<BinEntry> = {}): BinEntry {
   return {

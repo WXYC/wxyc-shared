@@ -245,8 +245,6 @@ export const testRotation: RotationEntry = {
 // DJs
 // ============================================================================
 
-// testDJ went with the `DJ` schema in wxyc-shared#372: its only referents were
-// GET /djs and /djs/register, none of which Backend has ever served.
 
 export const testBinEntry: BinEntry = {
   id: 1,
@@ -267,9 +265,7 @@ export const testScheduleShift: ScheduleShift = {
   id: 1,
   dj_id: 1,
   dj_name: 'DJ Test',
-  // 0 = Monday. Was the string 'Monday' under the DayOfWeek enum, which
-  // wxyc-shared#372 removed for disagreeing with the column on both type and
-  // week-start.
+  // 0 = Monday, matching the smallint column.
   day: 0,
   start_time: '14:00',
   end_time: '16:00',

@@ -351,44 +351,6 @@ describe('OpenAPI Compliance', () => {
       }
     });
 
-    it('GET /schedule/shifts response matches ScheduleShift[] schema', async () => {
-      const response = await client.get<unknown[]>('/schedule/shifts');
 
-      if (!response.ok) {
-        console.log('Skipping: Backend not available');
-        return;
-      }
-
-      expect(response.status).toBe(200);
-      expect(Array.isArray(response.body)).toBe(true);
-
-      for (const shift of response.body) {
-        const result = validateAgainstSchema(shift, 'ScheduleShift', schemas);
-        if (!result.valid) {
-          console.log('Validation errors:', result.errors);
-        }
-        expect(result.valid).toBe(true);
-      }
-    });
-
-    it('GET /schedule/specialty response matches SpecialtyShow[] schema', async () => {
-      const response = await client.get<unknown[]>('/schedule/specialty');
-
-      if (!response.ok) {
-        console.log('Skipping: Backend not available');
-        return;
-      }
-
-      expect(response.status).toBe(200);
-      expect(Array.isArray(response.body)).toBe(true);
-
-      for (const show of response.body) {
-        const result = validateAgainstSchema(show, 'SpecialtyShow', schemas);
-        if (!result.valid) {
-          console.log('Validation errors:', result.errors);
-        }
-        expect(result.valid).toBe(true);
-      }
-    });
   });
 });

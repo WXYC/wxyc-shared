@@ -12,8 +12,7 @@ info:
     the `/auth/*` app on the same host) or `library-metadata-lookup` (a separate
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
-    reachability is not decidable from this document — which is how seventeen
-    operations came to be declared at paths nothing served (wxyc-shared#372).
+    reachability is not decidable from this document.
   version: 1.42.0
   contact:
     name: WXYC
@@ -2538,25 +2537,17 @@ components:
     # Schedule Types
     # ===================
 
-    # `day` on both shapes below was `$ref: DayOfWeek` — a string enum of day
-    # names starting Sunday — until wxyc-shared#372. It is now the integer the
-    # column actually holds, matching `Schedule.day` in type and in week-start.
+    # `day` on both shapes below is the integer the `smallint` column holds,
+    # matching `Schedule.day` in type and in week-start (0 = Monday). It was a
+    # string enum of day names starting Sunday until the two models were
+    # reconciled.
     #
-    # These two are NOT phantom-only, which is worth stating because #372's
-    # write-up assumed they were: they are reachable from `POST /schedule`, a
-    # live route (`schedule_route.post('/', ...)` -> `addToSchedule`), as its
-    # request body and its response. Deleting them alongside GET
-    # /schedule/shifts would have stripped the declaration off a working
-    # endpoint, so the contradiction is resolved by reconciling `day` instead.
+    # These shapes are reachable from `POST /schedule`, a live route, as its
+    # request body and response — not only from a phantom path.
     #
-    # Known remaining drift, deliberately left for its own ticket rather than
-    # redesigned here: the handler is `db.insert(schedule).values(...)` over a
-    # table whose columns are day/start_time/show_duration/specialty_id/
-    # assigned_dj_id/assigned_dj_id2, so `dj_id`, `dj_name`, `end_time` and
-    # `show_name` below do not exist on it and `show_duration` is missing.
-    # The response status is 201, not the 200 declared. #372 corrected the day
-    # model because that is the contradiction it was scoped to; the field set
-    # is a separate correction on a live contract.
+    # The declared field set does not match the table the handler inserts into,
+    # and the handler returns 201 against the 200 declared below. Tracked in
+    # WXYC/Backend-Service#2224; do not fix it piecemeal here.
     ScheduleShift:
       type: object
       required:
@@ -7617,18 +7608,10 @@ paths:
       x-wxyc-service: backend-service
       summary: Get flowsheet entries
       description: |
-        This is also where the V2 projection ships. Backend names `/v2/flowsheet`
-        in three source comments and implements the discriminated-union shape as
-        `projectEntriesV2`, but calls it from `getEntries` — the handler mounted
-        right here, at plain `GET /flowsheet`. No `/v2` router was ever mounted
-        in `app.ts`, so the two `/v2/flowsheet*` declarations this spec used to
-        carry named nothing and were removed in wxyc-shared#372. Mounting the
-        prefix now would mean maintaining two paths to one projection for zero
-        callers; if that changes, add the path back at the moment it is built.
-
-        The `FlowsheetV2*` schemas remain declared under `components.schemas` —
-        they are the real wire shape and the generated DTOs consumers import,
-        and they outlive the path that never served them.
+        This is also where the V2 projection ships: `projectEntriesV2` is called
+        from the handler mounted here, not from a `/v2` prefix. No `/v2` router
+        exists. The `FlowsheetV2*` schemas under `components.schemas` are that
+        wire shape and are the DTOs consumers import.
       security: []
       parameters:
         - name: limit

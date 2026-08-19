@@ -21,6 +21,22 @@ interface OpenAPISpec {
 
 describe('OpenAPI Specification', () => {
   let spec: OpenAPISpec;
+
+  // All eight OpenAPI 3.0 operation keys. Shared by every guard that walks the
+  // document: a list one key short is a list with an exemption in it, and three
+  // copies of it is three places for that exemption to appear.
+  const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'];
+
+  function operations(): Array<[string, string, Record<string, unknown>]> {
+    const found: Array<[string, string, Record<string, unknown>]> = [];
+    for (const [path, item] of Object.entries(spec.paths)) {
+      for (const [method, operation] of Object.entries(item as Record<string, unknown>)) {
+        if (!HTTP_METHODS.includes(method)) continue;
+        found.push([method, path, operation as Record<string, unknown>]);
+      }
+    }
+    return found;
+  }
   // Raw source alongside the parsed tree, for assertions that must hold across
   // the whole document rather than inside one schema — e.g. a false citation
   // that could be copy-pasted into any description.
@@ -3868,19 +3884,6 @@ describe('OpenAPI Specification', () => {
       'post /api/v1/lookup',
     ] as const;
 
-    const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'];
-
-    function operations(): Array<[string, string, Record<string, unknown>]> {
-      const found: Array<[string, string, Record<string, unknown>]> = [];
-      for (const [path, item] of Object.entries(spec.paths)) {
-        for (const [method, operation] of Object.entries(item as Record<string, unknown>)) {
-          if (!HTTP_METHODS.includes(method)) continue;
-          found.push([method, path, operation as Record<string, unknown>]);
-        }
-      }
-      return found;
-    }
-
     it('marks every operation with exactly one service from the closed set', () => {
       const offenders: string[] = [];
       for (const [method, path, operation] of operations()) {
@@ -3894,6 +3897,18 @@ describe('OpenAPI Specification', () => {
         }
       }
       expect(offenders, offenders.join('\n')).toEqual([]);
+    });
+
+    // The converse of the prefix rule this deliberately does NOT use for
+    // attribution: /api/v1/* is LML's mount, so nothing under it can be
+    // Backend's. Without this a future LML operation mis-marked
+    // `backend-service` passes every other guard here silently.
+    it('never attributes an /api/v1 operation to backend-service', () => {
+      const misattributed = operations()
+        .filter(([, path]) => path.startsWith('/api/v1/'))
+        .filter(([, , operation]) => operation['x-wxyc-service'] === 'backend-service')
+        .map(([method, path]) => `${method} ${path}`);
+      expect(misattributed, misattributed.join('\n')).toEqual([]);
     });
 
     it('attributes exactly the known seven operations to library-metadata-lookup', () => {
@@ -3988,7 +4003,6 @@ describe('OpenAPI Specification', () => {
     // appear.
     it('names only schemes that components.securitySchemes defines', () => {
       const defined = Object.keys(spec.components.securitySchemes ?? {});
-      const methods = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'];
       const unresolved: string[] = [];
 
       function check(where: string, security: unknown): void {
@@ -4002,11 +4016,8 @@ describe('OpenAPI Specification', () => {
       }
 
       check('document default', (spec as { security?: unknown }).security);
-      for (const [path, item] of Object.entries(spec.paths)) {
-        for (const [method, operation] of Object.entries(item as Record<string, unknown>)) {
-          if (!methods.includes(method)) continue;
-          check(`${method} ${path}`, (operation as { security?: unknown }).security);
-        }
+      for (const [method, path, operation] of operations()) {
+        check(`${method} ${path}`, (operation as { security?: unknown }).security);
       }
 
       expect(
@@ -4094,20 +4105,12 @@ describe('OpenAPI Specification', () => {
     }
 
     function declaredPublicOperations(): string[] {
-      // All eight OpenAPI 3.0 operation keys. `trace` is here for the same
-      // reason the rest are: the value of this guard is exhaustiveness, and a
-      // list that is one key short is a list with an exemption in it.
-      const methods = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'];
-      const found: string[] = [];
-      for (const [path, item] of Object.entries(spec.paths)) {
-        for (const [method, operation] of Object.entries(item as Record<string, unknown>)) {
-          if (!methods.includes(method)) continue;
-          if (isAnonymouslyCallable((operation as { security?: unknown }).security)) {
-            found.push(`${method} ${path}`);
-          }
-        }
-      }
-      return found.sort();
+      return operations()
+        .filter(([, , operation]) =>
+          isAnonymouslyCallable((operation as { security?: unknown }).security)
+        )
+        .map(([method, path]) => `${method} ${path}`)
+        .sort();
     }
 
     it('gives every allowlisted operation a written reason', () => {
