@@ -99,7 +99,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.39.0');
+      expect(spec.info.version).toBe('1.40.0');
     });
 
     it('should have components section', () => {
@@ -3700,6 +3700,96 @@ describe('OpenAPI Specification', () => {
   describe('Security', () => {
     it('should define BearerAuth security scheme', () => {
       expect(spec.components.securitySchemes?.BearerAuth).toBeDefined();
+    });
+
+    // --- #368: `security: []` is a claim about the route, and it has to be true ---
+    //
+    // The document-level `security: [{ BearerAuth: [] }]` is the default; an
+    // operation-level `security: []` overrides it to mean "explicitly
+    // unauthenticated". A generated client reads that literally and omits the
+    // Authorization header, so an operation that declares it while Backend
+    // serves it behind `requirePermissions({ <resource>: [...] })` promises a
+    // 200 and delivers a 401 — which is exactly what `GET /library/info` and
+    // `GET /library/formats` were doing.
+    //
+    // The guard below is a CLOSED allowlist rather than a per-operation
+    // assertion on the two that were fixed. A test that only pinned those two
+    // would go on passing while the next endpoint added behind
+    // `requirePermissions` shipped declared-public; a closed list fails on any
+    // *new* `security: []` and makes the author come here and write down why
+    // the route is really public. Adding a line is cheap and deliberate,
+    // which is the whole point.
+    //
+    // Auditable against production with no credentials — 401/403 means the
+    // route is protected and `security: []` is wrong; 200 (or a 4xx from a
+    // missing query param) means it is genuinely open:
+    //
+    //   curl -s -o /dev/null -w '%{http_code}\n' "https://api.wxyc.org<path>"
+    //
+    // Note that `requirePermissions({})` — verify the JWT, anonymous sessions
+    // welcome — is a THIRD posture, and it is not `security: []` either. It
+    // still requires a Bearer token, so it belongs under the global default.
+    const PUBLIC_OPERATIONS: ReadonlyArray<readonly [string, string, string]> = [
+      // [method, path, why it is genuinely public]
+      ['post', '/auth/device/code', 'RFC 8628 device-code request — the whole point is that the device has no token yet'],
+      ['post', '/auth/device/token', 'RFC 8628 token poll — same, this is where the token comes from'],
+      ['get', '/concerts/{id}', 'deliberately public per BS#1694 / #236: the wxyc.org share Worker cannot mint anonymous sessions, and the response is publicly cacheable. Note the sibling GET /concerts is requirePermissions({}) and correctly does NOT appear here'],
+      ['get', '/config', 'unauthenticated bootstrap config, by design (config.route.ts). /config/secrets is the authed half and is not listed here'],
+      ['get', '/events/stream', 'browser EventSource cannot send an Authorization header; per-topic authz happens inside filterAuthorizedTopics (events.route.ts)'],
+      ['get', '/flowsheet', 'no auth middleware on flowsheet_route.get("/")'],
+      ['get', '/flowsheet/djs-on-air', 'no auth middleware'],
+      ['get', '/flowsheet/latest', 'no auth middleware'],
+      ['get', '/flowsheet/range', 'public date-windowed read, BS#2062 — the tubafrenzy /playlists/dailyEntries successor'],
+      ['get', '/flowsheet/search', 'public playlist-archive search'],
+      ['get', '/library/genres', 'deliberately public per BS#1682 — station-wide reference data, and dj-site#1004 SSR cannot attach a JWT. POST /library/genres stays catalog:write'],
+      ['get', '/library/tracks', 'phantom path — no route is mounted here at all (wxyc-shared#372 class B). Left as declared; correcting the auth on a path that does not exist would only make the phantom harder to spot'],
+      ['post', '/lookup', 'served by library-metadata-lookup, not Backend — a different service with its own auth posture (see the servers: caveat in wxyc-shared#372)'],
+      ['post', '/requests', 'phantom path — Backend serves POST /request, singular (wxyc-shared#372 class A)'],
+      ['get', '/schedule', 'no auth middleware on schedule_route.get("/")'],
+      ['get', '/schedule/shifts', 'phantom path (wxyc-shared#372 class B)'],
+      ['get', '/schedule/specialty', 'phantom path (wxyc-shared#372 class B)'],
+      ['get', '/v2/flowsheet', 'phantom path — no /v2 router is mounted in app.ts (wxyc-shared#372 class B)'],
+      ['get', '/v2/flowsheet/latest', 'phantom path (wxyc-shared#372 class B)'],
+    ] as const;
+
+    function declaredPublicOperations(): string[] {
+      const methods = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
+      const found: string[] = [];
+      for (const [path, item] of Object.entries(spec.paths)) {
+        for (const [method, operation] of Object.entries(item as Record<string, unknown>)) {
+          if (!methods.includes(method)) continue;
+          const security = (operation as { security?: unknown }).security;
+          if (Array.isArray(security) && security.length === 0) found.push(`${method} ${path}`);
+        }
+      }
+      return found.sort();
+    }
+
+    it('declares no operation public beyond the reviewed allowlist', () => {
+      const allowed = PUBLIC_OPERATIONS.map(([method, path]) => `${method} ${path}`).sort();
+      // Set-equality, both directions: an unreviewed new `security: []` fails,
+      // and so does an allowlist line whose operation has been corrected or
+      // removed — so the reasons above can't rot into fiction.
+      expect(declaredPublicOperations()).toEqual(allowed);
+    });
+
+    it('does not declare the catalog:read reads public — they 401 without a Bearer token', () => {
+      // Both are `requirePermissions({ catalog: ['read'] })` in
+      // apps/backend/routes/library.route.ts, and both return
+      // `401 {"error":"Unauthorized: Missing Authorization header."}` in
+      // production today. Backend's own app.yaml already had this right for
+      // /library/info (it declares no operation-level security); this is
+      // api.yaml catching up, not a new restriction on the wire.
+      for (const route of ['/library/info', '/library/formats']) {
+        const operation = (spec.paths[route] as { get?: { security?: unknown[] } })?.get;
+        expect(operation, route).toBeDefined();
+        // Inheriting the document default is the fix — an explicit
+        // `security: [{ BearerAuth: [] }]` would be equivalent, so accept
+        // either rather than pinning a formatting choice.
+        if (operation!.security !== undefined) {
+          expect(operation!.security, route).toEqual([{ BearerAuth: [] }]);
+        }
+      }
     });
   });
 
