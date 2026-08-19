@@ -6,7 +6,7 @@ info:
 
     This is the single source of truth for all WXYC API types. Code is generated from this spec
     for TypeScript, Swift, and Kotlin consumers.
-  version: 1.40.0
+  version: 1.41.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1439,10 +1439,15 @@ components:
           type: integer
           description: >
             The library row's surrogate key (BS#1963), NOT NULL in the
-            database since migration 0137. Optional here (never required) so
-            the live openapi-compliance deploy gate stays green across the
-            publish -> BS-deploy window, matching the CatalogExportRow and
-            BulkResolveInput precedent.
+            database since migration 0137. Optional here (never required)
+            because the column is emitted per-projection, not globally: NOT
+            NULL is a claim about the column, while `required` is a promise
+            that the key appears on the wire, and WXYC/Backend-Service#2167 is
+            open precisely because the LML search-proxy rows do not emit it
+            explicitly yet. Promoting this to required once every projection
+            returning the schema provably emits it is worth doing, and needs a
+            per-projection audit rather than a text edit. Matches the
+            CatalogExportRow and BulkResolveInput precedent.
         # Optional fields from fuzzy search
         album_dist:
           type: number
@@ -2529,10 +2534,15 @@ components:
           type: integer
           description: >
             The library row's surrogate key (BS#1963), NOT NULL in the
-            database since migration 0137. Optional here (never required) so
-            the live openapi-compliance deploy gate stays green across the
-            publish -> BS-deploy window, matching the CatalogExportRow and
-            BulkResolveInput precedent.
+            database since migration 0137. Optional here (never required)
+            because the column is emitted per-projection, not globally: NOT
+            NULL is a claim about the column, while `required` is a promise
+            that the key appears on the wire, and WXYC/Backend-Service#2167 is
+            open precisely because the LML search-proxy rows do not emit it
+            explicitly yet. Promoting this to required once every projection
+            returning the schema provably emits it is worth doing, and needs a
+            per-projection audit rather than a text edit. Matches the
+            CatalogExportRow and BulkResolveInput precedent.
 
     # ===================
     # Schedule Types
