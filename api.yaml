@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.42.0
+  version: 1.43.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1441,6 +1441,14 @@ components:
           type: string
         label_id:
           type: integer
+        artist_id:
+          type: integer
+          description: >
+            The WXYC catalog artist id, sharing the `library.artist_id`
+            keyspace. Optional here (never required): it lands ahead of the
+            Backend-Service change that populates it (BS#2227), so a consumer
+            compiled against this field must still tolerate its absence until
+            that deploys.
         legacy_release_id:
           type: integer
           description: >
