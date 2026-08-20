@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.42.0');
+      expect(spec.info.version).toBe('1.43.0');
     });
 
     it('should have components section', () => {
@@ -903,6 +903,32 @@ describe('OpenAPI Specification', () => {
         const prop = propertyOf('FlowsheetV2TrackEntry', 'track_position');
         expect(String(prop?.description)).not.toMatch(/no resolvable identity/);
       });
+    });
+  });
+
+  // #383. AlbumSearchResult identified an artist by name and shelf code only,
+  // so no catalog-search consumer could link a result row to that artist's
+  // page. Optional, not required: it lands ahead of the Backend-Service
+  // change that populates it (WXYC/Backend-Service#2227), so a consumer
+  // compiled against the new package must still tolerate its absence until
+  // that deploys.
+  describe('AlbumSearchResult.artist_id (#383)', () => {
+    type SchemaProp = {
+      type?: string;
+      description?: string;
+    };
+    type Schema = {
+      properties?: Record<string, SchemaProp>;
+      required?: string[];
+    };
+
+    it('is declared as an optional integer, describing the shared library.artist_id keyspace', () => {
+      const schema = spec.components.schemas.AlbumSearchResult as Schema;
+      const prop = schema.properties?.artist_id;
+      expect(prop).toBeDefined();
+      expect(prop?.type).toBe('integer');
+      expect(schema.required ?? []).not.toContain('artist_id');
+      expect(String(prop?.description)).toMatch(/library\.artist_id/);
     });
   });
 
