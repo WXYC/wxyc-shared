@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.44.0
+  version: 1.45.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1273,6 +1273,7 @@ components:
       type: object
       required:
         - shows
+        - total_in_window
         - older_open_show_count
       properties:
         shows:
@@ -1280,6 +1281,12 @@ components:
           description: Ordered oldest-first by `start_time`, tie-broken on `id`.
           items:
             $ref: '#/components/schemas/OpenShow'
+        total_in_window:
+          type: integer
+          description: >
+            How many open shows the window holds in total, before `limit`
+            truncates. `shows.length < total_in_window` is the only way a
+            caller can tell it is looking at a partial answer.
         older_open_show_count:
           type: integer
           description: >
@@ -7905,13 +7912,29 @@ paths:
           required: false
           description: >
             Lookback in whole hours from now, applied to `start_time`. Defaults
-            to 168 (7 days). Must be an integer between 1 and 8760 (1 year); a
-            non-integer or out-of-range value is a 400, never a silent clamp.
+            to 168 (7 days). A non-integer or out-of-range value is a 400,
+            never a silent clamp.
+
+
+            The ceiling is 262800 (30 years) so the window can actually REACH
+            the cohort `older_open_show_count` reports — production's open
+            shows start in 2006. What bounds the response is `limit`, not this.
           schema:
             type: integer
             minimum: 1
-            maximum: 8760
+            maximum: 262800
             default: 168
+        - name: limit
+          in: query
+          required: false
+          description: >
+            Rows returned. Compare `shows.length` against `total_in_window` to
+            tell a truncated page from a complete one.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
       responses:
         '200':
           description: Open shows inside the window, oldest first
@@ -7920,7 +7943,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/OpenShowsResponse'
         '400':
-          description: "window_hours was not an integer in [1, 8760]"
+          description: "window_hours or limit was not an integer in range"
         '403':
           description: "Caller lacks the `flowsheet: manage` permission"
 
@@ -7947,6 +7970,13 @@ paths:
         `POST /flowsheet/end`.
 
 
+        `end_time` and the `show_end` marker's `add_time` come from the show's
+        last logged entry, NOT from the moment the request is made. A show from
+        the legacy backlog stamped with `now()` would carry an interval
+        overlapping every `GET /flowsheet/range` window since it started, and
+        its marker would sort to the top of the public flowsheet.
+
+
         Ending an already-ended show is a 400, decided by a compare-and-set on
         `end_time IS NULL`, so two concurrent operators cannot both write a
         `show_end` marker.
@@ -7957,6 +7987,22 @@ paths:
           description: Backend-Service `shows.id`, not the tubafrenzy `legacy_show_id`.
           schema:
             type: integer
+        - name: force
+          in: query
+          required: false
+          description: >
+            Send `true` to close the show that is currently on air. Without it,
+            targeting the current show is a 409.
+
+
+            The override exists because an abandoned show IS the current show
+            until something closes it — the 2026-08-20 incident that motivated
+            this endpoint hung for nine hours as `max(shows.id)`. The
+            confirmation is aimed at a mistyped id, or at an operator acting on
+            a list fetched before a new show signed on.
+          schema:
+            type: string
+            enum: ['true']
       responses:
         '200':
           description: The finalized show, with `end_time` set
@@ -7970,6 +8016,8 @@ paths:
           description: "Caller lacks the `flowsheet: manage` permission"
         '404':
           description: No show with that id
+        '409':
+          description: The target is the current on-air show and `force=true` was not sent
 
   /flowsheet/djs-on-air:
     get:
