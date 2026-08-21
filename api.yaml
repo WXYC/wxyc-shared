@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.43.0
+  version: 1.44.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1208,6 +1208,85 @@ components:
           type: string
           format: date-time
           nullable: true
+
+    OpenShow:
+      type: object
+      description: >
+        One open show as reported by `GET /flowsheet/open-shows`. Distinct from
+        `Show`: it carries the derived `entry_count`, `is_current` and
+        `likely_abandoned` fields, and omits `end_time`, which is NULL for
+        every member of this collection by construction.
+      required:
+        - id
+        - primary_dj_id
+        - dj_name
+        - show_name
+        - start_time
+        - legacy_show_id
+        - entry_count
+        - is_current
+        - likely_abandoned
+      properties:
+        id:
+          type: integer
+        primary_dj_id:
+          type: string
+          nullable: true
+          description: >
+            NULL for legacy/tubafrenzy-originated shows and for any show whose
+            DJ account was deleted (`ON DELETE SET NULL`). Such a show can
+            still be closed via `force-end`.
+        dj_name:
+          type: string
+          nullable: true
+          description: >
+            The public DJ handle, resolved through the standard chain
+            (per-show override, then the linked account's handle, then the
+            legacy tubafrenzy handle). Never a real name. NULL when
+            unresolvable.
+        show_name:
+          type: string
+          nullable: true
+        start_time:
+          type: string
+          format: date-time
+        legacy_show_id:
+          type: integer
+          nullable: true
+          description: The tubafrenzy surrogate key, when this show was mirrored.
+        entry_count:
+          type: integer
+          description: Flowsheet rows belonging to this show, all entry types included.
+        is_current:
+          type: boolean
+          description: >
+            True for the single show every on-air read resolves to. Present so a
+            client can never offer to close the live broadcast.
+        likely_abandoned:
+          type: boolean
+          description: >
+            Advisory only — an operator hint, not a verdict. True when the show
+            is not current and has fewer than four entries. A show with many
+            entries can still be abandoned; check `start_time`.
+
+    OpenShowsResponse:
+      type: object
+      required:
+        - shows
+        - older_open_show_count
+      properties:
+        shows:
+          type: array
+          description: Ordered oldest-first by `start_time`, tie-broken on `id`.
+          items:
+            $ref: '#/components/schemas/OpenShow'
+        older_open_show_count:
+          type: integer
+          description: >
+            Open shows that started BEFORE the window, reported as a count and
+            never listed. Almost all of these are legacy imports whose
+            `show_end` never arrived; see the endpoint description. Widen
+            `window_hours` to reach them.
 
     ShowDJ:
       type: object
@@ -7795,6 +7874,102 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/Show'
                   - $ref: '#/components/schemas/ShowDJ'
+
+  /flowsheet/open-shows:
+    get:
+      x-wxyc-service: backend-service
+      summary: List open shows an operator may need to close
+      description: >
+        Every show with `end_time IS NULL` that started inside the lookback
+        window, oldest first, with its flowsheet entry count. Replaces
+        tubafrenzy's "Resume a Show" list, which retires with tubafrenzy on
+        2026-08-31.
+
+
+        Requires the `flowsheet: manage` permission — `musicDirector` or
+        `stationManager`. A plain `dj` gets 403. This is narrower than the
+        legacy capability it replaces, which had no ownership or role check.
+
+
+        **The window is not cosmetic.** `end_time IS NULL` is not a reliable
+        "still on the air" signal: a show whose `show_end` delivery was dropped
+        keeps a NULL `end_time` permanently and nothing re-closes it on a
+        schedule. Measured on production 2026-08-21, 2,814 shows were open and
+        exactly one had started within 90 days — the rest are legacy ETL
+        imports going back to 2006. An unwindowed list buries the actionable
+        show, so the older cohort is reported as a count via
+        `older_open_show_count` and reached by widening `window_hours`.
+      parameters:
+        - name: window_hours
+          in: query
+          required: false
+          description: >
+            Lookback in whole hours from now, applied to `start_time`. Defaults
+            to 168 (7 days). Must be an integer between 1 and 8760 (1 year); a
+            non-integer or out-of-range value is a 400, never a silent clamp.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 8760
+            default: 168
+      responses:
+        '200':
+          description: Open shows inside the window, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenShowsResponse'
+        '400':
+          description: "window_hours was not an integer in [1, 8760]"
+        '403':
+          description: "Caller lacks the `flowsheet: manage` permission"
+
+  /flowsheet/shows/{id}/force-end:
+    post:
+      x-wxyc-service: backend-service
+      summary: End a show the caller does not own
+      description: >
+        Closes an abandoned show. Writes the same `show_end` marker,
+        deactivates the same `show_djs` memberships and mirrors the same
+        tubafrenzy sign-off as `POST /flowsheet/end` — it reuses that
+        implementation rather than duplicating it.
+
+
+        Requires the `flowsheet: manage` permission, the same gate as
+        `GET /flowsheet/open-shows`. No request body: the show is identified by
+        the path, and the caller's own identity is irrelevant to which show is
+        closed.
+
+
+        A show whose `primary_dj_id` is NULL can be closed through this
+        endpoint. That is deliberate — it is the shape of the entire legacy
+        open-show backlog, and it is not reachable through
+        `POST /flowsheet/end`.
+
+
+        Ending an already-ended show is a 400, decided by a compare-and-set on
+        `end_time IS NULL`, so two concurrent operators cannot both write a
+        `show_end` marker.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Backend-Service `shows.id`, not the tubafrenzy `legacy_show_id`.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: The finalized show, with `end_time` set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Show'
+        '400':
+          description: The id was not a positive integer, or the show is already ended
+        '403':
+          description: "Caller lacks the `flowsheet: manage` permission"
+        '404':
+          description: No show with that id
 
   /flowsheet/djs-on-air:
     get:
