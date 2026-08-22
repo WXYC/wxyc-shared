@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.45.1');
+      expect(spec.info.version).toBe('1.46.0');
     });
 
     it('should have components section', () => {
@@ -4433,6 +4433,66 @@ describe('OpenAPI Specification', () => {
         readFileSync(join(__dirname, '..', 'node_modules', 'better-auth', 'package.json'), 'utf-8')
       ) as { version: string };
       expect(ba.version).toBe('1.6.25');
+    });
+  });
+  describe('Song like tallies (POST /likes/tally)', () => {
+    // The iOS Phase 4 client and the Backend-Service Phase 3 endpoint are both
+    // generated from this block, and its privacy properties are load-bearing:
+    // the endpoint must never grow a listener key. See WXYC/wxyc-ios-64#979.
+
+    const prop = (schema: string, name: string) =>
+      (spec.components.schemas[schema] as { properties?: Record<string, Record<string, unknown>> })
+        .properties?.[name];
+
+    it('declares POST /likes/tally and no per-listener likes path', () => {
+      const paths = spec.paths as Record<string, unknown>;
+      expect(paths['/likes/tally']).toBeDefined();
+      expect((paths['/likes/tally'] as Record<string, unknown>).post).toBeDefined();
+      // The superseded full-snapshot design must not come back.
+      expect(paths['/listeners/me/likes']).toBeUndefined();
+    });
+
+    it('SongLikeDelta requires song_key, song_title, artist_name and delta', () => {
+      const delta = spec.components.schemas.SongLikeDelta as { required?: string[] };
+      expect(delta).toBeDefined();
+      expect(delta.required).toEqual(['song_key', 'song_title', 'artist_name', 'delta']);
+    });
+
+    it('pins delta to exactly +1 / -1', () => {
+      const d = prop('SongLikeDelta', 'delta');
+      expect(d?.type).toBe('integer');
+      expect(d?.enum).toEqual([-1, 1]);
+    });
+
+    it('keeps release_title and artist_id optional — name-only likes are normal', () => {
+      const delta = spec.components.schemas.SongLikeDelta as { required?: string[] };
+      expect(delta.required).not.toContain('release_title');
+      expect(delta.required).not.toContain('artist_id');
+      expect(prop('SongLikeDelta', 'release_title')).toBeDefined();
+      expect(prop('SongLikeDelta', 'artist_id')).toBeDefined();
+    });
+
+    it('carries no listener, session, device or user field anywhere in the tally schemas', () => {
+      // The whole point of the design: nothing written here may be attributable.
+      for (const name of ['SongLikeDelta', 'SongLikeTallyRequest', 'SongLikeTallyResponse']) {
+        const schema = spec.components.schemas[name] as { properties?: Record<string, unknown> };
+        for (const prop of Object.keys(schema.properties ?? {})) {
+          expect(prop).not.toMatch(/listener|session|device|user|distinct|anon/i);
+        }
+      }
+    });
+
+    it('bounds the deltas batch at both ends', () => {
+      const deltas = prop('SongLikeTallyRequest', 'deltas');
+      expect(deltas?.type).toBe('array');
+      expect(deltas?.minItems).toBe(1);
+      expect(deltas?.maxItems).toBe(1000);
+      expect((deltas?.items as { $ref?: string })?.$ref).toBe('#/components/schemas/SongLikeDelta');
+    });
+
+    it('returns applied + resolved counts', () => {
+      const res = spec.components.schemas.SongLikeTallyResponse as { required?: string[] };
+      expect(res.required).toEqual(['applied', 'resolved']);
     });
   });
 });
