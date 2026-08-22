@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.45.0
+  version: 1.45.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1294,6 +1294,14 @@ components:
             never listed. Almost all of these are legacy imports whose
             `show_end` never arrived; see the endpoint description. Widen
             `window_hours` to reach them.
+
+
+            **Expected to go to zero and stay there.** This field and the
+            30-year `window_hours` ceiling both exist for one finite cohort —
+            the ~2,813 shows WXYC/Backend-Service#1543 repairs from the final
+            tubafrenzy dump. Once that lands, both are vestigial and a later
+            contract version should drop them rather than preserve them out of
+            habit.
 
     ShowDJ:
       type: object
