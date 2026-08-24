@@ -14,7 +14,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { parse } from 'yaml';
 import { join } from 'path';
-import { createE2EClient, E2EClient, getE2EConfig } from '../setup.js';
+import { createE2EClient, createE2EAuthClient, E2EClient, getE2EConfig } from '../setup.js';
 
 interface OpenAPISpec {
   components: {
@@ -38,6 +38,13 @@ interface SchemaObject {
 }
 
 let client: E2EClient;
+/**
+ * Bound to `config.authUrl` (the better-auth origin), not `config.baseUrl`
+ * (the backend API `client` above uses) -- the issue #379 auth schemas live
+ * at `/auth/*` on the auth service, not the backend. See
+ * `createE2EAuthClient`'s doc comment in `../setup.ts`.
+ */
+let authClient: E2EClient;
 let spec: OpenAPISpec;
 let schemas: Record<string, SchemaObject>;
 
@@ -180,6 +187,7 @@ describe('OpenAPI Compliance', () => {
   beforeAll(async () => {
     const config = getE2EConfig();
     client = createE2EClient(config);
+    authClient = createE2EAuthClient(config);
 
     // Load OpenAPI spec
     const specPath = join(__dirname, '../../api.yaml');
@@ -352,5 +360,76 @@ describe('OpenAPI Compliance', () => {
     });
 
 
+  });
+
+  // Issue #379 -- the better-auth core surface added to api.yaml. Uses
+  // `authClient` (bound to the auth origin) rather than `client`. Anonymous
+  // sign-in needs no credentials, so this suite runs unconditionally
+  // (unlike `e2e/auth.test.ts`'s credentialed behavioral assertions).
+  describe('Auth Endpoints (#379)', () => {
+    it('POST /auth/sign-in/anonymous response matches AuthTokenAndUserResult schema', async () => {
+      const response = await authClient.post<unknown>('/sign-in/anonymous', {});
+
+      if (!response.ok) {
+        console.log('Skipping: Auth service not available');
+        return;
+      }
+
+      expect(response.status).toBe(200);
+      const result = validateAgainstSchema(response.body, 'AuthTokenAndUserResult', schemas);
+      if (!result.valid) {
+        console.log('Validation errors:', result.errors);
+      }
+      expect(result.valid).toBe(true);
+    });
+
+    it('GET /auth/token response matches AuthTokenResponse schema', async () => {
+      const signIn = await authClient.post<{ token?: string }>('/sign-in/anonymous', {});
+      if (!signIn.ok) {
+        console.log('Skipping: Auth service not available');
+        return;
+      }
+      const sessionToken = signIn.headers.get('set-auth-token') || signIn.body?.token;
+      expect(sessionToken, 'anonymous sign-in must yield a session token').toBeTruthy();
+
+      const response = await authClient.get<unknown>('/token', {
+        headers: { Authorization: `Bearer ${sessionToken}` },
+      });
+
+      expect(response.status).toBe(200);
+      const result = validateAgainstSchema(response.body, 'AuthTokenResponse', schemas);
+      if (!result.valid) {
+        console.log('Validation errors:', result.errors);
+      }
+      expect(result.valid).toBe(true);
+    });
+
+    it('POST /auth/wxyc/lookup-email response matches LookupEmailResponse schema', async () => {
+      const response = await authClient.post<unknown>('/wxyc/lookup-email', {
+        identifier: `e2e-compliance-probe-${Date.now()}`,
+      });
+
+      if (!response.ok) {
+        console.log('Skipping: Auth service not available');
+        return;
+      }
+
+      expect(response.status).toBe(200);
+      const result = validateAgainstSchema(response.body, 'LookupEmailResponse', schemas);
+      if (!result.valid) {
+        console.log('Validation errors:', result.errors);
+      }
+      expect(result.valid).toBe(true);
+    });
+
+    it('a non-existent auth route returns a 4xx response, not a schema mismatch', async () => {
+      // Sanity check that this describe block is actually reaching the auth
+      // origin -- a client accidentally left pointed at the backend origin
+      // would 404 here too, but for the wrong reason (unknown app route
+      // rather than unknown better-auth path), silently passing every test
+      // above against a service that was never exercised.
+      const response = await authClient.get('/definitely-not-a-real-auth-path');
+      expect(response.status).toBeGreaterThanOrEqual(400);
+    });
   });
 });

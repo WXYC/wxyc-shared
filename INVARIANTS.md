@@ -69,6 +69,24 @@ If an entry here is wrong, two things break: someone wastes a half-day diagnosin
 - **What breaks if violated:** the listener middleware can't tell `update` from `refetch`. Either the surgical-patch path runs against a refetch payload (typeError) or the debounced invalidate runs against an update payload (extra refetch latency). The envelope is also pinned in `api.yaml` via the `LiveFsUpdateEvent` / `LiveFsRefetchEvent` schemas so a future BS change that ships a bare payload (`{id: 42}`) breaks two checks at once.
 - **Status:** **ENFORCED.** Today's `serverEventsMgr.broadcast` already sends the envelope; pinning catches a regression where someone bypasses it.
 
+### `CONTRACTS.ANONYMOUS_SIGN_IN_SHAPE`
+
+> `POST /auth/sign-in/anonymous` returns `{token, user}`, where `user.id` is the newly-created anonymous user's id and a session token arrives on either the `set-auth-token` response header or the body's `token` field.
+
+- **Provider:** better-auth's anonymous plugin (`dist/plugins/anonymous/index.mjs` `signInAnonymous`) plus the bearer plugin's response-header mirror (`dist/plugins/bearer/index.mjs`).
+- **Consumer:** wxyc-ios-64 / WXYC-Android's `AuthNetworkClient.signInAnonymously` — the only credential-free auth mechanism those apps have; `e2e/setup.ts:getAnonymousToken`.
+- **What breaks if violated:** a client reading only the header (or only the body) stops obtaining a session token, and every anonymous-gated route (`/proxy/*`, `/concerts` after a `/auth/token` exchange) 401s from launch.
+- **Status (2026-08-24):** **ENFORCED.** Verified directly against a live `POST` to `api.wxyc.org`: the header and body token values authenticate interchangeably as a bearer on `GET /auth/token` — the bearer plugin re-signs a bare (unsigned) token using the server secret when it arrives with no signature segment, so a client reading either succeeds. The response body also carries the `admin()` plugin's `role`/`banned`/`banReason`/`banExpires` fields and WXYC's `user.additionalFields`; see `AuthUser` in `api.yaml` for the complete, verified shape (issue #379).
+
+### `CONTRACTS.SET_AUTH_TOKEN_ROTATES_ON_RENEWAL`
+
+> `GET /auth/token` re-emits `set-auth-token` (mirroring a rotated session cookie) only when the call triggers better-auth's rolling session renewal — once per `session.updateAge` (Backend-Service: 1 day). An ordinary call inside that window omits the header.
+
+- **Provider:** better-auth's session refresh (`getSession`, internal to `sessionMiddleware`) plus the bearer plugin's `after` hook, which mirrors any fresh `set-cookie` it observes onto `set-auth-token` (`dist/plugins/bearer/index.mjs`).
+- **Consumer:** wxyc-dj-ios `AuthService.captureRotatedSessionToken` — without capturing a rotation, a DJ's stored session token silently ages out of sync with the server's rolling renewal and (per that file's own doc comment) surfaces as a silent logout roughly once a day.
+- **What breaks if violated:** if rotation stops firing, a client relying on it (dj-ios) keeps using a pre-rotation bearer that the server eventually stops honoring — a silent, deferred sign-out. If rotation starts firing on every call rather than only on renewal, a client naively persisting every header value adds needless Keychain writes but no functional break (dj-ios's guard already no-ops when the rotated value equals the current one).
+- **Status (2026-08-24):** **PARTIALLY VERIFIED, NOT FULLY ENFORCED.** Confirmed empirically: an anonymous session's first `GET /auth/token` call (immediately after sign-in, session brand new) carries no `set-auth-token` header — the expected non-rotation case for a session nowhere near its `updateAge` threshold. Whether better-auth actually rotates `set-auth-token` for an **anonymous** session once it crosses `session.updateAge` specifically (as opposed to a credentialed one, which wxyc-dj-ios already observes rotating in production) could not be confirmed in this PR — that requires either a session aged past 24h or a local stack with a shortened `session.updateAge` override, neither available in this environment. Tracked as the wxyc-swift-auth plan's open question for [wxyc-ios-64#970](https://github.com/WXYC/wxyc-ios-64/issues/970) (D1); the `it.skip`-ed assertion in `tests/e2e-contracts.test.ts` documents exactly what would flip this to ENFORCED.
+
 ## Future invariants to add
 
 The starter set above is deliberately small (4 items). Candidates for follow-ups, ordered roughly by cost-of-violation:
@@ -92,9 +110,10 @@ When adding a new contract:
 
 ## Toggling skipped contracts
 
-Skipped contracts as of 2026-05-28, each guarded by a comment naming the blocking BS PR/issue (grep `it.skip` in `tests/e2e-contracts.test.ts`):
+Skipped contracts as of 2026-08-24, each guarded by a comment naming the blocking BS PR/issue (grep `it.skip` in `tests/e2e-contracts.test.ts`):
 
 - `PLAY_ORDER_PER_SHOW_MONOTONIC` — blocked on [BS#693](https://github.com/WXYC/Backend-Service/issues/693).
 - `ROTATION_DEDUP_PER_ALBUM_BIN` — blocked on [BS#694](https://github.com/WXYC/Backend-Service/issues/694).
+- `SET_AUTH_TOKEN_ROTATES_ON_RENEWAL` — blocked on either a session aged past `session.updateAge` (1 day) or a local stack with that value shortened; neither is available to the E2E harness today. Tracked by [wxyc-ios-64#970](https://github.com/WXYC/wxyc-ios-64/issues/970).
 
 When the blocking change ships, flip `it.skip(...)` to `it(...)` for the corresponding test.

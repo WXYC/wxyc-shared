@@ -130,6 +130,64 @@ export const CONTRACTS = {
    */
   LIVE_FS_EVENT_ENVELOPE_SHAPE:
     'every liveFs event carries the shape { type, payload, timestamp }',
+
+  /**
+   * `POST /auth/sign-in/anonymous` returns `{token, user}`, where `user.id`
+   * is the newly-created anonymous user's id and a session token arrives on
+   * EITHER the `set-auth-token` response header or the body's `token` field
+   * (whichever a caller reads).
+   *
+   * Provider: better-auth's anonymous plugin
+   *           (`dist/plugins/anonymous/index.mjs` signInAnonymous) plus the
+   *           bearer plugin's response-header mirror
+   *           (`dist/plugins/bearer/index.mjs`).
+   * Consumer: wxyc-ios-64 / WXYC-Android's `AuthNetworkClient.signInAnonymously`
+   *           (the only credential-free auth mechanism those apps have);
+   *           `e2e/setup.ts:getAnonymousToken`.
+   *
+   * Status: ENFORCED. Verified 2026-08-24 against a live POST to
+   * api.wxyc.org: the header and body values authenticate interchangeably
+   * as a bearer on GET /auth/token (the bearer plugin re-signs a bare
+   * token using the server secret when it arrives with no signature
+   * segment), so a client reading either succeeds. The full response body
+   * also carries the admin() plugin's `role`/`banned`/`banReason`/`banExpires`
+   * fields and WXYC's `user.additionalFields` — see `AuthUser` in
+   * `api.yaml` for the complete, verified shape.
+   */
+  ANONYMOUS_SIGN_IN_SHAPE:
+    'POST /auth/sign-in/anonymous returns {token, user.id}, with the session token on set-auth-token or the body',
+
+  /**
+   * `GET /auth/token` re-emits `set-auth-token` (mirroring a rotated
+   * session cookie) only when the call triggers better-auth's rolling
+   * session renewal — once per `session.updateAge` (Backend-Service: 1
+   * day, `shared/authentication/src/auth.definition.ts`). An ordinary call
+   * inside that window omits the header.
+   *
+   * Provider: better-auth's session refresh (`getSession`, internal to
+   *           `sessionMiddleware`) plus the bearer plugin's `after` hook,
+   *           which mirrors any fresh `set-cookie` it observes onto
+   *           `set-auth-token` (`dist/plugins/bearer/index.mjs`).
+   * Consumer: wxyc-dj-ios `AuthService.captureRotatedSessionToken` — without
+   *           capturing a rotation, a DJ's stored session token silently
+   *           ages out of sync with the server's rolling renewal.
+   *
+   * Status: PARTIALLY VERIFIED, NOT FULLY ENFORCED. Confirmed 2026-08-24:
+   * an anonymous session's FIRST GET /auth/token call (immediately after
+   * sign-in, session brand new) carries no set-auth-token header, which is
+   * the expected non-rotation case. Whether better-auth actually rotates
+   * `set-auth-token` for an ANONYMOUS session once it crosses
+   * session.updateAge specifically (as opposed to a credentialed one, which
+   * wxyc-dj-ios already observes rotating) could not be confirmed in this
+   * PR — that requires either a session aged past 24h or a local stack
+   * with a shortened `session.updateAge` override, neither available here.
+   * This is the wxyc-swift-auth plan's tracked open question for
+   * wxyc-ios-64#970 (D1); its `it.skip`-ed assertion in
+   * `tests/e2e-contracts.test.ts` documents exactly what would flip this
+   * to ENFORCED.
+   */
+  SET_AUTH_TOKEN_ROTATES_ON_RENEWAL:
+    'GET /auth/token re-emits set-auth-token only on a rolling session renewal (once per session.updateAge)',
 } as const;
 
 /** A reference to one of the named cross-service contracts. */

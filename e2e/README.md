@@ -29,6 +29,21 @@ npm run test:e2e -- e2e/flowsheet.test.ts
 - Validates JWT contains a role recognized by the backend (`WXYCRoles`)
 - Tests authenticated catalog and DJ bin access
 - Tests rejection of invalid/tampered tokens
+- **`better-auth core surface (issue #379)`**: behavioral assertions for the
+  eight `/auth/*` paths added to `api.yaml` in issue #379 — `set-auth-token`
+  on email *and* username sign-in (the username case self-skips absent
+  `E2E_TEST_DJ_USERNAME`, see below), the anonymous sign-in shape (no
+  credentials needed), `/auth/token` mint shape for both a credentialed and
+  an anonymous session, the 401-vs-404 split on `/auth/token` (missing/bad
+  bearer vs. the wrong HTTP method), `/auth/wxyc/lookup-email` resolution +
+  no-match, `send-verification-otp`'s success shape, sign-out invalidation
+  (a signed-out session subsequently 401s on `/auth/token`), and — **the
+  last test in the file, deliberately** — the `AuthPlainErrorResponse`-shaped
+  429 body once the shared per-IP rate limit is hit. That last test
+  exhausts the same `authMutationRateLimit` budget every credentialed
+  assertion above depends on (10 requests / 15 min per `X-Real-IP`, shared
+  across every `/auth/sign-in/*` + `/auth/email-otp/send-verification-otp` +
+  `/auth/wxyc/lookup-email` path) — do not reorder it earlier in the file.
 
 ### Flowsheet E2E (`flowsheet.test.ts`)
 - Public read endpoints (no auth required)
@@ -58,9 +73,23 @@ npm run test:e2e -- e2e/flowsheet.test.ts
 
 ### Contract Tests (`contract/openapi-compliance.test.ts`)
 - Validates API responses match OpenAPI schema definitions
+- **`Auth Endpoints (#379)`**: validates the `/auth/*` responses against
+  their `api.yaml` schemas (`AuthTokenAndUserResult`, `AuthTokenResponse`,
+  `LookupEmailResponse`) using an auth-origin client — see "Auth-origin
+  client" below. Runs unconditionally; anonymous sign-in needs no
+  credentials.
 
 ### Type Tests (`types/generated-types.test.ts`)
 - Validates generated TypeScript types can parse real API responses
+
+## Auth-origin client
+
+`createE2EClient` binds `config.baseUrl` (the backend API origin, default
+port 8080) — that's what every suite above except auth uses. The `/auth/*`
+paths live on the separate auth origin (`config.authUrl`, default port
+8081), so anything talking to them directly (not through `E2EAuthHelper`,
+which already targets `authUrl` internally) needs `createE2EAuthClient()`
+instead. Both factories accept the same `Partial<E2EConfig>` override.
 
 ## Configuration
 
@@ -71,12 +100,26 @@ E2E_BASE_URL=http://localhost:8080       # Backend API
 E2E_AUTH_URL=http://localhost:8081/auth   # Better-auth service
 E2E_TEST_DJ_EMAIL=test@wxyc.org          # Test DJ account email
 E2E_TEST_DJ_PASSWORD=testpassword        # Test DJ account password
+E2E_TEST_DJ_USERNAME=testdj              # Username half of the same account — optional, see below
 E2E_DB_URL=postgres://user:pw@host:5432/db  # Stack DB, for suites that seed rows (concerts)
 E2E_SCHEMA_NAME=wxyc_schema              # Postgres schema the backend reads (default wxyc_schema)
 ```
 
 Tests that require authentication use `it.skipIf(!hasCredentials)` and will
-be skipped when `E2E_TEST_DJ_EMAIL` / `E2E_TEST_DJ_PASSWORD` are not set.
+be skipped when `E2E_TEST_DJ_EMAIL` / `E2E_TEST_DJ_PASSWORD` are not set —
+this is now conditional, not universal: the anonymous-sign-in and
+`/auth/token` 401/404 assertions added in issue #379 need no credentials at
+all and run unconditionally.
+
+`E2E_TEST_DJ_USERNAME` is optional and independent of the above: it gates
+only the username-sign-in assertions (`POST /auth/sign-in/username`,
+`POST /auth/wxyc/lookup-email`'s resolution case) via their own
+`hasUsernameCredentials` check, and self-skips exactly like the
+email/password ones when unset. It is deliberately **not** wired to a
+fail-loud gate yet — see `bs-lml-gate.yml`'s comment on this variable and
+`E2EConfig.testDjUsername`'s doc comment in `setup.ts` for the landing
+order that has to complete first (staging account + repository secret,
+then the gate's env block, then a fail-loud assertion).
 
 ## Auth Requirements by Endpoint
 
@@ -98,3 +141,11 @@ be skipped when `E2E_TEST_DJ_EMAIL` / `E2E_TEST_DJ_PASSWORD` are not set.
 | `POST /djs/bin` | Yes | `bin:write` |
 | `GET /schedule` | No | Public |
 | `GET /concerts` | Yes | Anonymous session → JWT |
+| `POST /auth/sign-in/email` | No | Public — establishes a session |
+| `POST /auth/sign-in/username` | No | Public — establishes a session |
+| `POST /auth/sign-in/email-otp` | No | Public — establishes a session |
+| `POST /auth/sign-in/anonymous` | No | Public — establishes a session |
+| `POST /auth/email-otp/send-verification-otp` | No | Public |
+| `POST /auth/wxyc/lookup-email` | No | Public (WXYC-custom, not better-auth) |
+| `GET /auth/token` | Yes | Session bearer → JWT |
+| `POST /auth/sign-out` | Yes | Session bearer |

@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.46.0
+  version: 1.47.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3629,6 +3629,337 @@ components:
         error:
           $ref: '#/components/schemas/DeviceAuthActionErrorCode'
         error_description:
+          type: string
+
+    # ===================
+    # Auth — better-auth core surface (issue #379, wxyc-swift-auth Phase A).
+    # Mirrors better-auth 1.6.26 (Backend-Service's node_modules-resolved
+    # version; package.json ranges to ^1.6.30) plus one WXYC-custom route,
+    # /auth/wxyc/lookup-email, which is marked below and sits outside the
+    # pinned-mirror's scope. Wire shapes verified against
+    # node_modules/better-auth/dist/{api/routes,plugins/{username,anonymous,
+    # jwt,email-otp,bearer}}/*.mjs plus direct probes against api.wxyc.org
+    # for status-code edge cases (the GET /auth/token 401-vs-404 split
+    # below). $ref-closed within this subset: no schema here $refs the
+    # shared ApiErrorResponse, whose `details` field (additionalProperties:
+    # true) forces JSONValue codegen and would pull that into the auth
+    # subset's public surface — see the wxyc-swift-auth plan's Phase A1
+    # $ref-closure constraint.
+    # ===================
+
+    AuthUser:
+      type: object
+      description: >
+        The better-auth user row as every sign-in / token-exchange response
+        in this section embeds it — parseUserOutput's serialization of the
+        `user` table plus the admin() plugin's fields plus WXYC's
+        `user.additionalFields` (Backend-Service
+        shared/authentication/src/auth.definition.ts). Shared across every
+        sign-in response below: the row shape does not depend on which route
+        created or found it. Verified field-for-field against a live
+        POST /auth/sign-in/anonymous response.
+      required:
+        - id
+        - email
+        - emailVerified
+        - name
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        emailVerified:
+          type: boolean
+        name:
+          type: string
+        image:
+          type: string
+          nullable: true
+        role:
+          type: string
+          nullable: true
+          description: >
+            The admin() plugin's system role flag on `user.role` (default
+            "user") — NOT a WXYC station role. Station role (member, dj,
+            musicDirector, stationManager, admin) lives on
+            `organization_member.role` and is resolved separately into the
+            JWT's `role` claim (buildJwtPayload / selectMemberRole in
+            auth.definition.ts); it is not this field. See that file's own
+            comment: "auth_user.role ... carries no station role."
+        banned:
+          type: boolean
+          nullable: true
+        banReason:
+          type: string
+          nullable: true
+        banExpires:
+          type: string
+          format: date-time
+          nullable: true
+        username:
+          type: string
+          nullable: true
+        displayUsername:
+          type: string
+          nullable: true
+        isAnonymous:
+          type: boolean
+          nullable: true
+        hasCompletedOnboarding:
+          type: boolean
+          description: WXYC additionalField; defaults false at creation.
+        realName:
+          type: string
+          nullable: true
+        djName:
+          type: string
+          nullable: true
+        appSkin:
+          type: string
+          description: WXYC additionalField; defaults "modern-light" at creation.
+        capabilities:
+          type: array
+          items:
+            type: string
+          description: WXYC additionalField; defaults [] at creation.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    EmailSignInRequest:
+      type: object
+      description: Body for POST /auth/sign-in/email.
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        callbackURL:
+          type: string
+          description: >
+            Redirect target after sign-in / email verification. WXYC's
+            native clients never send this — a callbackURL flips `redirect`
+            true in the response and sets a Location header, both meant for
+            a browser.
+        rememberMe:
+          type: boolean
+          default: true
+          description: When false, the session is not remembered (shorter-lived cookie).
+
+    UsernameSignInRequest:
+      type: object
+      description: Body for POST /auth/sign-in/username.
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        callbackURL:
+          type: string
+        rememberMe:
+          type: boolean
+
+    AuthSignInResult:
+      type: object
+      description: >
+        Response body for POST /auth/sign-in/email and POST
+        /auth/sign-in/username — identical shape, since both routes end in
+        the same session-create + setSessionCookie call (better-auth
+        dist/api/routes/sign-in.mjs signInEmail; dist/plugins/username
+        signInUsername). `token` also arrives on the `set-auth-token`
+        response header (see the two paths below); the body is the
+        documented fallback when a caller can't read response headers.
+      required:
+        - redirect
+        - token
+        - user
+      properties:
+        redirect:
+          type: boolean
+          description: True when callbackURL was supplied and the client should follow Location.
+        token:
+          type: string
+          description: The session token.
+        url:
+          type: string
+          nullable: true
+          description: The callbackURL echoed back, or null when none was supplied.
+        user:
+          $ref: '#/components/schemas/AuthUser'
+
+    OTPSignInRequest:
+      type: object
+      description: >
+        Body for POST /auth/sign-in/email-otp. `name`/`image` are consulted
+        only the first time this email signs in (the route auto-registers an
+        unknown address on a correct code — disableSignUp gates
+        send-verification-otp, not this route).
+      required:
+        - email
+        - otp
+      properties:
+        email:
+          type: string
+        otp:
+          type: string
+        name:
+          type: string
+        image:
+          type: string
+
+    AuthTokenAndUserResult:
+      type: object
+      description: >
+        Response body shared by POST /auth/sign-in/anonymous and POST
+        /auth/sign-in/email-otp — both answer `{token, user}` with no
+        redirect/url (better-auth dist/plugins/anonymous/index.mjs
+        signInAnonymous; dist/plugins/email-otp/routes.mjs signInEmailOTP).
+        One type for two endpoints, per the DeviceAuthActionResponse
+        precedent above.
+      required:
+        - token
+        - user
+      properties:
+        token:
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+
+    AuthTokenResponse:
+      type: object
+      description: Response body for GET /auth/token — the short-lived JWT.
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          description: A signed JWT, verifiable against the JWKS at GET /auth/jwks.
+
+    AuthSignOutResult:
+      type: object
+      description: >
+        Response body for POST /auth/sign-out. Always `{success: true}` on
+        200 — a failure to delete the session server-side is logged, not
+        surfaced (better-auth dist/api/routes/sign-out.mjs signOut).
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+
+    LookupEmailRequest:
+      type: object
+      description: >
+        Body for POST /auth/wxyc/lookup-email — a WXYC-custom route (see the
+        path's own comment), not a better-auth one.
+      required:
+        - identifier
+      properties:
+        identifier:
+          type: string
+
+    LookupEmailResponse:
+      type: object
+      description: >
+        `email: null` means no account matches `identifier` — the one
+        precise failure this route can report (apps/auth/lookup-email.ts).
+        Everything downstream of a resolved email is deliberately vague
+        (anti-enumeration): send-verification-otp answers success for an
+        unknown address, and sign-in/email-otp answers the same INVALID_OTP
+        for a wrong code as for no account.
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          nullable: true
+
+    SendLoginCodeRequest:
+      type: object
+      description: Body for POST /auth/email-otp/send-verification-otp.
+      required:
+        - email
+        - type
+      properties:
+        email:
+          type: string
+        type:
+          type: string
+          enum:
+            - sign-in
+            - email-verification
+            - forget-password
+            - change-email
+          description: >
+            WXYC's OTP sign-in flow always sends "sign-in". "change-email"
+            is declared by the plugin's own schema but always 400s here — a
+            dedicated /email-otp/request-email-change route exists for it.
+
+    AuthSendCodeResult:
+      type: object
+      description: >
+        Response body for POST /auth/email-otp/send-verification-otp.
+        Always `{success: true}` on 2xx — disableSignUp: true makes the
+        server answer identically for an unknown address (anti-enumeration),
+        so a 2xx here does not confirm the account exists.
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+
+    AuthErrorResponse:
+      type: object
+      description: >
+        better-auth's uniform error body (@better-auth/core's
+        `APIError.from`/`defineErrorCodes`: `{message, code}`). Purpose-built
+        rather than a $ref to the shared ApiErrorResponse — see this
+        section's header comment. Answers every non-2xx response from this
+        section's better-auth-native operations except the 429s, which the
+        Express rate limiter in front of them answers in a different shape
+        (AuthPlainErrorResponse, below).
+      required:
+        - message
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+          description: >
+            A defineErrorCodes key, e.g. INVALID_EMAIL_OR_PASSWORD,
+            INVALID_USERNAME_OR_PASSWORD, INVALID_EMAIL, EMAIL_NOT_VERIFIED,
+            UNAUTHORIZED, INVALID_OTP, OTP_EXPIRED, TOO_MANY_ATTEMPTS,
+            ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY,
+            COULD_NOT_CREATE_SESSION, FAILED_TO_CREATE_USER,
+            MISSING_OR_NULL_ORIGIN. Left open rather than enumerated —
+            unlike DeviceAuth's closed, small RFC 8628 vocabulary,
+            better-auth's general error surface is broad and not
+            practically exhaustible per operation.
+
+    AuthPlainErrorResponse:
+      type: object
+      description: >
+        `{error: string}` — the shape Backend-Service's own Express layer
+        answers with, distinct from better-auth's `{message, code}`. Two
+        sources share it: the WXYC-custom /auth/wxyc/lookup-email route
+        (apps/auth/app.ts lookupEmailHandler, `res.json({error: ...})`) and
+        the express-rate-limit mutation limiter mounted in front of every
+        rate-limited /auth/* route in this section (apps/auth/app.ts
+        authMutationRateLimit — 10 requests / 15 min, keyed on
+        X-Real-IP — `message: {error: ...}`).
+      required:
+        - error
+      properties:
+        error:
           type: string
 
     RateLimitInfo:
@@ -10422,7 +10753,11 @@ paths:
   # components/schemas/DeviceAuth*. /device/code + /device/token are PUBLIC;
   # /device/approve + /device/deny require a Better Auth session (BearerAuth);
   # GET /device accepts an optional session (used only to claim the code).
-  # Mirrors better-auth 1.6.20 + Backend-Service#1495.
+  # Mirrors better-auth 1.6.20 + Backend-Service#1495. (Refreshed at issue
+  # #379: Backend-Service's node_modules-resolved version is now 1.6.26 —
+  # see the /auth core-surface section below, which mirrors that version.
+  # The device-authorization plugin's wire shapes were not re-diffed against
+  # 1.6.26; re-verify if a device-auth defect is ever suspected.)
   # ===================
 
   /auth/device/code:
@@ -10613,3 +10948,424 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceAuthActionError'
+
+  # ===================
+  # Auth — better-auth core surface (issue #379, wxyc-swift-auth Phase A).
+  # Mirrors better-auth 1.6.26 plus one WXYC-custom route
+  # (/auth/wxyc/lookup-email, marked below). Schemas live under
+  # components/schemas/Auth* — see that section's header comment for the
+  # verification sources and the $ref-closure constraint. Every operation
+  # here is x-wxyc-service: backend-service — the auth app is mounted on
+  # the same host (api.wxyc.org) as the rest of Backend-Service, per this
+  # document's info.description.
+  # ===================
+
+  /auth/sign-in/email:
+    post:
+      x-wxyc-service: backend-service
+      summary: Sign in with email and password
+      description: >
+        The org-canonical DJ sign-in route. `requireEmailVerification: true`
+        is set server-side, so an unverified account 403s here (it does not
+        for /auth/sign-in/email-otp, which marks the account verified on a
+        correct code instead — mailbox possession being the proof the
+        verification email would have demanded).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailSignInRequest'
+      responses:
+        '200':
+          description: Signed in.
+          headers:
+            set-auth-token:
+              schema:
+                type: string
+              description: >
+                The bearer plugin's response-header mirror of the session
+                token — the primary channel; `token` in the body is the
+                documented fallback for a caller that can't read response
+                headers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSignInResult'
+        '401':
+          description: 'INVALID_EMAIL_OR_PASSWORD — user not found, or the password did not verify.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '403':
+          description: >
+            EMAIL_NOT_VERIFIED, or MISSING_OR_NULL_ORIGIN — better-auth's
+            global originCheckMiddleware refuses a cookie-bearing request
+            with no Origin header before any credential check. Reachable
+            when a stale better-auth session cookie survives on the client
+            from a prior sign-in (native clients suppress cookies to avoid
+            this — see wxyc-dj-ios CLAUDE.md's CookielessSession).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '429':
+          description: >
+            Rate limited — 10 requests / 15 min per X-Real-IP
+            (authMutationRateLimit covers every /auth/sign-in/* path).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  /auth/sign-in/username:
+    post:
+      x-wxyc-service: backend-service
+      summary: Sign in with username and password
+      description: >
+        Validates the identifier's *shape* before any lookup — better-auth's
+        default username pattern is `/^[a-zA-Z0-9_.]+$/` (Backend-Service
+        registers `username({ minUsernameLength: 2 })` with no
+        usernameValidator override), so an email-shaped identifier posted
+        here 422s on shape alone. Route selection (email vs. username) is a
+        client responsibility — see wxyc-dj-ios's SignInIdentifier for the
+        `@`-based router this document does not encode.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsernameSignInRequest'
+      responses:
+        '200':
+          description: Signed in.
+          headers:
+            set-auth-token:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSignInResult'
+        '401':
+          description: 'INVALID_USERNAME_OR_PASSWORD — user not found, or the password did not verify.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '403':
+          description: 'EMAIL_NOT_VERIFIED, or MISSING_OR_NULL_ORIGIN (see POST /auth/sign-in/email).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '422':
+          description: >
+            USERNAME_TOO_SHORT, USERNAME_TOO_LONG, or INVALID_USERNAME — the
+            identifier failed shape validation before any credential check
+            (e.g. an email-shaped identifier posted to this route).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '429':
+          description: 'Rate limited — see POST /auth/sign-in/email.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  /auth/wxyc/lookup-email:
+    post:
+      x-wxyc-service: backend-service
+      summary: Resolve a login identifier to its verification email
+      description: >
+        WXYC-CUSTOM ROUTE — lookupEmailHandler in Backend-Service
+        apps/auth/app.ts, not a better-auth endpoint, and NOT covered by
+        this file's better-auth pinned-mirror comment above. Backend-Service
+        owns its declared-vs-handler fidelity directly, so this is also the
+        one operation in this section upstream declared-response-vs-handler
+        verification (wxyc-shared#328) can fully cover once that lands. The
+        OTP sign-in flow's leg 1: resolves a username to the address
+        /auth/email-otp/send-verification-otp mails a code to. An identifier
+        already containing '@' is echoed back unchanged by the handler
+        without a lookup (email-shaped identifiers skip this route
+        entirely). A mild enumeration vector (confirms whether a username
+        exists) that the response never displays and the rate limiter
+        bounds — see AuthPlainErrorResponse and LookupEmailResponse.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LookupEmailRequest'
+      responses:
+        '200':
+          description: >
+            Resolved (or not — see LookupEmailResponse's `email: null`
+            case).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupEmailResponse'
+        '400':
+          description: '"identifier required" — identifier missing or not a string.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+        '429':
+          description: 'Rate limited — see POST /auth/sign-in/email.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+        '500':
+          description: '"Internal server error" — unexpected failure resolving the identifier.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  /auth/email-otp/send-verification-otp:
+    post:
+      x-wxyc-service: backend-service
+      summary: Mail a one-time sign-in code
+      description: >
+        The OTP sign-in flow's leg 2. `disableSignUp: true` makes this
+        answer `{success: true}` for an unknown address too (the code is
+        generated and immediately discarded server-side) — anti-enumeration
+        by design, so a 200 here never confirms the account exists. Paired
+        with POST /auth/sign-in/email-otp, which redeems the code.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendLoginCodeRequest'
+      responses:
+        '200':
+          description: Code sent (or silently discarded for an unknown address — see above).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSendCodeResult'
+        '400':
+          description: >
+            INVALID_EMAIL (malformed address — the one leg of this flow
+            that CAN report a bad email, since an '@'-containing identifier
+            skips the /auth/wxyc/lookup-email leg entirely), or "Invalid OTP
+            type" (type: change-email — see SendLoginCodeRequest).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '429':
+          description: >
+            Rate limited — 10 requests / 15 min per X-Real-IP
+            (authMutationRateLimit covers this path by exact match).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  /auth/sign-in/email-otp:
+    post:
+      x-wxyc-service: backend-service
+      summary: Redeem a mailed one-time code to sign in
+      description: >
+        A peer of the two password routes, not a variant of them — same
+        setSessionCookie call, same globally-mounted bearer() plugin, so the
+        same set-auth-token contract. One asymmetry: this route marks an
+        unverified account's email verified and proceeds (mailbox
+        possession is the proof the verification email would have
+        demanded), where the password routes 403 EMAIL_NOT_VERIFIED
+        instead. OTP verification is atomic and single-use (better-auth's
+        atomicVerifyOTP): a correct code can be consumed by only one
+        concurrent caller.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTPSignInRequest'
+      responses:
+        '200':
+          description: Signed in (or registered, for an email signing in for the first time).
+          headers:
+            set-auth-token:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenAndUserResult'
+        '400':
+          description: >
+            INVALID_OTP (wrong code, already-consumed code, or no
+            outstanding code for this email) or OTP_EXPIRED (past the 5
+            minute TTL — the expired record is deleted, so a retry also
+            reads as INVALID_OTP).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '403':
+          description: >
+            TOO_MANY_ATTEMPTS — 5 wrong tries against one outstanding code
+            (allowedAttempts: 5) locks that code out; the DJ must request a
+            new one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '429':
+          description: 'Rate limited — see POST /auth/sign-in/email.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  /auth/sign-in/anonymous:
+    post:
+      x-wxyc-service: backend-service
+      summary: Create a throwaway anonymous session
+      description: >
+        The mechanism wxyc-ios-64 and WXYC-Android use for endpoints gated
+        on any session rather than a DJ login (e.g. `/proxy/*`, `/concerts`
+        after a /auth/token exchange). No request body. An anonymous session
+        cannot sign in anonymously a second time (ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY)
+        — a client must persist and reuse the session token rather than
+        re-calling this on every launch.
+      security: []
+      parameters:
+        - name: X-Device-Fingerprint
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: >
+            Stable per-device identifier for BS's audit trail, associated
+            with the newly-minted user.id at sign-in time. Optional —
+            omitting it only means the audit trail is missing that
+            association; the request still succeeds. See
+            apps/auth/check-request-ban-handler.ts for the header's other,
+            better-established consumer (POST /auth/check-request-ban).
+      responses:
+        '200':
+          description: Anonymous session created.
+          headers:
+            set-auth-token:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenAndUserResult'
+        '400':
+          description: >
+            ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY (the caller's
+            current session, if any, is already anonymous) or
+            COULD_NOT_CREATE_SESSION.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '429':
+          description: 'Rate limited — /auth/sign-in/* is a prefix match, so this path is covered too (see POST /auth/sign-in/email).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+        '500':
+          description: 'FAILED_TO_CREATE_USER — unexpected failure creating the anonymous user row.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+
+  /auth/token:
+    get:
+      x-wxyc-service: backend-service
+      summary: Exchange a session bearer for a short-lived JWT
+      description: >
+        `Authorization: Bearer <session token>` in, a signed JWT out —
+        verifiable by Backend-Service's regular routes against the JWKS at
+        GET /auth/jwks without a database round-trip. Only GET is
+        registered for this path: any other method 404s (better-call has no
+        route to match, not a 405 — verified against production). A missing,
+        malformed, or expired/revoked session bearer 401s (UNAUTHORIZED);
+        that is the only failure mode this path itself produces for a
+        GET — there is no 404 for "wrong bearer," only for "wrong method or
+        unknown path." `set-auth-token` on the 200 is conditional: better-auth
+        re-issues the session cookie (and the bearer plugin mirrors it to this
+        header) only on a rolling renewal, once per `session.updateAge`
+        (Backend-Service: 1 day) — an ordinary call inside that window omits
+        the header entirely. See INVARIANTS.md's set-auth-token rotation
+        contract.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: X-Device-Fingerprint
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: >
+            Same audit-trail header as POST /auth/sign-in/anonymous — sent
+            on every JWT mint, not only the first, so BS's audit trail can
+            correlate a device across renewals.
+      responses:
+        '200':
+          description: JWT minted.
+          headers:
+            set-auth-token:
+              schema:
+                type: string
+              description: >
+                Present only when this call triggered a rolling session
+                renewal — see the operation description. Absent on a
+                typical call.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '401':
+          description: 'UNAUTHORIZED — missing, malformed, or expired/revoked session bearer.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+
+  /auth/sign-out:
+    post:
+      x-wxyc-service: backend-service
+      summary: Invalidate the current session
+      description: >
+        `Authorization: Bearer <session token>` in; deletes the session
+        server-side (best-effort — a DB failure is logged, not surfaced) and
+        clears the session cookie. Always 200 `{success: true}` — there is
+        no distinct "already signed out" response, and a garbage or absent
+        bearer still 200s (deleteSession is a no-op when no session token is
+        found). After this call the session token 401s on GET /auth/token
+        (see INVARIANTS.md).
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Signed out (unconditionally — see above).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSignOutResult'

@@ -15,7 +15,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import {
   createE2EClient,
+  createE2EAuthClient,
   createE2EAuthHelper,
+  getAnonymousToken,
   type E2EClient,
   type E2EAuthHelper,
   waitForService,
@@ -31,6 +33,16 @@ describe('Auth E2E', () => {
   const config = getE2EConfig();
 
   const hasCredentials = Boolean(config.testDjEmail && config.testDjPassword);
+  /**
+   * Username half of the same staging DJ account. Provisioning (staging
+   * account + repository secret) is tracked outside this repo — see
+   * `E2EConfig.testDjUsername`'s doc comment in `setup.ts`. Self-skips like
+   * `hasCredentials` rather than a fail-loud `E2E_REQUIRE_CREDENTIALS` gate,
+   * deliberately: that gate only becomes safe once the credential actually
+   * exists in every environment this suite runs in (issue #379's landing
+   * order).
+   */
+  const hasUsernameCredentials = Boolean(config.testDjUsername && config.testDjPassword);
 
   beforeAll(async () => {
     await waitForService(`${config.baseUrl}/healthcheck`);
@@ -278,6 +290,216 @@ describe('Auth E2E', () => {
 
       expect(response.status).toBe(401);
       client.clearAuthToken();
+    });
+  });
+
+  // ── issue #379: better-auth core surface behavioral assertions ─────────
+  //
+  // These guard the api.yaml mirror added in #379 (wxyc-swift-auth Phase
+  // A). Each test hits an auth-origin client (`createE2EAuthClient` — the
+  // `client`/`authHelper` pair above talks to the backend origin and to
+  // `/auth` through E2EAuthHelper's own fetch calls respectively, neither
+  // of which fits an ad-hoc auth-origin request against a path E2EAuthHelper
+  // doesn't wrap).
+  describe('better-auth core surface (issue #379)', () => {
+    let authClient: E2EClient;
+
+    beforeAll(() => {
+      authClient = createE2EAuthClient();
+    });
+
+    // ── set-auth-token header ─────────────────────────────────────────
+
+    it.skipIf(!hasCredentials)(
+      'POST /auth/sign-in/email returns set-auth-token header',
+      async () => {
+        const response = await authClient.post('/sign-in/email', {
+          email: config.testDjEmail,
+          password: config.testDjPassword,
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get('set-auth-token')).toBeTruthy();
+      }
+    );
+
+    // Provisioning-gated per E2EConfig.testDjUsername's doc comment — see
+    // hasUsernameCredentials above. Self-skips, never fail-loud, until the
+    // staging account + secret exist.
+    it.skipIf(!hasUsernameCredentials)(
+      'POST /auth/sign-in/username returns set-auth-token header',
+      async () => {
+        const response = await authClient.post('/sign-in/username', {
+          username: config.testDjUsername,
+          password: config.testDjPassword,
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get('set-auth-token')).toBeTruthy();
+      }
+    );
+
+    // ── anonymous sign-in shape ────────────────────────────────────────
+
+    it('POST /auth/sign-in/anonymous returns token + user.id, no credentials needed', async () => {
+      const response = await authClient.post<{ token?: string; user?: { id?: string } }>(
+        '/sign-in/anonymous',
+        {}
+      );
+
+      expect(response.status).toBe(200);
+      // The token arrives on the header (bearer plugin) or in the body,
+      // depending on plugin config — see AuthTokenAndUserResult in api.yaml.
+      const headerToken = response.headers.get('set-auth-token');
+      const bodyToken = response.body?.token;
+      expect(headerToken || bodyToken, 'a session token must arrive on the header or the body').toBeTruthy();
+      expect(response.body?.user?.id, 'anonymous sign-in must return a user id').toBeTruthy();
+    });
+
+    // ── /auth/token mint shape, both session kinds ──────────────────────
+
+    it('GET /auth/token mints a JWT for an anonymous session', async () => {
+      const sessionToken = await getAnonymousToken(config.authUrl);
+      const response = await authClient.get<{ token?: string }>('/token', {
+        headers: { Authorization: `Bearer ${sessionToken}` },
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body?.token).toBeTruthy();
+      // Basic JWT shape: three dot-separated segments.
+      expect(response.body!.token!.split('.').length).toBe(3);
+    });
+
+    it.skipIf(!hasCredentials)(
+      'GET /auth/token mints a JWT for a credentialed DJ session',
+      async () => {
+        const { cookies } = await authHelper.signIn(config.testDjEmail!, config.testDjPassword!);
+        // Exchange via cookie (E2EAuthHelper's own mechanism) rather than a
+        // bearer header here, so this test is independent of the
+        // set-auth-token assertion above.
+        const cookieHeader = cookies.map((c) => c.split(';')[0]).join('; ');
+        const response = await authClient.get<{ token?: string }>('/token', {
+          headers: { cookie: cookieHeader },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body?.token).toBeTruthy();
+      }
+    );
+
+    // ── 401-vs-404 on GET /auth/token ───────────────────────────────────
+
+    it('GET /auth/token returns 401 for a missing bearer', async () => {
+      const response = await authClient.get('/token');
+      expect(response.status).toBe(401);
+    });
+
+    it('GET /auth/token returns 401 for a garbage bearer', async () => {
+      const response = await authClient.get('/token', {
+        headers: { Authorization: 'Bearer not-a-real-session-token' },
+      });
+      expect(response.status).toBe(401);
+    });
+
+    it('POST /auth/token (wrong method) returns 404, not 401', async () => {
+      // Only GET is registered for this path -- better-call has no route
+      // to match a POST, so it 404s rather than 401ing or 405ing. Pins the
+      // distinction the api.yaml operation description documents.
+      const response = await authClient.post('/token');
+      expect(response.status).toBe(404);
+    });
+
+    // ── lookup-email resolution + no-match ──────────────────────────────
+
+    it.skipIf(!hasUsernameCredentials)(
+      'POST /auth/wxyc/lookup-email resolves a known username to its email',
+      async () => {
+        const response = await authClient.post<{ email?: string | null }>('/wxyc/lookup-email', {
+          identifier: config.testDjUsername,
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body?.email).toBe(config.testDjEmail);
+      }
+    );
+
+    it('POST /auth/wxyc/lookup-email returns { email: null } for an unknown username', async () => {
+      const response = await authClient.post<{ email?: string | null }>('/wxyc/lookup-email', {
+        identifier: `e2e-nonexistent-username-${Date.now()}`,
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body?.email).toBeNull();
+    });
+
+    // ── send-verification-otp success shape ─────────────────────────────
+    //
+    // Not exercised against a real account: disableSignUp: true makes the
+    // route answer {success: true} identically whether or not the address
+    // exists, and a synthetic address never triggers a real send (see
+    // apps/auth's sendVerificationOTP -- an unknown email is a silent
+    // discard, not an error). The verify leg (POST /auth/sign-in/email-otp)
+    // is unassertable here for the same reason api.yaml's operation
+    // description carries: nobody reads the mailed code in this harness.
+    it('POST /auth/email-otp/send-verification-otp returns { success: true } for any address', async () => {
+      const response = await authClient.post<{ success?: boolean }>('/email-otp/send-verification-otp', {
+        email: `e2e-otp-probe-${Date.now()}@wxyc.org`,
+        type: 'sign-in',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body?.success).toBe(true);
+    });
+
+    // ── sign-out invalidation ────────────────────────────────────────────
+
+    it.skipIf(!hasCredentials)(
+      'POST /auth/sign-out invalidates the session -- it 401s on GET /auth/token afterward',
+      async () => {
+        const signInResponse = await authClient.post<{ token?: string }>('/sign-in/email', {
+          email: config.testDjEmail,
+          password: config.testDjPassword,
+        });
+        const sessionToken =
+          signInResponse.headers.get('set-auth-token') || signInResponse.body?.token;
+        expect(sessionToken, 'sign-in must yield a session token to sign out with').toBeTruthy();
+
+        const signOutResponse = await authClient.post<{ success?: boolean }>('/sign-out', undefined, {
+          headers: { Authorization: `Bearer ${sessionToken}` },
+        });
+        expect(signOutResponse.status).toBe(200);
+        expect(signOutResponse.body?.success).toBe(true);
+
+        const tokenResponse = await authClient.get('/token', {
+          headers: { Authorization: `Bearer ${sessionToken}` },
+        });
+        expect(tokenResponse.status, 'a signed-out session token must 401 on /auth/token').toBe(401);
+      }
+    );
+
+    // ── rate-limit body shape -- MUST RUN LAST ──────────────────────────
+    //
+    // authMutationRateLimit (apps/auth/app.ts) is ONE limiter instance
+    // mounted on every /auth/sign-in/*, /auth/email-otp/send-verification-otp,
+    // and /auth/wxyc/lookup-email path -- 10 requests / 15 min per
+    // X-Real-IP, shared across all of them for this suite's egress IP. This
+    // test deliberately exhausts that shared budget, so it is the last test
+    // in this file on purpose: every credentialed assertion above that
+    // needs the same budget must run first. Uses send-verification-otp with
+    // a synthetic, timestamped address (see the success-shape test above)
+    // so it never sends real mail.
+    it('POST /auth/email-otp/send-verification-otp returns AuthPlainErrorResponse-shaped 429 once rate limited', async () => {
+      let last: Awaited<ReturnType<typeof authClient.post<{ error?: string }>>> | undefined;
+      for (let i = 0; i < 15; i++) {
+        last = await authClient.post<{ error?: string }>('/email-otp/send-verification-otp', {
+          email: `e2e-ratelimit-probe-${Date.now()}-${i}@wxyc.org`,
+          type: 'sign-in',
+        });
+        if (last.status === 429) break;
+      }
+
+      expect(last?.status, 'expected a 429 within 15 rapid requests').toBe(429);
+      expect(typeof last?.body?.error, 'AuthPlainErrorResponse is { error: string }').toBe('string');
     });
   });
 });

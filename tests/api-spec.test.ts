@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.46.0');
+      expect(spec.info.version).toBe('1.47.0');
     });
 
     it('should have components section', () => {
@@ -4094,6 +4094,12 @@ describe('OpenAPI Specification', () => {
       ['get', '/flowsheet/search', 'public playlist-archive search'],
       ['get', '/library/genres', 'deliberately public per BS#1682 — station-wide reference data, and dj-site#1004 SSR cannot attach a JWT. POST /library/genres stays catalog:write'],
       ['get', '/schedule', 'no auth middleware on schedule_route.get("/")'],
+      ['post', '/auth/sign-in/email', 'better-auth sign-in route — the whole point is that the caller has no session yet'],
+      ['post', '/auth/sign-in/username', 'better-auth sign-in route — same'],
+      ['post', '/auth/sign-in/email-otp', 'better-auth OTP redemption — same; this is where a session is first created for the OTP flow'],
+      ['post', '/auth/sign-in/anonymous', 'better-auth anonymous sign-in — same, by definition'],
+      ['post', '/auth/email-otp/send-verification-otp', 'mails a one-time code to an unauthenticated caller; disableSignUp: true makes it answer identically for an unknown address (anti-enumeration)'],
+      ['post', '/auth/wxyc/lookup-email', 'WXYC-custom OTP-flow leg 1 (apps/auth/app.ts lookupEmailHandler) — resolves a login identifier before any session exists. Rate-limited; see AuthPlainErrorResponse'],
     ] as const;
 
     // Seven lines left this list in #372, and none of them by being reviewed

@@ -5,10 +5,12 @@
  * documents the named invariant in its description so a failure in CI
  * names the contract that broke.
  *
- * Two contracts (PLAY_ORDER_PER_SHOW_MONOTONIC, ROTATION_DEDUP_PER_ALBUM_BIN)
- * are NOT yet enforced on the server side. Those tests are `it.skip`-ed; the
- * assertion bodies still describe target state. To enable them, replace
- * `it.skip` with `it` once the BS-side fix lands (see comments inline).
+ * Three contracts (PLAY_ORDER_PER_SHOW_MONOTONIC, ROTATION_DEDUP_PER_ALBUM_BIN,
+ * SET_AUTH_TOKEN_ROTATES_ON_RENEWAL) are NOT yet enforced -- the first two on
+ * the server side, the third for lack of an aged-session test fixture. Those
+ * tests are `it.skip`-ed; the assertion bodies still describe target state.
+ * To enable them, replace `it.skip` with `it` once the blocker clears (see
+ * comments inline, and INVARIANTS.md's "Toggling skipped contracts").
  *
  * Prerequisites:
  *   - Backend service at $E2E_BASE_URL (default http://localhost:8080)
@@ -22,7 +24,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   createE2EClient,
+  createE2EAuthClient,
   createE2EAuthHelper,
+  getAnonymousToken,
   type E2EClient,
   type E2EAuthHelper,
   waitForService,
@@ -449,4 +453,71 @@ describe('Cross-service contracts (E2E)', () => {
       expect(entryId).toBeGreaterThan(0);
     }
   );
+
+  // ── ANONYMOUS_SIGN_IN_SHAPE ───────────────────────────────────────────
+  //
+  // ENFORCED. No credentials needed -- anonymous sign-in requires none by
+  // definition, so this test runs unconditionally.
+  it(`upholds CONTRACTS.ANONYMOUS_SIGN_IN_SHAPE: ${CONTRACTS.ANONYMOUS_SIGN_IN_SHAPE}`, async () => {
+    const authClient = createE2EAuthClient();
+    const response = await authClient.post<{ token?: string; user?: { id?: string } }>(
+      '/sign-in/anonymous',
+      {}
+    );
+
+    expect(response.status).toBe(200);
+    const headerToken = response.headers.get('set-auth-token');
+    const bodyToken = response.body?.token;
+    expect(headerToken || bodyToken, 'a session token must arrive on the header or the body').toBeTruthy();
+    expect(response.body?.user?.id, 'anonymous sign-in must return a user id').toBeTruthy();
+
+    // Whichever token a caller reads must actually authenticate -- this is
+    // the interchangeability the contract statement leans on ("whichever a
+    // caller reads").
+    const sessionToken = headerToken || bodyToken;
+    const tokenResponse = await authClient.get<{ token?: string }>('/token', {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    });
+    expect(tokenResponse.status, 'the returned session token must mint a JWT').toBe(200);
+    expect(tokenResponse.body?.token).toBeTruthy();
+  });
+
+  // ── SET_AUTH_TOKEN_ROTATES_ON_RENEWAL ─────────────────────────────────
+  //
+  // SKIPPED: asserting the positive case (rotation DOES occur once
+  // session.updateAge elapses) needs either a session older than 1 day or
+  // a local stack with session.updateAge shortened -- neither is available
+  // to this harness against a fresh staging session. The negative case
+  // (immediately after creation, this call must NOT see a
+  // rotation) is asserted unconditionally below, and is itself part of the
+  // contract -- an unconditional rotation would defeat the "only per
+  // updateAge" half of the statement just as much as no rotation ever
+  // would. Flip `it.skip` to `it` (and extend the body to age a session
+  // past updateAge, e.g. via a test-only endpoint or a shortened local
+  // config) once that capability exists -- see the D1 tracking issue.
+  it.skip(
+    `upholds CONTRACTS.SET_AUTH_TOKEN_ROTATES_ON_RENEWAL (positive case): ${CONTRACTS.SET_AUTH_TOKEN_ROTATES_ON_RENEWAL}`,
+    async () => {
+      // Target shape once a past-updateAge session is obtainable: sign in,
+      // age the session past session.updateAge, call GET /auth/token, and
+      // assert the set-auth-token header IS present and differs from the
+      // original session token.
+    }
+  );
+
+  it('does not rotate set-auth-token on the first GET /auth/token after anonymous sign-in', async () => {
+    const authUrl = getE2EConfig().authUrl;
+    const sessionToken = await getAnonymousToken(authUrl);
+    const authClient = createE2EAuthClient();
+
+    const response = await authClient.get('/token', {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    });
+
+    expect(response.status).toBe(200);
+    // A brand-new session is nowhere near session.updateAge (1 day), so no
+    // rotation is expected -- see INVARIANTS.md's status note for this
+    // contract.
+    expect(response.headers.get('set-auth-token')).toBeNull();
+  });
 });

@@ -11,6 +11,17 @@ export interface E2EConfig {
   testDjEmail?: string;
   testDjPassword?: string;
   /**
+   * Username half of the same staging DJ account `testDjEmail` /
+   * `testDjPassword` authenticate. Provisioning is tracked outside this
+   * repo (issue #379's A2) — until the staging account + repository secret
+   * exist, this stays unset and the username-sign-in assertions self-skip
+   * exactly like the email/password ones do on `hasCredentials`. Do NOT
+   * promote the username assertions to a fail-loud `E2E_REQUIRE_CREDENTIALS`
+   * gate ahead of that provisioning landing in `bs-lml-gate.yml` — see the
+   * comment on that assertion in `e2e/auth.test.ts`.
+   */
+  testDjUsername?: string;
+  /**
    * Full Postgres connection string for the stack's database, used by tests
    * that must seed rows for endpoints with no create-via-API path (e.g.
    * `/concerts`, whose rows are produced by scraper/ETL jobs). Unset in
@@ -31,6 +42,7 @@ export function getE2EConfig(): E2EConfig {
     authUrl: process.env.E2E_AUTH_URL || 'http://localhost:8081/auth',
     testDjEmail: process.env.E2E_TEST_DJ_EMAIL,
     testDjPassword: process.env.E2E_TEST_DJ_PASSWORD,
+    testDjUsername: process.env.E2E_TEST_DJ_USERNAME,
     dbUrl: process.env.E2E_DB_URL,
     schemaName: process.env.E2E_SCHEMA_NAME || process.env.WXYC_SCHEMA_NAME || 'wxyc_schema',
   };
@@ -153,6 +165,21 @@ export interface E2EResponse<T> {
  */
 export function createE2EClient(config?: Partial<E2EConfig>): E2EClient {
   return new E2EClient({ ...getE2EConfig(), ...config });
+}
+
+/**
+ * An E2EClient bound to the auth origin (`config.authUrl`) rather than the
+ * backend origin (`config.baseUrl`) `createE2EClient` uses.
+ *
+ * `E2EClient` reads only `baseUrl` internally, so pointing one at the
+ * better-auth routes added in issue #379 (`/sign-in/email`, `/token`, …)
+ * needs an override rather than the default client — named explicitly here
+ * so every auth-schema compliance assertion shares one client rather than
+ * each inlining `createE2EClient({ baseUrl: config.authUrl })`.
+ */
+export function createE2EAuthClient(config?: Partial<E2EConfig>): E2EClient {
+  const merged = { ...getE2EConfig(), ...config };
+  return new E2EClient({ ...merged, baseUrl: merged.authUrl });
 }
 
 /**
