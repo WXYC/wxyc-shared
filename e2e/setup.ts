@@ -31,6 +31,21 @@ export interface E2EConfig {
   dbUrl?: string;
   /** Postgres schema the backend reads (per-worker in CI; `wxyc_schema` by default). */
   schemaName: string;
+  /**
+   * Issue #379 review finding #10's ratified fail-loud gate. When `true`,
+   * `e2e/auth.test.ts`'s `beforeAll` throws if `testDjEmail`/`testDjPassword`
+   * are not both set, instead of letting every credentialed assertion in
+   * that file silently self-skip via `hasCredentials`. `bs-lml-gate.yml`
+   * sets this now that `E2E_TEST_DJ_EMAIL`/`E2E_TEST_DJ_PASSWORD` are
+   * provisioned repository secrets — a misconfigured or accidentally-removed
+   * secret should fail the prod-promotion gate loudly, not pass green
+   * having silently run zero credentialed assertions. Deliberately NOT
+   * applied to `testDjUsername` — that credential is not yet provisioned in
+   * every environment this suite runs in, so it keeps its own
+   * `hasUsernameCredentials` self-skip (see `e2e/auth.test.ts` and
+   * `e2e/README.md`) until it is.
+   */
+  requireCredentials: boolean;
 }
 
 /**
@@ -45,6 +60,7 @@ export function getE2EConfig(): E2EConfig {
     testDjUsername: process.env.E2E_TEST_DJ_USERNAME,
     dbUrl: process.env.E2E_DB_URL,
     schemaName: process.env.E2E_SCHEMA_NAME || process.env.WXYC_SCHEMA_NAME || 'wxyc_schema',
+    requireCredentials: process.env.E2E_REQUIRE_CREDENTIALS === 'true',
   };
 }
 
@@ -312,8 +328,13 @@ export class E2EAuthHelper {
 /**
  * Extract Set-Cookie header values from a Response.
  * Handles runtimes where getSetCookie() may not be available.
+ *
+ * Exported so callers outside this module (e.g. `e2e/auth.test.ts`, which
+ * needs the session cookies from a raw `E2EClient` sign-in response rather
+ * than going through `E2EAuthHelper.signIn`) can reuse the same fallback
+ * logic instead of re-deriving it.
  */
-function extractSetCookieHeaders(headers: Headers): string[] {
+export function extractSetCookieHeaders(headers: Headers): string[] {
   if (typeof headers.getSetCookie === 'function') {
     const cookies = headers.getSetCookie();
     if (cookies.length > 0) return cookies;

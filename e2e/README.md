@@ -29,21 +29,36 @@ npm run test:e2e -- e2e/flowsheet.test.ts
 - Validates JWT contains a role recognized by the backend (`WXYCRoles`)
 - Tests authenticated catalog and DJ bin access
 - Tests rejection of invalid/tampered tokens
+- Every credentialed and anonymous assertion in this file shares ONE sign-in
+  each, captured once in `beforeAll` (`credentialedSignIn` /
+  `anonymousSignIn`) rather than one live sign-in per test — see the
+  budget-arithmetic comment near the file's end for why that consolidation
+  is load-bearing, not just tidiness.
 - **`better-auth core surface (issue #379)`**: behavioral assertions for the
   eight `/auth/*` paths added to `api.yaml` in issue #379 — `set-auth-token`
   on email *and* username sign-in (the username case self-skips absent
   `E2E_TEST_DJ_USERNAME`, see below), the anonymous sign-in shape (no
   credentials needed), `/auth/token` mint shape for both a credentialed and
   an anonymous session, the 401-vs-404 split on `/auth/token` (missing/bad
-  bearer vs. the wrong HTTP method), `/auth/wxyc/lookup-email` resolution +
-  no-match, `send-verification-otp`'s success shape, sign-out invalidation
-  (a signed-out session subsequently 401s on `/auth/token`), and — **the
-  last test in the file, deliberately** — the `AuthPlainErrorResponse`-shaped
-  429 body once the shared per-IP rate limit is hit. That last test
-  exhausts the same `authMutationRateLimit` budget every credentialed
-  assertion above depends on (10 requests / 15 min per `X-Real-IP`, shared
-  across every `/auth/sign-in/*` + `/auth/email-otp/send-verification-otp` +
-  `/auth/wxyc/lookup-email` path) — do not reorder it earlier in the file.
+  bearer vs. the wrong HTTP method), `/auth/wxyc/lookup-email` resolution
+  (gated on `canResolveUsernameToEmail`, not `hasUsernameCredentials` — see
+  below) + no-match, `send-verification-otp`'s success shape, and sign-out
+  invalidation (a signed-out session subsequently 401s on `/auth/token`).
+  **There is no live 429 test in this file.** An earlier version ended with
+  one that deliberately exhausted the shared `authMutationRateLimit` budget
+  (10 requests / 15 min per `X-Real-IP`, shared across every
+  `/auth/sign-in/*` + `/auth/email-otp/send-verification-otp` +
+  `/auth/wxyc/lookup-email` path, plus five more mount prefixes) — cascading
+  429s into every test file that runs after this one in the same `npm run
+  test:e2e` invocation, and into the canary smoke step downstream in
+  `bs-lml-gate.yml`. It was removed (issue #379 review finding #7); the two
+  429 response shapes (`AuthRateLimitedResponse` for better-auth's own
+  tighter internal per-path limiter, met first in practice, and
+  `AuthPlainErrorResponse` for the shared express-layer fallback) are
+  documented directly in `api.yaml` and verified against source instead of
+  a live probe — see the budget-arithmetic comment at the end of this file
+  for the full accounting of why no live 429 assertion fits anywhere in
+  this repo's e2e suite today.
 
 ### Flowsheet E2E (`flowsheet.test.ts`)
 - Public read endpoints (no auth required)
@@ -77,7 +92,17 @@ npm run test:e2e -- e2e/flowsheet.test.ts
   their `api.yaml` schemas (`AuthTokenAndUserResult`, `AuthTokenResponse`,
   `LookupEmailResponse`) using an auth-origin client — see "Auth-origin
   client" below. Runs unconditionally; anonymous sign-in needs no
-  credentials.
+  credentials. Shares one anonymous sign-in across its tests (issue #379
+  review finding #9) rather than calling `POST /auth/sign-in/anonymous`
+  once per test, and asserts each response's status directly rather than
+  silently skipping on a non-2xx — the old skip-on-`!ok` pattern couldn't
+  tell "auth service genuinely unreachable" (which a thrown `fetch` error
+  already fails this suite on, before reaching that check) apart from
+  "auth service reachable but answering with an error" (a 429 from the
+  shared rate-limit budget, say), so it always passed regardless of which
+  happened. The origin-verification test calls better-auth's own built-in
+  `GET /ok` liveness route rather than probing a made-up path, since only
+  the real auth origin serves it.
 
 ### Type Tests (`types/generated-types.test.ts`)
 - Validates generated TypeScript types can parse real API responses
@@ -101,6 +126,7 @@ E2E_AUTH_URL=http://localhost:8081/auth   # Better-auth service
 E2E_TEST_DJ_EMAIL=test@wxyc.org          # Test DJ account email
 E2E_TEST_DJ_PASSWORD=testpassword        # Test DJ account password
 E2E_TEST_DJ_USERNAME=testdj              # Username half of the same account — optional, see below
+E2E_REQUIRE_CREDENTIALS=true             # Fail loud (not skip) if the DJ email/password are unset — see below
 E2E_DB_URL=postgres://user:pw@host:5432/db  # Stack DB, for suites that seed rows (concerts)
 E2E_SCHEMA_NAME=wxyc_schema              # Postgres schema the backend reads (default wxyc_schema)
 ```
@@ -111,15 +137,31 @@ this is now conditional, not universal: the anonymous-sign-in and
 `/auth/token` 401/404 assertions added in issue #379 need no credentials at
 all and run unconditionally.
 
+`E2E_REQUIRE_CREDENTIALS` (issue #379 review finding #10) flips that
+self-skip into a fail-loud check: when set to `true`, `e2e/auth.test.ts`'s
+`beforeAll` throws if `E2E_TEST_DJ_EMAIL` / `E2E_TEST_DJ_PASSWORD` are not
+both set, instead of letting every credentialed assertion in that file
+silently pass having run zero of them. `bs-lml-gate.yml` sets this now
+that both secrets are provisioned there — a repository secret going
+missing (renamed, revoked, a typo'd key) should fail the prod-promotion
+gate loudly, not stay green having tested nothing. Leave it unset for
+local/partial-stack runs where signing in as a DJ isn't the point.
+
 `E2E_TEST_DJ_USERNAME` is optional and independent of the above: it gates
-only the username-sign-in assertions (`POST /auth/sign-in/username`,
-`POST /auth/wxyc/lookup-email`'s resolution case) via their own
-`hasUsernameCredentials` check, and self-skips exactly like the
-email/password ones when unset. It is deliberately **not** wired to a
-fail-loud gate yet — see `bs-lml-gate.yml`'s comment on this variable and
-`E2EConfig.testDjUsername`'s doc comment in `setup.ts` for the landing
-order that has to complete first (staging account + repository secret,
-then the gate's env block, then a fail-loud assertion).
+only `POST /auth/sign-in/username` via its own `hasUsernameCredentials`
+check (username + password), and self-skips exactly like the
+email/password ones when unset. `POST /auth/wxyc/lookup-email`'s
+resolution case is gated on a separate `canResolveUsernameToEmail` check
+(username + email, no password — issue #379 review finding #12; an
+earlier version conflated the two, which made a username+password-but-no-
+email env shape eligible to run that assertion and then fail on
+`E2E_TEST_DJ_EMAIL` being `undefined` for a reason unrelated to the
+contract under test). `E2E_TEST_DJ_USERNAME` is deliberately **not**
+wired to a fail-loud gate — see `bs-lml-gate.yml`'s comment on this
+variable and `E2EConfig.testDjUsername`'s doc comment in `setup.ts` for
+the landing order that has to complete first (staging account +
+repository secret, then the gate's env block, then a fail-loud
+assertion).
 
 ## Auth Requirements by Endpoint
 

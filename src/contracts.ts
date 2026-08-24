@@ -158,36 +158,59 @@ export const CONTRACTS = {
     'POST /auth/sign-in/anonymous returns {token, user.id}, with the session token on set-auth-token or the body',
 
   /**
-   * `GET /auth/token` re-emits `set-auth-token` (mirroring a rotated
-   * session cookie) only when the call triggers better-auth's rolling
-   * session renewal — once per `session.updateAge` (Backend-Service: 1
-   * day, `shared/authentication/src/auth.definition.ts`). An ordinary call
-   * inside that window omits the header.
+   * The session token VALUE embedded in `set-auth-token` never changes for
+   * the life of a session. `GET /auth/token`'s rolling renewal re-issues
+   * the session cookie (and the bearer plugin mirrors it onto
+   * `set-auth-token`) only once per `session.updateAge` (Backend-Service:
+   * 1 day), but the re-issued value is a DETERMINISTIC RE-ENCODING of the
+   * same token — `<token>.<HMAC-base64url>` — never a new token; liveness
+   * comes from `expiresAt` being extended server-side under that same
+   * token, not from the client persisting a rotated credential. Whenever
+   * `set-auth-token` is present, its value starts with the caller's
+   * current session token followed by `.`; on an ordinary call inside the
+   * renewal window the header is simply absent and the client keeps using
+   * the token it already has.
    *
-   * Provider: better-auth's session refresh (`getSession`, internal to
-   *           `sessionMiddleware`) plus the bearer plugin's `after` hook,
-   *           which mirrors any fresh `set-cookie` it observes onto
-   *           `set-auth-token` (`dist/plugins/bearer/index.mjs`).
-   * Consumer: wxyc-dj-ios `AuthService.captureRotatedSessionToken` — without
-   *           capturing a rotation, a DJ's stored session token silently
-   *           ages out of sync with the server's rolling renewal.
+   * This corrects an earlier, false version of this contract
+   * (SET_AUTH_TOKEN_ROTATES_ON_RENEWAL) that assumed the re-emitted header
+   * carried a NEW token. It does not: see wxyc-ios-64#970's premise
+   * correction, verified directly against the better-auth 1.6.30 dist
+   * Backend-Service's apps/auth actually loads.
    *
-   * Status: PARTIALLY VERIFIED, NOT FULLY ENFORCED. Confirmed 2026-08-24:
-   * an anonymous session's FIRST GET /auth/token call (immediately after
-   * sign-in, session brand new) carries no set-auth-token header, which is
-   * the expected non-rotation case. Whether better-auth actually rotates
-   * `set-auth-token` for an ANONYMOUS session once it crosses
-   * session.updateAge specifically (as opposed to a credentialed one, which
-   * wxyc-dj-ios already observes rotating) could not be confirmed in this
-   * PR — that requires either a session aged past 24h or a local stack
-   * with a shortened `session.updateAge` override, neither available here.
-   * This is the wxyc-swift-auth plan's tracked open question for
-   * wxyc-ios-64#970 (D1); its `it.skip`-ed assertion in
-   * `tests/e2e-contracts.test.ts` documents exactly what would flip this
-   * to ENFORCED.
+   * Provider: better-auth's session refresh (`GET /auth/token`'s
+   *           roll-forward calls `internalAdapter.updateSession(token,
+   *           {expiresAt, updatedAt})` — dist/api/routes/session.mjs —
+   *           which keys on the token and rewrites only the two timestamp
+   *           columns; `token: generateId(32)` runs once at session
+   *           creation and no code path rewrites it) plus the bearer
+   *           plugin's `after` hook, which mirrors the session cookie's
+   *           value (already `<token>.<hmac>` — better-call's signed-cookie
+   *           format) onto `set-auth-token` whenever a fresh `set-cookie`
+   *           appears (`dist/plugins/bearer/index.mjs`).
+   * Consumer: wxyc-dj-ios `AuthService.captureRotatedSessionToken` — its
+   *           name predates this correction; the value it captures is a
+   *           same-token re-encoding, not a new token, and persisting it
+   *           is a no-op today wherever the guard already compares
+   *           decoded-token equality. wxyc-swift-auth Phase B/D1's
+   *           rationale for keeping the capture surface at all was amended
+   *           to match (wire-compatibility with a future encoding change),
+   *           not "the token actually rotates."
+   *
+   * Status: ENFORCED. Both assertable halves hold unconditionally against
+   * a live stack: (1) a brand-new session's first GET /auth/token omits
+   * set-auth-token entirely (nowhere near session.updateAge); (2) whenever
+   * a sign-in response carries BOTH the header and the body's raw `token`
+   * (every sign-in route in this section does), the header value starts
+   * with `<body.token>.`. Asserting the renewal case itself — that the
+   * header, when it DOES appear on a later call, still carries the SAME
+   * token — would need a session aged past session.updateAge (1 day) or a
+   * shortened local override, neither available to this harness; that
+   * positive-renewal case is left unasserted rather than pinned with an
+   * `it.skip` whose target (a NEW token appearing) was never true to begin
+   * with.
    */
-  SET_AUTH_TOKEN_ROTATES_ON_RENEWAL:
-    'GET /auth/token re-emits set-auth-token only on a rolling session renewal (once per session.updateAge)',
+  SET_AUTH_TOKEN_NEVER_ROTATES:
+    'the session token value in set-auth-token never changes for a session; renewal re-encodes the same token as <token>.<hmac> and extends expiresAt, it does not issue a new token',
 } as const;
 
 /** A reference to one of the named cross-service contracts. */

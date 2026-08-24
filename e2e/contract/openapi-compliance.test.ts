@@ -366,42 +366,56 @@ describe('OpenAPI Compliance', () => {
   // `authClient` (bound to the auth origin) rather than `client`. Anonymous
   // sign-in needs no credentials, so this suite runs unconditionally
   // (unlike `e2e/auth.test.ts`'s credentialed behavioral assertions).
+  //
+  // Issue #379 review finding #9: three of the four tests here used to open
+  // with `if (!response.ok) return` and a console.log, silently passing
+  // whenever the auth service answered with ANYTHING other than 2xx --
+  // including a 429 from the shared rate-limit budget e2e/auth.test.ts's
+  // budget-arithmetic comment documents, which this file's tests inherit
+  // (this file runs after auth.test.ts in the same `npm run test:e2e`
+  // invocation). `E2EClient.request` never catches a `fetch` failure, so a
+  // GENUINELY unreachable auth service throws out of this suite and fails
+  // it loudly already -- the skip-on-`!ok` pattern was never actually
+  // covering "service down"; it was covering "service reachable but
+  // answered with an error," which these tests exist specifically to
+  // catch. Removed in favor of asserting the expected status directly, the
+  // same way `e2e/auth.test.ts`'s assertions already do. The two
+  // anonymous-sign-in calls below were also independently consolidated
+  // into one shared `beforeAll` sign-in (previously each test signed in
+  // itself), cutting this describe block's contribution to the shared
+  // rate-limit budget from 3 requests (2x /sign-in/anonymous, 1x
+  // /wxyc/lookup-email) to 2.
   describe('Auth Endpoints (#379)', () => {
+    let anonymousSessionToken: string | undefined;
+
+    beforeAll(async () => {
+      const signIn = await authClient.post<{ token?: string }>('/sign-in/anonymous', {});
+      anonymousSessionToken = signIn.headers.get('set-auth-token') || signIn.body?.token;
+    });
+
     it('POST /auth/sign-in/anonymous response matches AuthTokenAndUserResult schema', async () => {
       const response = await authClient.post<unknown>('/sign-in/anonymous', {});
 
-      if (!response.ok) {
-        console.log('Skipping: Auth service not available');
-        return;
-      }
-
-      expect(response.status).toBe(200);
+      expect(response.status, 'expected the auth service to answer 200 -- see this block\'s header comment').toBe(
+        200
+      );
       const result = validateAgainstSchema(response.body, 'AuthTokenAndUserResult', schemas);
-      if (!result.valid) {
-        console.log('Validation errors:', result.errors);
-      }
-      expect(result.valid).toBe(true);
+      expect(result.valid, `schema validation errors: ${JSON.stringify(result.errors)}`).toBe(true);
     });
 
     it('GET /auth/token response matches AuthTokenResponse schema', async () => {
-      const signIn = await authClient.post<{ token?: string }>('/sign-in/anonymous', {});
-      if (!signIn.ok) {
-        console.log('Skipping: Auth service not available');
-        return;
-      }
-      const sessionToken = signIn.headers.get('set-auth-token') || signIn.body?.token;
-      expect(sessionToken, 'anonymous sign-in must yield a session token').toBeTruthy();
+      expect(
+        anonymousSessionToken,
+        'expected the shared beforeAll anonymous sign-in to have yielded a session token'
+      ).toBeTruthy();
 
       const response = await authClient.get<unknown>('/token', {
-        headers: { Authorization: `Bearer ${sessionToken}` },
+        headers: { Authorization: `Bearer ${anonymousSessionToken}` },
       });
 
       expect(response.status).toBe(200);
       const result = validateAgainstSchema(response.body, 'AuthTokenResponse', schemas);
-      if (!result.valid) {
-        console.log('Validation errors:', result.errors);
-      }
-      expect(result.valid).toBe(true);
+      expect(result.valid, `schema validation errors: ${JSON.stringify(result.errors)}`).toBe(true);
     });
 
     it('POST /auth/wxyc/lookup-email response matches LookupEmailResponse schema', async () => {
@@ -409,27 +423,34 @@ describe('OpenAPI Compliance', () => {
         identifier: `e2e-compliance-probe-${Date.now()}`,
       });
 
-      if (!response.ok) {
-        console.log('Skipping: Auth service not available');
-        return;
-      }
-
-      expect(response.status).toBe(200);
+      expect(response.status, 'expected the auth service to answer 200 -- see this block\'s header comment').toBe(
+        200
+      );
       const result = validateAgainstSchema(response.body, 'LookupEmailResponse', schemas);
-      if (!result.valid) {
-        console.log('Validation errors:', result.errors);
-      }
-      expect(result.valid).toBe(true);
+      expect(result.valid, `schema validation errors: ${JSON.stringify(result.errors)}`).toBe(true);
     });
 
-    it('a non-existent auth route returns a 4xx response, not a schema mismatch', async () => {
-      // Sanity check that this describe block is actually reaching the auth
-      // origin -- a client accidentally left pointed at the backend origin
-      // would 404 here too, but for the wrong reason (unknown app route
-      // rather than unknown better-auth path), silently passing every test
-      // above against a service that was never exercised.
-      const response = await authClient.get('/definitely-not-a-real-auth-path');
-      expect(response.status).toBeGreaterThanOrEqual(400);
+    it('reaches the auth origin, not the backend origin', async () => {
+      // Issue #379 review finding #9's second half: the old version of this
+      // test asserted only `status >= 400` against a made-up path, which a
+      // client mis-pointed at the BACKEND origin would also satisfy (an
+      // unmatched Express route also 404s) -- so it could not actually tell
+      // "reaching the right origin" apart from "reaching the wrong one,"
+      // despite its name. GET /ok is better-auth's own built-in liveness
+      // route (dist/api/routes/ok.mjs, always registered, no auth) -- the
+      // backend origin has no such route at all, so a client mis-pointed at
+      // it would 404 here instead of matching the shape below. Costs no
+      // rate-limited request (/ok is not in apps/auth/app.ts's
+      // rateLimitedPaths).
+      const response = await authClient.get<{ ok?: boolean }>('/ok');
+      expect(response.status, 'GET /auth/ok should be 200 on the real auth origin').toBe(200);
+      expect(response.body?.ok).toBe(true);
+
+      // Belt-and-suspenders: a genuinely unknown path on the (now-confirmed)
+      // auth origin should still 4xx rather than fall through to something
+      // schema-shaped.
+      const notFound = await authClient.get('/definitely-not-a-real-auth-path');
+      expect(notFound.status).toBeGreaterThanOrEqual(400);
     });
   });
 });

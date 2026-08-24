@@ -161,6 +161,14 @@ jobs:
           E2E_AUTH_URL: ${{ vars.BS_STAGING_AUTH_URL }}
           E2E_TEST_DJ_EMAIL: ${{ secrets.E2E_TEST_DJ_EMAIL }}
           E2E_TEST_DJ_PASSWORD: ${{ secrets.E2E_TEST_DJ_PASSWORD }}
+          # Issue #379 review finding #10: E2E_TEST_DJ_EMAIL / _PASSWORD are
+          # provisioned repository secrets (unlike E2E_TEST_DJ_USERNAME
+          # below), so this gate can safely fail loud instead of silently
+          # self-skipping every credentialed assertion in e2e/auth.test.ts
+          # if the secret ever goes missing (renamed, revoked, a typo'd key
+          # here). See E2EConfig.requireCredentials's doc comment in
+          # e2e/setup.ts and the beforeAll check in e2e/auth.test.ts.
+          E2E_REQUIRE_CREDENTIALS: 'true'
           # Issue #379: username half of the same staging DJ account, gating
           # the POST /auth/sign-in/username and lookup-email-resolution
           # assertions in e2e/auth.test.ts. NOT YET PROVISIONED as a
