@@ -21,6 +21,29 @@ npm run test:e2e
 npm run test:e2e -- e2e/flowsheet.test.ts
 ```
 
+## Shared session fixtures (`global-setup.ts`)
+
+`vitest.e2e.config.ts` registers `e2e/global-setup.ts` as a vitest
+`globalSetup` module. It runs once, in the main process, before any test
+file below is forked, and mints the anonymous session, the credentialed
+(DJ) session, and a `POST /auth/wxyc/lookup-email` "no match" probe that
+every other file in this directory would otherwise re-mint on its own —
+against the SAME shared, cross-service rate-limit bucket
+(`apps/auth/app.ts`'s `authMutationRateLimit`: 10 requests / 15 min per
+`X-Real-IP`, one reused Express middleware instance mounted across nine
+path prefixes). It exposes the results via `process.env`, which every
+worker process inherits at fork time; `e2e/setup.ts`'s `getSharedAnonymousSession`
+/ `getSharedDjSession` / `getSharedLookupEmailNullProbe` /
+`exchangeSessionForJwt` are the one place every consumer reads them from.
+
+Before this existed, seven files independently signed in a combined 15
+times against that one 10-request bucket in a single `npm run test:e2e`
+run. See `e2e/auth.test.ts`'s budget-arithmetic comment (in its
+`better-auth core surface (issue #379)` describe block) for the full,
+current per-file accounting — the whole run now costs 6 covered requests
+(4 without a configured DJ account), leaving headroom under the ceiling
+even after the downstream `wxyc-canary` smoke step's own sign-in.
+
 ## Test Categories
 
 ### Auth E2E (`auth.test.ts`)
@@ -29,11 +52,15 @@ npm run test:e2e -- e2e/flowsheet.test.ts
 - Validates JWT contains a role recognized by the backend (`WXYCRoles`)
 - Tests authenticated catalog and DJ bin access
 - Tests rejection of invalid/tampered tokens
-- Every credentialed and anonymous assertion in this file shares ONE sign-in
-  each, captured once in `beforeAll` (`credentialedSignIn` /
-  `anonymousSignIn`) rather than one live sign-in per test — see the
-  budget-arithmetic comment near the file's end for why that consolidation
-  is load-bearing, not just tidiness.
+- Every credentialed and anonymous assertion in this file reads the shared
+  sessions `e2e/global-setup.ts` mints (see "Shared session fixtures"
+  above) rather than signing in itself — see the budget-arithmetic comment
+  near the file's end for the full accounting. The "Authenticated catalog
+  access" and "Authenticated DJ bin access" describes each re-apply the
+  shared JWT in their own `beforeAll`, since the two describes before them
+  (`Unauthenticated requests...`, `Public endpoints...`) clear the shared
+  client's token in every one of their tests and nothing else would
+  restore it.
 - **`better-auth core surface (issue #379)`**: behavioral assertions for the
   eight `/auth/*` paths added to `api.yaml` in issue #379 — `set-auth-token`
   on email *and* username sign-in (the username case self-skips absent
@@ -92,15 +119,22 @@ npm run test:e2e -- e2e/flowsheet.test.ts
   their `api.yaml` schemas (`AuthTokenAndUserResult`, `AuthTokenResponse`,
   `LookupEmailResponse`) using an auth-origin client — see "Auth-origin
   client" below. Runs unconditionally; anonymous sign-in needs no
-  credentials. Shares one anonymous sign-in across its tests (issue #379
-  review finding #9) rather than calling `POST /auth/sign-in/anonymous`
-  once per test, and asserts each response's status directly rather than
+  credentials. Asserts each response's status directly rather than
   silently skipping on a non-2xx — the old skip-on-`!ok` pattern couldn't
   tell "auth service genuinely unreachable" (which a thrown `fetch` error
   already fails this suite on, before reaching that check) apart from
   "auth service reachable but answering with an error" (a 429 from the
   shared rate-limit budget, say), so it always passed regardless of which
-  happened. The origin-verification test calls better-auth's own built-in
+  happened (issue #379 review finding #9). Of this block's three live
+  requests, two now read `e2e/global-setup.ts`'s shared fixtures instead
+  (the `GET /auth/token` schema check reads the shared anonymous session;
+  the lookup-email schema check reads the shared no-match probe) — the ONE
+  exception is the `AuthTokenAndUserResult` schema-shape test itself,
+  which keeps its own dedicated `POST /auth/sign-in/anonymous` call
+  because it needs the FULL raw response to validate, not just the token
+  the shared fixture carries. See `e2e/auth.test.ts`'s budget-arithmetic
+  comment for the exact count this block contributes to the shared
+  rate-limit budget. The origin-verification test calls better-auth's own built-in
   `GET /ok` liveness route rather than probing a made-up path, since only
   the real auth origin serves it.
 

@@ -404,6 +404,136 @@ export async function getAnonymousJwt(authUrl: string): Promise<string> {
   return body.token;
 }
 
+// ── Cross-file shared fixtures (issue #379 review fix-pass #2, finding #2) ──
+//
+// `e2e/global-setup.ts` runs once, in the main process, before any e2e test
+// file is forked, and mints the handful of live sessions/probes below that
+// would otherwise be re-minted once per file against the SAME shared,
+// cross-service rate-limit budget (apps/auth/app.ts's authMutationRateLimit
+// -- 10 requests / 15 min per X-Real-IP, one bucket shared across nine path
+// prefixes). It exposes them via `process.env`, which Node's
+// `child_process.fork` inherits at fork time -- global setup completes,
+// including these mutations, before vitest spawns any worker. The getters
+// below are the one place every consumer reads them from, so the env-var
+// names and JSON shapes are defined exactly once. See
+// `e2e/auth.test.ts`'s budget-arithmetic comment for the full accounting
+// this collapses.
+
+/** The shared anonymous session `e2e/global-setup.ts` mints once per run. */
+export interface SharedAnonymousSession {
+  /** Whichever of `setAuthTokenHeader` / `bodyToken` the mint found -- for consumers that just need a working token and don't care which channel it arrived on. */
+  sessionToken: string;
+  /** The raw `set-auth-token` response header value from the mint, or `null` if the response didn't carry one. */
+  setAuthTokenHeader: string | null;
+  /** The raw response body's `token` field from the mint, or `undefined` if the response didn't carry one. */
+  bodyToken?: string;
+  userId?: string;
+}
+
+/**
+ * Read the anonymous session `e2e/global-setup.ts` minted for this run.
+ * Returns `null` if global setup didn't run, or its anonymous sign-in
+ * failed (e.g. the auth service was unreachable) -- callers that need one
+ * should assert non-null themselves so the failure is attributed to the
+ * right test rather than surfacing as a confusing downstream 401.
+ *
+ * Keeping `setAuthTokenHeader` and `bodyToken` as separate fields (rather
+ * than only the collapsed `sessionToken`) is load-bearing, not redundancy:
+ * `CONTRACTS.ANONYMOUS_SIGN_IN_SHAPE` (header-or-body) and
+ * `CONTRACTS.SET_AUTH_TOKEN_NEVER_ROTATES`'s deterministic-prefix property
+ * (header must start with the body token followed by ".") both need to
+ * see which channel carried which value, not just "a token arrived
+ * somewhere" -- collapsing the two would force those contract tests back
+ * onto their own live sign-in calls.
+ */
+export function getSharedAnonymousSession(): SharedAnonymousSession | null {
+  const sessionToken = process.env.E2E_GLOBAL_ANON_SESSION_TOKEN;
+  if (!sessionToken) return null;
+  return {
+    sessionToken,
+    setAuthTokenHeader: process.env.E2E_GLOBAL_ANON_SET_AUTH_TOKEN_HEADER || null,
+    bodyToken: process.env.E2E_GLOBAL_ANON_BODY_TOKEN || undefined,
+    userId: process.env.E2E_GLOBAL_ANON_USER_ID || undefined,
+  };
+}
+
+/** The shared credentialed (DJ) session `e2e/global-setup.ts` mints once per run, when configured. */
+export interface SharedDjSession {
+  sessionToken: string;
+  /** The raw `set-auth-token` header value from the mint, or `null` if the response didn't carry one. */
+  setAuthTokenHeader: string | null;
+  /** A ready-to-send `Cookie:` header value (`name=value; name2=value2`), or `null` if none were set. */
+  cookieHeader: string | null;
+}
+
+/**
+ * Read the credentialed (DJ) session `e2e/global-setup.ts` minted for this
+ * run. Returns `null` when no DJ account is configured (global setup skips
+ * this mint entirely in that case) or the mint failed -- every consumer
+ * already self-skips its credentialed assertions via its own
+ * `hasCredentials` check, so a `null` here is expected and not itself an
+ * error.
+ */
+export function getSharedDjSession(): SharedDjSession | null {
+  const sessionToken = process.env.E2E_GLOBAL_DJ_SESSION_TOKEN;
+  if (!sessionToken) return null;
+  return {
+    sessionToken,
+    setAuthTokenHeader: process.env.E2E_GLOBAL_DJ_SET_AUTH_TOKEN_HEADER || null,
+    cookieHeader: process.env.E2E_GLOBAL_DJ_COOKIE_HEADER || null,
+  };
+}
+
+/**
+ * The shared `POST /auth/wxyc/lookup-email` "no match" probe
+ * `e2e/global-setup.ts` runs once per run against a synthetic, timestamped,
+ * guaranteed-nonexistent identifier. Both `e2e/auth.test.ts`'s behavioral
+ * no-match assertion and `e2e/contract/openapi-compliance.test.ts`'s
+ * schema-compliance assertion for the same response need only that the
+ * identifier doesn't resolve, so one probe serves both.
+ */
+export interface SharedLookupEmailNullProbe {
+  status: number;
+  body: { email?: string | null };
+}
+
+export function getSharedLookupEmailNullProbe(): SharedLookupEmailNullProbe | null {
+  const status = process.env.E2E_GLOBAL_LOOKUP_EMAIL_NULL_STATUS;
+  const body = process.env.E2E_GLOBAL_LOOKUP_EMAIL_NULL_BODY;
+  if (!status || !body) return null;
+  try {
+    return { status: Number(status), body: JSON.parse(body) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Exchange a session token (anonymous or credentialed) for a JWT via the
+ * free (non-rate-limited -- GET /auth/token is not in apps/auth/app.ts's
+ * rateLimitedPaths) `/auth/token` endpoint. Every consumer of a SHARED
+ * session mints its own JWT this way rather than sharing one JWT across
+ * files: JWTs are cheap to mint, each file wants its own decoded
+ * payload/expiry, and there is no rate-limit reason to share the mint
+ * itself, only the underlying session that would otherwise need re-minting.
+ */
+export async function exchangeSessionForJwt(
+  sessionToken: string,
+  authUrl?: string
+): Promise<{ token: string; payload: Record<string, unknown> } | null> {
+  const authClient = createE2EAuthClient(authUrl ? { authUrl } : undefined);
+  const response = await authClient.get<{ token?: string }>('/token', {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  if (response.status !== 200 || !response.body?.token) return null;
+  const jwt = response.body.token;
+  const payloadB64 = jwt.split('.')[1];
+  const payload: Record<string, unknown> = payloadB64
+    ? JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'))
+    : {};
+  return { token: jwt, payload };
+}
+
 /**
  * Poll a function until it returns a non-null value or times out.
  *

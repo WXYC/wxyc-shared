@@ -4001,8 +4001,11 @@ components:
       description: >
         `{message: string}` — better-auth's OWN internal per-path rate
         limiter (dist/api/rate-limiter/index.mjs `rateLimitResponse`),
-        which is what a client actually meets FIRST on every operation in
-        this section that carries a 429: 3 requests / 10 seconds on any
+        which is what a client actually meets FIRST on FIVE of the six
+        429-declaring operations in this section — every one except
+        POST /auth/wxyc/lookup-email, a plain Express handler that never
+        reaches better-auth's request pipeline at all (see that
+        operation's own 429 description): 3 requests / 10 seconds on any
         `/sign-in*` path (getDefaultSpecialRules), 3 requests / 60 seconds
         on `/email-otp/send-verification-otp` specifically. Keyed per
         exact path per IP (createRateLimitKey(ip, path)) — NOT shared
@@ -4015,10 +4018,12 @@ components:
         `text/plain;charset=UTF-8` default for a string body; the JSON is
         valid, but a client that gates JSON-parsing on Content-Type (as
         this repo's own e2e harness does) will not auto-decode it. The
-        window-reset hint arrives on the `X-Retry-After` response header
-        (seconds, NOT the standard `Retry-After`), not in the body. See
-        AuthPlainErrorResponse for the second, express-layer limiter a
-        client can reach only after clearing this one.
+        window-reset hint arrives on THIS layer's own `X-Retry-After`
+        response header (seconds) — a non-standard header name, chosen by
+        better-auth itself, and distinct from the standard `Retry-After`
+        the OTHER layer sets (see AuthPlainErrorResponse) — not in the
+        body. See AuthPlainErrorResponse for the second, express-layer
+        limiter a client can reach only after clearing this one.
       required:
         - message
       properties:
@@ -4038,15 +4043,24 @@ components:
         this section (apps/auth/app.ts authMutationRateLimit — 10 requests
         / 15 min, keyed on X-Real-IP, SHARED across all nine mount
         prefixes it's attached to via one reused middleware instance —
-        `message: {error: ...}`). On the six operations below that declare
-        a 429, this is the SECOND layer: better-auth's own tighter,
-        per-path AuthRateLimitedResponse limiter (3 requests per 10-60s,
-        depending on path) is what a client meets first in practice, since
-        its window is far easier to exhaust than this shared 10-per-15-min
-        budget. A client could still reach this shape directly if it
-        avoided tripping the internal limiter (e.g. by spacing requests
-        more than its window apart) while still accumulating past 10
-        requests across the shared budget.
+        `message: {error: ...}`). Two different roles depending on the
+        operation: on FIVE of the six 429-declaring operations below, this
+        is the SECOND layer — better-auth's own tighter, per-path
+        AuthRateLimitedResponse limiter (3 requests per 10-60s, depending
+        on path) is what a client meets first in practice, since its
+        window is far easier to exhaust than this shared 10-per-15-min
+        budget, and a client reaches this shape directly only by avoiding
+        the internal limiter (e.g. spacing requests out) while still
+        accumulating past 10 requests across the shared budget. On the
+        sixth, POST /auth/wxyc/lookup-email, this is the ONLY layer — that
+        operation never reaches better-auth's internal limiter at all (see
+        its own 429 description), so its 429 is always this shape, never a
+        "second" layer reached after a first. `express-rate-limit@8.6.2`
+        (apps/auth's pinned version) also sets the standard `Retry-After`
+        header (plus `RateLimit` / `RateLimit-Policy`, from its
+        `standardHeaders: 'draft-7'` config) on every 429 this schema
+        answers — verified against
+        node_modules/express-rate-limit/dist/index.cjs.
       required:
         - error
       properties:
@@ -11132,19 +11146,60 @@ paths:
             after clearing that (e.g. by spacing requests out) is the
             second, shared layer: Express's authMutationRateLimit, 10
             requests / 15 min per X-Real-IP, covering every
-            /auth/sign-in/* path — see AuthPlainErrorResponse.
+            /auth/sign-in/* path — see AuthPlainErrorResponse. Both layers
+            set a retry hint, under DIFFERENT header names — see this
+            response's `headers` block — so check for whichever one is
+            present rather than assuming X-Retry-After's absence means no
+            hint was given.
           headers:
             X-Retry-After:
               schema:
                 type: string
               description: >
                 Seconds until the internal limiter's window resets. Set
-                only on the better-auth-layer 429 (AuthRateLimitedResponse);
-                the express-layer 429 sets no equivalent header.
+                only on the better-auth-layer 429 (AuthRateLimitedResponse).
+            Retry-After:
+              schema:
+                type: string
+              description: >
+                Seconds until the shared express-layer bucket resets. Set
+                only on the express-layer 429 (AuthPlainErrorResponse) —
+                express-rate-limit@8.6.2's standard `Retry-After` header,
+                emitted because apps/auth/app.ts configures
+                `standardHeaders: 'draft-7'` (verified against
+                node_modules/express-rate-limit/dist/index.cjs
+                setRetryAfterHeader). That layer also sets `RateLimit` and
+                `RateLimit-Policy` on every response, 429 or not; not
+                modeled as separate headers here since they carry no
+                information beyond this one for a client's purposes. Never
+                present on the same response as X-Retry-After above — the
+                two layers are mutually exclusive per response.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthRateLimitedResponse'
+                description: >
+                  One of two shapes depending on which of the two layers
+                  above answered. Modeled as a oneOf rather than a single
+                  schema so a generated client's type reflects both real
+                  possibilities rather than silently assuming the
+                  better-auth shape always wins — verified this generates
+                  cleanly across all four codegen targets: openapi-typescript
+                  emits a proper union type (the one generator that surfaces
+                  a per-status response body at all); the Python
+                  (datamodel-code-generator), Swift (openapi-generator-cli
+                  swift6), and Kotlin generators don't model inline
+                  path-response bodies by status code in the first place, so
+                  both member schemas simply continue to generate as
+                  independent, unaffected models. NOTE: the better-auth-layer
+                  member (AuthRateLimitedResponse) is not reliably decodable
+                  as JSON in the first place regardless of this modeling —
+                  see that schema's own description for the Content-Type
+                  caveat; a `oneOf` communicates the shape a caller gets IF
+                  it parses the body as JSON, not a guarantee that
+                  Content-Type says so.
+                oneOf:
+                  - $ref: '#/components/schemas/AuthRateLimitedResponse'
+                  - $ref: '#/components/schemas/AuthPlainErrorResponse'
 
   /auth/sign-in/username:
     post:
@@ -11211,16 +11266,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthErrorResponse'
         '429':
-          description: 'Rate limited — see POST /auth/sign-in/email (same two-layer shape; this path shares the /auth/sign-in* prefix rule).'
+          description: 'Rate limited — see POST /auth/sign-in/email (same two-layer shape and header pair; this path shares the /auth/sign-in* prefix rule).'
           headers:
             X-Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+            Retry-After:
               schema:
                 type: string
               description: Same contract as POST /auth/sign-in/email.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthRateLimitedResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/AuthRateLimitedResponse'
+                  - $ref: '#/components/schemas/AuthPlainErrorResponse'
 
   /auth/wxyc/lookup-email:
     post:
@@ -11265,15 +11326,28 @@ paths:
         '429':
           description: >
             Rate limited — Express's authMutationRateLimit (10 requests /
-            15 min per X-Real-IP), the SAME shared bucket the six
-            better-auth-native operations in this section share. This is
-            the ONE operation in this section with only one rate-limit
-            layer, not two: lookupEmailHandler is a plain Express handler
-            registered before the better-auth router
-            (apps/auth/app.ts), so better-auth's own internal per-path
-            limiter (AuthRateLimitedResponse) never applies here — a
-            request to this path never reaches better-auth's request
-            pipeline at all.
+            15 min per X-Real-IP), the SAME shared bucket the five
+            better-auth-native operations in this section share (sign-in/
+            email, sign-in/username, sign-in/email-otp, sign-in/anonymous,
+            email-otp/send-verification-otp). This is the ONE operation in
+            this section with only one rate-limit layer, not two:
+            lookupEmailHandler is a plain Express handler registered before
+            the better-auth router (apps/auth/app.ts), so better-auth's own
+            internal per-path limiter (AuthRateLimitedResponse) never
+            applies here — a request to this path never reaches
+            better-auth's request pipeline at all, so this operation's 429
+            is ALWAYS AuthPlainErrorResponse-shaped, never a oneOf like the
+            five above.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+              description: >
+                Seconds until the shared express-layer bucket resets — see
+                POST /auth/sign-in/email's Retry-After header description.
+                No X-Retry-After equivalent exists on this operation's 429
+                (that header is specific to better-auth's internal limiter,
+                which this operation never reaches — see above).
           content:
             application/json:
               schema:
@@ -11329,15 +11403,23 @@ paths:
             that is the second, shared layer: Express's
             authMutationRateLimit, 10 requests / 15 min per X-Real-IP,
             covering this path by exact match — see AuthPlainErrorResponse.
+            Both layers set a retry hint under different header names —
+            see this response's `headers` block.
           headers:
             X-Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+            Retry-After:
               schema:
                 type: string
               description: Same contract as POST /auth/sign-in/email.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthRateLimitedResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/AuthRateLimitedResponse'
+                  - $ref: '#/components/schemas/AuthPlainErrorResponse'
 
   /auth/sign-in/email-otp:
     post:
@@ -11354,14 +11436,22 @@ paths:
         atomicVerifyOTP): a correct code can be consumed by only one
         concurrent caller. Registration-on-first-sign-in is declared by the
         plugin but unreachable on this deployment — see OTPSignInRequest's
-        description. UNVERIFIED-CARVE-OUT: this route cannot be exercised
-        end-to-end by any automated harness that lacks mailbox access — a
-        real run requires reading a mailed 6-digit code — so wxyc-shared's
-        own e2e suite (e2e/auth.test.ts) only asserts the two legs it can
-        reach without one: POST /auth/email-otp/send-verification-otp's
-        success shape, and this operation's 400/403/429 responses via a
-        synthetic code that is guaranteed wrong. No e2e test here redeems a
-        real code end-to-end.
+        description. NO LIVE COVERAGE OF THIS ROUTE TODAY: wxyc-shared's
+        e2e suite (e2e/auth.test.ts) exercises the SEND leg
+        (POST /auth/email-otp/send-verification-otp's success shape) but
+        does not call this operation at all, live, in any shape — not the
+        success path (impossible for an automated harness with no mailbox
+        access — a real run requires reading a mailed 6-digit code) and
+        not even the guaranteed-wrong-code 400/403 paths, which a
+        synthetic code COULD exercise without needing a real mailbox. That
+        coverage gap is a deliberate, budget-driven omission, not an
+        oversight: this path shares the `/auth/sign-in*` prefix rate-limit
+        rule, and the e2e suite's whole-run request budget against the
+        shared 10-request/15-min bucket (apps/auth/app.ts
+        authMutationRateLimit) is already fully committed elsewhere — see
+        the budget-arithmetic comment in e2e/auth.test.ts. Add a
+        synthetic-wrong-code assertion here only after re-verifying the
+        whole-run budget still holds with one more covered request.
       security: []
       requestBody:
         required: true
@@ -11404,16 +11494,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthErrorResponse'
         '429':
-          description: 'Rate limited — see POST /auth/sign-in/email (same two-layer shape; this path shares the /auth/sign-in* prefix rule).'
+          description: 'Rate limited — see POST /auth/sign-in/email (same two-layer shape and header pair; this path shares the /auth/sign-in* prefix rule).'
           headers:
             X-Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+            Retry-After:
               schema:
                 type: string
               description: Same contract as POST /auth/sign-in/email.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthRateLimitedResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/AuthRateLimitedResponse'
+                  - $ref: '#/components/schemas/AuthPlainErrorResponse'
 
   /auth/sign-in/anonymous:
     post:
@@ -11469,16 +11565,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthErrorResponse'
         '429':
-          description: 'Rate limited — /auth/sign-in/* is a prefix match, so this path is covered too (same two-layer shape as POST /auth/sign-in/email).'
+          description: 'Rate limited — /auth/sign-in/* is a prefix match, so this path is covered too (same two-layer shape and header pair as POST /auth/sign-in/email).'
           headers:
             X-Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+            Retry-After:
               schema:
                 type: string
               description: Same contract as POST /auth/sign-in/email.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthRateLimitedResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/AuthRateLimitedResponse'
+                  - $ref: '#/components/schemas/AuthPlainErrorResponse'
         '500':
           description: 'FAILED_TO_CREATE_USER — unexpected failure creating the anonymous user row.'
           content:

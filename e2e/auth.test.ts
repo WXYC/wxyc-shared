@@ -16,10 +16,11 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import {
   createE2EClient,
   createE2EAuthClient,
-  createE2EAuthHelper,
-  extractSetCookieHeaders,
+  exchangeSessionForJwt,
+  getSharedAnonymousSession,
+  getSharedDjSession,
+  getSharedLookupEmailNullProbe,
   type E2EClient,
-  type E2EAuthHelper,
   waitForService,
   getE2EConfig,
 } from './setup.js';
@@ -29,7 +30,6 @@ const VALID_WXYC_ROLES = ['member', 'dj', 'musicDirector', 'stationManager', 'ad
 
 describe('Auth E2E', () => {
   let client: E2EClient;
-  let authHelper: E2EAuthHelper;
   let authClient: E2EClient;
   const config = getE2EConfig();
 
@@ -62,37 +62,22 @@ describe('Auth E2E', () => {
   const canResolveUsernameToEmail = Boolean(config.testDjUsername && config.testDjEmail);
 
   /**
-   * The shared credentialed sign-in, captured ONCE in `beforeAll` rather
-   * than per test. Issue #379 review finding #7: an earlier version of
-   * this file called `authHelper.authenticateClient` (or POSTed
-   * `/sign-in/email` directly) once per test — seven times across the
-   * "DJ sign-in" / "Authenticated catalog access" / "Authenticated DJ bin
-   * access" blocks alone — every one of which spends one request against
-   * the shared, cross-file rate-limit budget documented near this file's
-   * end. `client` gets `setAuthToken`'d here too, so every test below that
-   * needs an authenticated backend request just uses `client` directly.
+   * The credentialed session's decoded JWT payload and the JWT string
+   * itself, derived ONCE in `beforeAll` from `e2e/global-setup.ts`'s shared
+   * DJ session (issue #379 review fix-pass #2, finding #2) via the free,
+   * non-rate-limited `GET /auth/token` exchange. `credentialedJwt` also
+   * backs the auth-token-leak fix below (fix-pass #2, finding #1): both
+   * "Authenticated catalog access" and "Authenticated DJ bin access" apply
+   * it again in their OWN `beforeAll`, since the two describes above them
+   * (`Unauthenticated requests...`, `Public endpoints...`) clear `client`'s
+   * token in every one of their tests and nothing previously restored it.
    */
-  let credentialedSignIn: {
-    payload: Record<string, unknown>;
-    setAuthTokenHeader: string | null;
-    sessionCookies: string[];
-  } | null = null;
-
-  /**
-   * The shared anonymous sign-in, same reasoning as `credentialedSignIn`.
-   * `POST /auth/sign-in/anonymous` needs no credentials, so it always runs,
-   * and every request it costs is spent regardless of whether a DJ account
-   * is configured — worth consolidating for exactly the same reason.
-   */
-  let anonymousSignIn: {
-    sessionToken: string;
-    userId: string | undefined;
-  } | null = null;
+  let credentialedJwt: string | null = null;
+  let credentialedPayload: Record<string, unknown> | null = null;
 
   beforeAll(async () => {
     await waitForService(`${config.baseUrl}/healthcheck`);
     client = createE2EClient();
-    authHelper = createE2EAuthHelper();
     authClient = createE2EAuthClient();
 
     // Issue #379 review finding #10: fail loud, not silent-skip, when the
@@ -111,41 +96,19 @@ describe('Auth E2E', () => {
       );
     }
 
+    // Authenticate using the DJ session e2e/global-setup.ts already minted
+    // for this run, rather than signing in again — issue #379 review
+    // fix-pass #2, finding #2. See this file's budget-arithmetic comment
+    // near its end for the full per-file accounting.
     if (hasCredentials) {
-      const signInResp = await authClient.post<{ token?: string }>('/sign-in/email', {
-        email: config.testDjEmail,
-        password: config.testDjPassword,
-      });
-      if (signInResp.status === 200) {
-        const setAuthTokenHeader = signInResp.headers.get('set-auth-token');
-        const sessionToken = setAuthTokenHeader || signInResp.body?.token;
-        const sessionCookies = extractSetCookieHeaders(signInResp.headers);
-        if (sessionToken) {
-          const jwtResp = await authClient.get<{ token?: string }>('/token', {
-            headers: { Authorization: `Bearer ${sessionToken}` },
-          });
-          if (jwtResp.status === 200 && jwtResp.body?.token) {
-            const jwt = jwtResp.body.token;
-            client.setAuthToken(jwt);
-            const payloadB64 = jwt.split('.')[1];
-            const payload: Record<string, unknown> = payloadB64
-              ? JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'))
-              : {};
-            credentialedSignIn = { payload, setAuthTokenHeader, sessionCookies };
-          }
+      const shared = getSharedDjSession();
+      if (shared) {
+        const exchanged = await exchangeSessionForJwt(shared.sessionToken, config.authUrl);
+        if (exchanged) {
+          credentialedJwt = exchanged.token;
+          credentialedPayload = exchanged.payload;
+          client.setAuthToken(credentialedJwt);
         }
-      }
-    }
-
-    const anonResp = await authClient.post<{ token?: string; user?: { id?: string } }>(
-      '/sign-in/anonymous',
-      {}
-    );
-    if (anonResp.status === 200) {
-      const headerToken = anonResp.headers.get('set-auth-token');
-      const sessionToken = headerToken || anonResp.body?.token;
-      if (sessionToken) {
-        anonymousSignIn = { sessionToken, userId: anonResp.body?.user?.id };
       }
     }
   });
@@ -234,14 +197,15 @@ describe('Auth E2E', () => {
 
   // ── Authenticated flow ────────────────────────────────────────────────
   //
-  // Every test below reads the shared `credentialedSignIn` fixture from
-  // `beforeAll` rather than signing in itself — see that field's doc
-  // comment. `client` is already carrying the resulting JWT.
+  // Every test below reads the shared `credentialedPayload` fixture from
+  // the outer `beforeAll` rather than signing in itself. Neither test here
+  // makes a network call at all, so the auth-token-leak fix two describes
+  // down (see its own comment) doesn't apply to this one.
 
   describe('DJ sign-in and JWT token flow', () => {
     it.skipIf(!hasCredentials)('should sign in and obtain a JWT with a valid WXYC role', () => {
-      expect(credentialedSignIn, 'expected the shared beforeAll sign-in to have succeeded').not.toBeNull();
-      const payload = credentialedSignIn!.payload;
+      expect(credentialedPayload, 'expected the shared beforeAll sign-in to have succeeded').not.toBeNull();
+      const payload = credentialedPayload!;
 
       // The JWT must contain a role recognized by the backend
       expect(payload).toHaveProperty('role');
@@ -255,8 +219,8 @@ describe('Auth E2E', () => {
     it.skipIf(!hasCredentials)(
       'JWT role should NOT be a better-auth built-in that the backend does not recognize',
       () => {
-        expect(credentialedSignIn, 'expected the shared beforeAll sign-in to have succeeded').not.toBeNull();
-        const payload = credentialedSignIn!.payload;
+        expect(credentialedPayload, 'expected the shared beforeAll sign-in to have succeeded').not.toBeNull();
+        const payload = credentialedPayload!;
 
         // These built-in better-auth roles are NOT in WXYCRoles on
         // Backend-Service main (until the admin-role branch merges).
@@ -268,12 +232,29 @@ describe('Auth E2E', () => {
   });
 
   // ── Authorized catalog access ─────────────────────────────────────────
+  //
+  // AUTH-TOKEN-LEAK FIX (issue #379 review fix-pass #2, finding #1): the
+  // two describes above (`Unauthenticated requests...`, `Public
+  // endpoints...`) call `client.clearAuthToken()` ten times combined and
+  // nothing restores it afterward. Without this describe's OWN `beforeAll`
+  // re-applying the shared JWT, every request below would silently 401
+  // instead of the intended 200/404 -- and each test's own assertion
+  // (`status === 200 || status === 404`) is the pin that catches a
+  // regression here: a 401 satisfies neither branch and fails loudly. Do
+  // NOT remove this `beforeAll` on the assumption that the outer one
+  // already set the token; it did, but two earlier describes have since
+  // cleared it.
 
   describe('Authenticated catalog access', () => {
+    beforeAll(() => {
+      if (credentialedJwt) client.setAuthToken(credentialedJwt);
+    });
+
     it.skipIf(!hasCredentials)('GET /library should return 200 with valid auth', async () => {
       const response = await client.get('/library?artist_name=test');
 
-      // Should succeed (200) or return 404 (no results) — never 401/403
+      // Should succeed (200) or return 404 (no results) — never 401/403.
+      // This is the pin: a leaked/cleared token 401s here instead.
       expect(response.status === 200 || response.status === 404).toBe(true);
     });
 
@@ -300,15 +281,22 @@ describe('Auth E2E', () => {
   });
 
   // ── DJ bin access ─────────────────────────────────────────────────────
+  //
+  // Same auth-token-leak fix as "Authenticated catalog access" above --
+  // see that describe's comment.
 
   describe('Authenticated DJ bin access', () => {
+    beforeAll(() => {
+      if (credentialedJwt) client.setAuthToken(credentialedJwt);
+    });
+
     it.skipIf(!hasCredentials)('GET /djs/bin should return 200 with valid auth', async () => {
-      expect(credentialedSignIn, 'expected the shared beforeAll sign-in to have succeeded').not.toBeNull();
-      const payload = credentialedSignIn!.payload;
-      const userId = payload.sub || payload.id;
+      expect(credentialedPayload, 'expected the shared beforeAll sign-in to have succeeded').not.toBeNull();
+      const userId = credentialedPayload!.sub || credentialedPayload!.id;
       const response = await client.get(`/djs/bin?dj_id=${userId}`);
 
-      // Should succeed or 404 (no bin entries) — never 401/403
+      // Should succeed or 404 (no bin entries) — never 401/403. This is
+      // the pin: a leaked/cleared token 401s here instead.
       expect(response.status === 200 || response.status === 404).toBe(true);
     });
   });
@@ -349,15 +337,16 @@ describe('Auth E2E', () => {
   //
   // These guard the api.yaml mirror added in #379 (wxyc-swift-auth Phase
   // A). Each test hits `authClient` (bound to the auth origin — see
-  // `createE2EAuthClient`'s doc comment in `./setup.ts`), and reuses the
-  // shared `credentialedSignIn` / `anonymousSignIn` fixtures wherever the
-  // assertion doesn't specifically need its own fresh sign-in.
+  // `createE2EAuthClient`'s doc comment in `./setup.ts`), and reads
+  // `e2e/global-setup.ts`'s shared fixtures wherever the assertion doesn't
+  // specifically need its own fresh, dedicated sign-in.
   describe('better-auth core surface (issue #379)', () => {
     // ── set-auth-token header ─────────────────────────────────────────
 
     it.skipIf(!hasCredentials)('POST /auth/sign-in/email returns set-auth-token header', () => {
-      expect(credentialedSignIn, 'expected the shared beforeAll sign-in to have succeeded').not.toBeNull();
-      expect(credentialedSignIn!.setAuthTokenHeader).toBeTruthy();
+      const shared = getSharedDjSession();
+      expect(shared, 'expected e2e/global-setup.ts to have minted a shared DJ session').not.toBeNull();
+      expect(shared!.setAuthTokenHeader).toBeTruthy();
     });
 
     // Provisioning-gated per E2EConfig.testDjUsername's doc comment — see
@@ -383,11 +372,11 @@ describe('Auth E2E', () => {
     it('POST /auth/sign-in/anonymous returns token + user.id, no credentials needed', () => {
       // The token arrives on the header (bearer plugin) or in the body,
       // depending on plugin config — see AuthTokenAndUserResult in
-      // api.yaml. `anonymousSignIn` is only populated when one of the two
-      // was found (see beforeAll), so a non-null value already proves that
-      // half; only the user id needs its own assertion here.
-      expect(anonymousSignIn, 'a session token must arrive on the header or the body').not.toBeNull();
-      expect(anonymousSignIn!.userId, 'anonymous sign-in must return a user id').toBeTruthy();
+      // api.yaml.
+      const shared = getSharedAnonymousSession();
+      expect(shared, 'a session token must arrive on the header or the body').not.toBeNull();
+      expect(shared!.setAuthTokenHeader || shared!.bodyToken).toBeTruthy();
+      expect(shared!.userId, 'anonymous sign-in must return a user id').toBeTruthy();
     });
 
     // ── /auth/token mint shape, both session kinds ──────────────────────
@@ -396,9 +385,10 @@ describe('Auth E2E', () => {
     // /auth/token is not one of apps/auth/app.ts's rateLimitedPaths.
 
     it('GET /auth/token mints a JWT for an anonymous session', async () => {
-      expect(anonymousSignIn, 'expected the shared beforeAll anonymous sign-in to have succeeded').not.toBeNull();
+      const shared = getSharedAnonymousSession();
+      expect(shared, 'expected e2e/global-setup.ts to have minted a shared anonymous session').not.toBeNull();
       const response = await authClient.get<{ token?: string }>('/token', {
-        headers: { Authorization: `Bearer ${anonymousSignIn!.sessionToken}` },
+        headers: { Authorization: `Bearer ${shared!.sessionToken}` },
       });
 
       expect(response.status).toBe(200);
@@ -408,16 +398,15 @@ describe('Auth E2E', () => {
     });
 
     it.skipIf(!hasCredentials)('GET /auth/token mints a JWT for a credentialed DJ session', async () => {
-      expect(credentialedSignIn, 'expected the shared beforeAll sign-in to have succeeded').not.toBeNull();
+      const shared = getSharedDjSession();
+      expect(shared, 'expected e2e/global-setup.ts to have minted a shared DJ session').not.toBeNull();
       // Exchange via cookie (the session cookies the shared sign-in
       // captured) rather than a bearer header, so this test is independent
-      // of the set-auth-token assertion above — and reuses the shared
-      // sign-in's cookies rather than signing in again.
-      const cookieHeader = credentialedSignIn!.sessionCookies.map((c) => c.split(';')[0]).join('; ');
-      expect(cookieHeader, 'expected the shared sign-in to have set at least one session cookie').toBeTruthy();
+      // of the set-auth-token assertion above.
+      expect(shared!.cookieHeader, 'expected the shared DJ session to have set at least one session cookie').toBeTruthy();
 
       const response = await authClient.get<{ token?: string }>('/token', {
-        headers: { cookie: cookieHeader },
+        headers: { cookie: shared!.cookieHeader! },
       });
 
       expect(response.status).toBe(200);
@@ -464,13 +453,16 @@ describe('Auth E2E', () => {
       }
     );
 
-    it('POST /auth/wxyc/lookup-email returns { email: null } for an unknown username', async () => {
-      const response = await authClient.post<{ email?: string | null }>('/wxyc/lookup-email', {
-        identifier: `e2e-nonexistent-username-${Date.now()}`,
-      });
-
-      expect(response.status).toBe(200);
-      expect(response.body?.email).toBeNull();
+    it('POST /auth/wxyc/lookup-email returns { email: null } for an unknown username', () => {
+      // Reads e2e/global-setup.ts's shared no-match probe rather than
+      // issuing its own /wxyc/lookup-email call (issue #379 review
+      // fix-pass #2, finding #2) -- the same underlying response also
+      // backs openapi-compliance.test.ts's schema-compliance assertion for
+      // this endpoint.
+      const probe = getSharedLookupEmailNullProbe();
+      expect(probe, 'expected e2e/global-setup.ts to have run the shared lookup-email probe').not.toBeNull();
+      expect(probe!.status).toBe(200);
+      expect(probe!.body?.email).toBeNull();
     });
 
     // ── send-verification-otp success shape ─────────────────────────────
@@ -479,10 +471,13 @@ describe('Auth E2E', () => {
     // route answer {success: true} identically whether or not the address
     // exists, and a synthetic address never triggers a real send (see
     // apps/auth's sendVerificationOTP -- an unknown email is a silent
-    // discard, not an error). The verify leg (POST /auth/sign-in/email-otp)
-    // is unassertable here for the same reason api.yaml's operation
-    // description now carries explicitly (issue #379 review finding #11):
-    // nobody reads the mailed code in this harness.
+    // discard, not an error). This is a deliberately dedicated live call
+    // (not shareable -- every consumer needs a fresh, unique synthetic
+    // address to avoid the internal per-path limiter, so there's nothing
+    // to memoize) — costed in the budget-arithmetic comment below. The
+    // verify leg (POST /auth/sign-in/email-otp) has NO live coverage at
+    // all in this suite today — see that operation's api.yaml description
+    // for why, and for what re-enabling it would cost.
     it('POST /auth/email-otp/send-verification-otp returns { success: true } for any address', async () => {
       const response = await authClient.post<{ success?: boolean }>('/email-otp/send-verification-otp', {
         email: `e2e-otp-probe-${Date.now()}@wxyc.org`,
@@ -495,13 +490,14 @@ describe('Auth E2E', () => {
 
     // ── sign-out invalidation ────────────────────────────────────────────
     //
-    // Deliberately signs in AGAIN here rather than reusing the shared
-    // `credentialedSignIn` fixture: this test invalidates the session it
-    // signs in with, and every other test in this file that needs an
+    // Deliberately signs in AGAIN here rather than reusing the shared DJ
+    // session: this test invalidates the session it signs in with, and
+    // every other test in this file (and in catalog.test.ts,
+    // recent-entries.test.ts, tests/e2e-contracts.test.ts) that needs an
     // authenticated `client` depends on the shared session staying alive
-    // for the file's whole run. This is the one place in the file where a
-    // second live /sign-in/email call is necessary, not an oversight — see
-    // the budget-arithmetic comment below, which counts it.
+    // for the whole run. This is the one place in the file where a second
+    // live /sign-in/email call is necessary, not an oversight — see the
+    // budget-arithmetic comment below, which counts it.
 
     it.skipIf(!hasCredentials)(
       'POST /auth/sign-out invalidates the session -- it 401s on GET /auth/token afterward',
@@ -529,7 +525,8 @@ describe('Auth E2E', () => {
 
     // ── rate-limit 429 shape -- MODELED FROM SOURCE, NOT EXERCISED LIVE ──
     //
-    // Issue #379 review finding #7. This file used to end here with a
+    // Issue #379 review finding #7 (fix-pass #1), re-audited and tightened
+    // in fix-pass #2 finding #2. This file used to end here with a
     // 15-request burst against POST /auth/email-otp/send-verification-otp,
     // deliberately exhausting the shared Express `authMutationRateLimit`
     // bucket (10 requests / 15 min per X-Real-IP -- apps/auth/app.ts
@@ -539,50 +536,40 @@ describe('Auth E2E', () => {
     // /auth/wxyc/lookup-email, /auth/wxyc/complete-onboarding, and the
     // three /auth/device/{code,approve,deny} paths). That loop is gone,
     // and no replacement live 429 assertion exists anywhere in this repo's
-    // e2e suite. The budget arithmetic, worked through in full so a future
-    // editor doesn't re-add a live 429 test without re-doing this math:
+    // e2e suite. bs-lml-gate.yml has never actually run (zero workflow
+    // runs as of this writing), so there is no "it's been green" evidence
+    // to lean on -- the budget arithmetic below is the only thing standing
+    // between this suite and a self-inflicted 429 storm on its first real
+    // run, and it has to close on its own.
     //
-    //   - This file's OWN other assertions, after the consolidation above
-    //     (one shared credentialed sign-in and one shared anonymous
-    //     sign-in in beforeAll instead of one call per test), still spend
-    //     5 requests against the shared bucket today (hasUsernameCredentials
-    //     false, canResolveUsernameToEmail false -- the common case until
-    //     that credential is provisioned): 1x /sign-in/email (the shared
-    //     beforeAll sign-in), 1x /sign-in/email again (POST /auth/sign-out's
-    //     own -- necessarily separate, see that test's comment), 1x
-    //     /sign-in/anonymous (the shared beforeAll sign-in), 1x
-    //     /wxyc/lookup-email (the unconditional no-match case), and 1x
-    //     /email-otp/send-verification-otp (the unconditional
-    //     success-shape case). POST /auth/sign-in/username and the
-    //     lookup-email resolution case each add one more once their
-    //     credential is provisioned.
-    //   - This is ONE of several files sharing the SAME bucket in the SAME
-    //     `npm run test:e2e` invocation: vitest.e2e.config.ts runs every
-    //     e2e/**/*.test.ts file plus tests/e2e-contracts.test.ts
-    //     sequentially (pool: 'forks', singleFork: true) against one
-    //     egress IP. Every sibling file below was independently
-    //     consolidated onto shared beforeAll sign-ins for the same reason
-    //     as this file, and still isn't free: e2e/contract/openapi-
-    //     compliance.test.ts spends 2 (one shared /sign-in/anonymous, one
-    //     /wxyc/lookup-email, in its "Auth Endpoints (#379)" describe
-    //     block), e2e/catalog.test.ts and e2e/recent-entries.test.ts spend
-    //     1 each (their own single beforeAll sign-in), and
-    //     tests/e2e-contracts.test.ts spends 3 (one shared credentialed
-    //     sign-in reused by every credentialed contract test in that file,
-    //     the BEARER_IS_JWT_NOT_SESSION test's own necessarily-separate
-    //     sign-in, and one shared /sign-in/anonymous reused by
-    //     ANONYMOUS_SIGN_IN_SHAPE and both SET_AUTH_TOKEN_NEVER_ROTATES
-    //     assertions).
-    //   - Summed: 5 (this file) + 2 + 1 + 1 + 3 = 12, already past the
-    //     10-request ceiling BEFORE bs-lml-gate.yml's subsequent
-    //     wxyc-canary smoke step, which signs in against the SAME staging
-    //     host from the SAME runner inside the SAME 15-minute window.
+    // `e2e/global-setup.ts` mints the shared anonymous/credentialed
+    // sessions and the shared lookup-email probe ONCE, in the main
+    // process, before any test file is forked -- see that file's own doc
+    // comment. Every consumer below reads those fixtures (or exchanges a
+    // shared SESSION token for its own JWT via the free, non-rate-limited
+    // GET /auth/token) instead of minting its own. Full per-file
+    // accounting of what's left after that consolidation, covered
+    // request by covered request:
     //
-    //   The arithmetic does not close, so per the review's own
-    //   instruction: don't exercise 429 live at all here. The two shapes
-    //   an operation in this section can actually return are documented
-    //   directly on each 429 response in api.yaml and verified against
-    //   source rather than a live probe:
+    //   | Source                                    | Requests | What                                                                 |
+    //   |--------------------------------------------|:--------:|----------------------------------------------------------------------|
+    //   | e2e/global-setup.ts                        |    3     | 1x /sign-in/anonymous, 1x /sign-in/email (only when a DJ account is configured), 1x /wxyc/lookup-email (the shared no-match probe) |
+    //   | e2e/auth.test.ts (this file)                |    2     | POST /auth/sign-out's own dedicated sign-in (invalidates the shared session, so it can't reuse it) + POST /auth/email-otp/send-verification-otp's success-shape probe (needs a fresh synthetic address every time, so nothing to share) |
+    //   | e2e/contract/openapi-compliance.test.ts     |    1     | The "matches AuthTokenAndUserResult schema" test's own dedicated /sign-in/anonymous -- it needs the FULL raw response to validate against the schema, which the shared fixture (token + user id only) doesn't carry |
+    //   | e2e/catalog.test.ts                         |    0     | Reads the shared DJ session, exchanges for its own JWT (free)         |
+    //   | e2e/recent-entries.test.ts                  |    0     | Same as catalog.test.ts                                               |
+    //   | e2e/concerts.test.ts                        |    0     | Reads the shared anonymous session, exchanges for its own JWT (free)  |
+    //   | e2e/proxy.test.ts                           |    0     | Reads the shared anonymous session directly (proxy takes a session bearer, not a JWT -- no exchange needed) |
+    //   | tests/e2e-contracts.test.ts                 |    0     | Reads both shared sessions; BEARER_IS_JWT_NOT_SESSION reuses the shared DJ session's cookies instead of signing in fresh |
+    //   | **Total (this run)**                        |  **6**   | (4 when no DJ account is configured -- global-setup's credentialed mint and this file's sign-out test both skip, 2 fewer) |
+    //   | wxyc-canary smoke step (bs-lml-gate.yml)    |   +1     | Its own DJ sign-in, against the SAME staging host from the SAME runner inside the SAME 15-minute window |
+    //   | **Grand total**                              |  **7**   | Against the 10-request/15-min ceiling -- 3 requests of headroom       |
+    //
+    //   The math has to hold with ZERO slack spent on a deliberate 429
+    //   probe, so per the review's own instruction: don't exercise 429
+    //   live at all. The two shapes an operation in this section can
+    //   actually return are documented directly on each 429 response in
+    //   api.yaml and verified against source rather than a live probe:
     //     - AuthRateLimitedResponse (`{message: string}`, an
     //       `X-Retry-After` header, no guaranteed JSON Content-Type) --
     //       better-auth's OWN internal per-path limiter
@@ -593,10 +580,16 @@ describe('Auth E2E', () => {
     //       express layer's.
     //     - AuthPlainErrorResponse (`{error: string}`) -- the express-layer
     //       fallback (apps/auth/app.ts authMutationRateLimit), reachable
-    //       only once the internal limiter above is cleared.
+    //       only once the internal limiter above is cleared. Also carries
+    //       a standard `Retry-After` header (plus `RateLimit` /
+    //       `RateLimit-Policy`) via express-rate-limit@8.6.2's
+    //       `standardHeaders: 'draft-7'` config -- see AuthPlainErrorResponse's
+    //       own api.yaml description.
     //   If a live 429 assertion is ever wanted again, it needs its own
     //   budget -- e.g. a dedicated, rarely-run suite against a throwaway
     //   IP/host -- not a line item in a file a shared-IP prod-promotion
-    //   gate runs on every merge.
+    //   gate runs on every merge. Before adding ANY new live request
+    //   anywhere in this table's files, re-verify the grand total against
+    //   the 10-request ceiling first.
   });
 });

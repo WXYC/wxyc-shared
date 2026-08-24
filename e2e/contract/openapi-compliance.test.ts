@@ -14,7 +14,14 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { parse } from 'yaml';
 import { join } from 'path';
-import { createE2EClient, createE2EAuthClient, E2EClient, getE2EConfig } from '../setup.js';
+import {
+  createE2EClient,
+  createE2EAuthClient,
+  E2EClient,
+  getE2EConfig,
+  getSharedAnonymousSession,
+  getSharedLookupEmailNullProbe,
+} from '../setup.js';
 
 interface OpenAPISpec {
   components: {
@@ -379,21 +386,21 @@ describe('OpenAPI Compliance', () => {
   // covering "service down"; it was covering "service reachable but
   // answered with an error," which these tests exist specifically to
   // catch. Removed in favor of asserting the expected status directly, the
-  // same way `e2e/auth.test.ts`'s assertions already do. The two
-  // anonymous-sign-in calls below were also independently consolidated
-  // into one shared `beforeAll` sign-in (previously each test signed in
-  // itself), cutting this describe block's contribution to the shared
-  // rate-limit budget from 3 requests (2x /sign-in/anonymous, 1x
-  // /wxyc/lookup-email) to 2.
+  // same way `e2e/auth.test.ts`'s assertions already do.
+  //
+  // Fix-pass #2, finding #2: this block's own anonymous sign-in and
+  // lookup-email calls (3 live requests total against the shared,
+  // cross-file rate-limit budget) are now read from `e2e/global-setup.ts`'s
+  // shared fixtures instead. The ONE exception is the schema-shape test
+  // immediately below: it legitimately needs its own fresh, raw
+  // `/sign-in/anonymous` response to validate against
+  // AuthTokenAndUserResult -- the shared fixture only carries the session
+  // token and user id, not the full response body a schema check needs --
+  // so it keeps its own live call. See e2e/auth.test.ts's
+  // budget-arithmetic comment for the full per-file accounting.
   describe('Auth Endpoints (#379)', () => {
-    let anonymousSessionToken: string | undefined;
-
-    beforeAll(async () => {
-      const signIn = await authClient.post<{ token?: string }>('/sign-in/anonymous', {});
-      anonymousSessionToken = signIn.headers.get('set-auth-token') || signIn.body?.token;
-    });
-
     it('POST /auth/sign-in/anonymous response matches AuthTokenAndUserResult schema', async () => {
+      // Deliberately its own live call -- see this block's header comment.
       const response = await authClient.post<unknown>('/sign-in/anonymous', {});
 
       expect(response.status, 'expected the auth service to answer 200 -- see this block\'s header comment').toBe(
@@ -404,13 +411,11 @@ describe('OpenAPI Compliance', () => {
     });
 
     it('GET /auth/token response matches AuthTokenResponse schema', async () => {
-      expect(
-        anonymousSessionToken,
-        'expected the shared beforeAll anonymous sign-in to have yielded a session token'
-      ).toBeTruthy();
+      const shared = getSharedAnonymousSession();
+      expect(shared, 'expected e2e/global-setup.ts to have minted a shared anonymous session').not.toBeNull();
 
       const response = await authClient.get<unknown>('/token', {
-        headers: { Authorization: `Bearer ${anonymousSessionToken}` },
+        headers: { Authorization: `Bearer ${shared!.sessionToken}` },
       });
 
       expect(response.status).toBe(200);
@@ -418,15 +423,18 @@ describe('OpenAPI Compliance', () => {
       expect(result.valid, `schema validation errors: ${JSON.stringify(result.errors)}`).toBe(true);
     });
 
-    it('POST /auth/wxyc/lookup-email response matches LookupEmailResponse schema', async () => {
-      const response = await authClient.post<unknown>('/wxyc/lookup-email', {
-        identifier: `e2e-compliance-probe-${Date.now()}`,
-      });
-
-      expect(response.status, 'expected the auth service to answer 200 -- see this block\'s header comment').toBe(
+    it('POST /auth/wxyc/lookup-email response matches LookupEmailResponse schema', () => {
+      // Reads e2e/global-setup.ts's shared no-match probe rather than
+      // issuing its own /wxyc/lookup-email call -- the same underlying
+      // response (a synthetic, guaranteed-nonexistent identifier) serves
+      // both this schema check and e2e/auth.test.ts's behavioral
+      // no-match assertion.
+      const probe = getSharedLookupEmailNullProbe();
+      expect(probe, 'expected e2e/global-setup.ts to have run the shared lookup-email probe').not.toBeNull();
+      expect(probe!.status, 'expected the auth service to have answered 200 -- see this block\'s header comment').toBe(
         200
       );
-      const result = validateAgainstSchema(response.body, 'LookupEmailResponse', schemas);
+      const result = validateAgainstSchema(probe!.body, 'LookupEmailResponse', schemas);
       expect(result.valid, `schema validation errors: ${JSON.stringify(result.errors)}`).toBe(true);
     });
 

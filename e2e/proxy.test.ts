@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { createE2EClient, type E2EClient, waitForService, getE2EConfig, getAnonymousToken } from './setup.js';
+import { createE2EClient, type E2EClient, waitForService, getE2EConfig, getSharedAnonymousSession } from './setup.js';
 import type {
   AlbumMetadataResponse,
   ArtistMetadataResponse,
@@ -23,9 +23,22 @@ describe('Proxy E2E', () => {
     await waitForService(`${config.baseUrl}/healthcheck`, 10000);
     client = createE2EClient();
 
-    // Authenticate with anonymous session (required for all proxy endpoints)
-    const token = await getAnonymousToken(config.authUrl);
-    client.setAuthToken(token);
+    // Authenticate with the anonymous session e2e/global-setup.ts already
+    // minted for this run (required for all proxy endpoints), rather than
+    // signing in again -- issue #379 review fix-pass #2, finding #2. Proxy
+    // endpoints take the raw session token directly as the bearer (session
+    // auth, not JWT auth -- see this file's header comment), so no
+    // /auth/token exchange is needed here. See e2e/auth.test.ts's
+    // budget-arithmetic comment for why sharing this across files is
+    // load-bearing.
+    const shared = getSharedAnonymousSession();
+    if (!shared) {
+      throw new Error(
+        'Expected e2e/global-setup.ts to have minted a shared anonymous session ' +
+          '(E2E_GLOBAL_ANON_SESSION_TOKEN unset) -- every test in this file needs it.'
+      );
+    }
+    client.setAuthToken(shared.sessionToken);
   });
 
   // -- Authentication --------------------------------------------------------
