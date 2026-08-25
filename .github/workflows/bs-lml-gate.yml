@@ -161,6 +161,25 @@ jobs:
           E2E_AUTH_URL: ${{ vars.BS_STAGING_AUTH_URL }}
           E2E_TEST_DJ_EMAIL: ${{ secrets.E2E_TEST_DJ_EMAIL }}
           E2E_TEST_DJ_PASSWORD: ${{ secrets.E2E_TEST_DJ_PASSWORD }}
+          # Issue #379 review finding #10: E2E_TEST_DJ_EMAIL / _PASSWORD are
+          # provisioned repository secrets (unlike E2E_TEST_DJ_USERNAME
+          # below), so this gate can safely fail loud instead of silently
+          # self-skipping every credentialed assertion in e2e/auth.test.ts
+          # if the secret ever goes missing (renamed, revoked, a typo'd key
+          # here). See E2EConfig.requireCredentials's doc comment in
+          # e2e/setup.ts and the beforeAll check in e2e/auth.test.ts.
+          E2E_REQUIRE_CREDENTIALS: 'true'
+          # Issue #379: username half of the same staging DJ account, gating
+          # the POST /auth/sign-in/username and lookup-email-resolution
+          # assertions in e2e/auth.test.ts. NOT YET PROVISIONED as a
+          # repository secret -- referencing it here before it exists is
+          # harmless (an unset secret resolves to an empty string, and the
+          # gated assertions self-skip on empty exactly like the
+          # email/password ones do), which is why this line can land ahead
+          # of provisioning. Do NOT add a fail-loud requireCredentials-style
+          # assertion for it until the staging account + this secret both
+          # exist -- see e2e/README.md's E2E_TEST_DJ_USERNAME section.
+          E2E_TEST_DJ_USERNAME: ${{ secrets.E2E_TEST_DJ_USERNAME }}
         run: npm run test:e2e
 
       # Pinned to wxyc-canary main @ <SHA> (Phase 5a + the prepare-script

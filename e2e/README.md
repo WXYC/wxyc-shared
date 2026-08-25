@@ -38,23 +38,24 @@ worker process inherits at fork time; `e2e/setup.ts`'s `getSharedAnonymousSessio
 
 Before this existed, seven files independently signed in a combined 15
 times against that one 10-request bucket in a single `npm run test:e2e`
-run — over the ceiling, so a full run could rate-limit itself.
-`catalog`, `concerts`, `proxy`, and `recent-entries` now read the shared
-fixtures instead of minting their own; `auth.test.ts` and
-`tests/e2e-contracts.test.ts` still sign in for themselves and move over
-in the two PRs that follow this one, which is where the full per-file
-accounting lands.
-
-When `E2E_TEST_DJ_USERNAME` is provisioned, the shared credentialed mint
-reroutes from `/sign-in/email` to `/sign-in/username` with no code change
-required. If `/sign-in/username` itself then fails (a misconfigured or
-mismatched secret), `global-setup.ts` retries the shared mint once via
+run. See `e2e/auth.test.ts`'s budget-arithmetic comment (in its
+`better-auth core surface (issue #379)` describe block) for the full,
+current per-file accounting, parameterized on which credentials are
+configured — 4 covered requests with none, 6 with `E2E_TEST_DJ_EMAIL` /
+`_PASSWORD` (today's actual state), 7 once `E2E_TEST_DJ_USERNAME` is also
+provisioned. `bs-lml-gate.yml` already wires that third secret through, so
+the run activates two more assertions (and reroutes the shared
+credentialed mint from `/sign-in/email` to `/sign-in/username`) the moment
+it's set, with no code change required — the downstream `wxyc-canary`
+smoke step's own sign-in adds one more on top, for a worst-case 8 of 10
+requests against the ceiling (2 requests of headroom) once all three
+secrets exist. If `/sign-in/username` itself ever fails (a misconfigured
+or mismatched secret), `global-setup.ts` retries the shared mint once via
 `/sign-in/email` rather than leaving the fixture unset — that fallback
-costs one more request.
-
-Note this accounting only holds because e2e test FILES run sequentially
-(`fileParallelism: false`); concurrent files spend the same one bucket in
-bursts.
+costs one more request, 9 of 10 worst case, still under the ceiling. The
+table also carries explicit zero-cost rows for the two files that touch
+no auth surface at all (`flowsheet.test.ts`, `types/generated-types.test.ts`),
+so the row list stays exhaustive against the full nine-file glob.
 
 `e2e/global-setup.ts` polls BOTH origins before minting anything (the
 backend's `/healthcheck` and the auth service's own built-in `GET /ok` —
@@ -74,6 +75,40 @@ requests against the shared budget for fixtures nothing in it reads.
 - Validates JWT contains a role recognized by the backend (`WXYCRoles`)
 - Tests authenticated catalog and DJ bin access
 - Tests rejection of invalid/tampered tokens
+- Every credentialed and anonymous assertion in this file reads the shared
+  sessions `e2e/global-setup.ts` mints (see "Shared session fixtures"
+  above) rather than signing in itself — see the budget-arithmetic comment
+  near the file's end for the full accounting. The "Authenticated catalog
+  access" and "Authenticated DJ bin access" describes each re-apply the
+  shared JWT in their own `beforeAll`, since the two describes before them
+  (`Unauthenticated requests...`, `Public endpoints...`) clear the shared
+  client's token in every one of their tests and nothing else would
+  restore it.
+- **`better-auth core surface (issue #379)`**: behavioral assertions for the
+  eight `/auth/*` paths added to `api.yaml` in issue #379 — `set-auth-token`
+  on email *and* username sign-in (the username case self-skips absent
+  `E2E_TEST_DJ_USERNAME`, see below), the anonymous sign-in shape (no
+  credentials needed), `/auth/token` mint shape for both a credentialed and
+  an anonymous session, the 401-vs-404 split on `/auth/token` (missing/bad
+  bearer vs. the wrong HTTP method), `/auth/wxyc/lookup-email` resolution
+  (gated on `canResolveUsernameToEmail`, not `hasUsernameCredentials` — see
+  below) + no-match, `send-verification-otp`'s success shape, and sign-out
+  invalidation (a signed-out session subsequently 401s on `/auth/token`).
+  **There is no live 429 test in this file.** An earlier version ended with
+  one that deliberately exhausted the shared `authMutationRateLimit` budget
+  (10 requests / 15 min per `X-Real-IP`, shared across every
+  `/auth/sign-in/*` + `/auth/email-otp/send-verification-otp` +
+  `/auth/wxyc/lookup-email` path, plus five more mount prefixes) — cascading
+  429s into every test file that runs after this one in the same `npm run
+  test:e2e` invocation, and into the canary smoke step downstream in
+  `bs-lml-gate.yml`. It was removed (issue #379 review finding #7); the two
+  429 response shapes (`AuthRateLimitedResponse` for better-auth's own
+  tighter internal per-path limiter, met first in practice, and
+  `AuthPlainErrorResponse` for the shared express-layer fallback) are
+  documented directly in `api.yaml` and verified against source instead of
+  a live probe — see the budget-arithmetic comment at the end of this file
+  for the full accounting of why no live 429 assertion fits anywhere in
+  this repo's e2e suite today.
 
 ### Flowsheet E2E (`flowsheet.test.ts`)
 - Public read endpoints (no auth required)
@@ -103,9 +138,43 @@ requests against the shared budget for fixtures nothing in it reads.
 
 ### Contract Tests (`contract/openapi-compliance.test.ts`)
 - Validates API responses match OpenAPI schema definitions
+- **`Auth Endpoints (#379)`**: validates the `/auth/*` responses against
+  their `api.yaml` schemas (`AuthTokenAndUserResult`, `AuthTokenResponse`,
+  `LookupEmailResponse`) using an auth-origin client — see "Auth-origin
+  client" below. Runs unconditionally; anonymous sign-in needs no
+  credentials. Asserts each response's status directly rather than
+  silently skipping on a non-2xx — the old skip-on-`!ok` pattern couldn't
+  tell "auth service genuinely unreachable" (which a thrown `fetch` error
+  already fails this suite on, before reaching that check) apart from
+  "auth service reachable but answering with an error" (a 429 from the
+  shared rate-limit budget, say), so it always passed regardless of which
+  happened (issue #379 review finding #9). Of this block's three live
+  requests, two now read `e2e/global-setup.ts`'s shared fixtures instead
+  (the `GET /auth/token` schema check reads the shared anonymous session;
+  the lookup-email schema check reads the shared no-match probe) — the ONE
+  exception is the `AuthTokenAndUserResult` schema-shape test itself,
+  which keeps its own dedicated `POST /auth/sign-in/anonymous` call
+  because it needs the FULL raw response to validate, not just the token
+  the shared fixture carries. See `e2e/auth.test.ts`'s budget-arithmetic
+  comment for the exact count this block contributes to the shared
+  rate-limit budget. The origin-verification test calls better-auth's own built-in
+  `GET /ok` liveness route rather than probing a made-up path, since only
+  the real auth origin serves it.
 
 ### Type Tests (`types/generated-types.test.ts`)
 - Validates generated TypeScript types can parse real API responses
+
+## Auth-origin client
+
+`createE2EClient` binds `config.baseUrl` (the backend API origin, default
+port 8080) — that's what every suite above except auth uses. The `/auth/*`
+paths live on the separate auth origin (`config.authUrl`, default port
+8081), so anything talking to them directly needs `createE2EAuthClient()`
+instead (both factories accept the same `Partial<E2EConfig>` override).
+`e2e/global-setup.ts` and every test file's own `authClient` use this
+factory; there is no separate auth-helper class anymore (a `E2EAuthHelper`
+that predated the shared-session design was retired once it had zero
+remaining callers — see "Shared session fixtures" above).
 
 ## Configuration
 
@@ -116,12 +185,44 @@ E2E_BASE_URL=http://localhost:8080       # Backend API
 E2E_AUTH_URL=http://localhost:8081/auth   # Better-auth service
 E2E_TEST_DJ_EMAIL=test@wxyc.org          # Test DJ account email
 E2E_TEST_DJ_PASSWORD=testpassword        # Test DJ account password
+E2E_TEST_DJ_USERNAME=testdj              # Username half of the same account — optional, see below
+E2E_REQUIRE_CREDENTIALS=true             # Fail loud (not skip) if the DJ email/password are unset — see below
+E2E_SKIP_SHARED_AUTH_MINTS=true          # Skip every e2e/global-setup.ts mint — see "Shared session fixtures" above
 E2E_DB_URL=postgres://user:pw@host:5432/db  # Stack DB, for suites that seed rows (concerts)
 E2E_SCHEMA_NAME=wxyc_schema              # Postgres schema the backend reads (default wxyc_schema)
 ```
 
 Tests that require authentication use `it.skipIf(!hasCredentials)` and will
-be skipped when `E2E_TEST_DJ_EMAIL` / `E2E_TEST_DJ_PASSWORD` are not set.
+be skipped when `E2E_TEST_DJ_EMAIL` / `E2E_TEST_DJ_PASSWORD` are not set —
+this is now conditional, not universal: the anonymous-sign-in and
+`/auth/token` 401/404 assertions added in issue #379 need no credentials at
+all and run unconditionally.
+
+`E2E_REQUIRE_CREDENTIALS` (issue #379 review finding #10) flips that
+self-skip into a fail-loud check: when set to `true`, `e2e/auth.test.ts`'s
+`beforeAll` throws if `E2E_TEST_DJ_EMAIL` / `E2E_TEST_DJ_PASSWORD` are not
+both set, instead of letting every credentialed assertion in that file
+silently pass having run zero of them. `bs-lml-gate.yml` sets this now
+that both secrets are provisioned there — a repository secret going
+missing (renamed, revoked, a typo'd key) should fail the prod-promotion
+gate loudly, not stay green having tested nothing. Leave it unset for
+local/partial-stack runs where signing in as a DJ isn't the point.
+
+`E2E_TEST_DJ_USERNAME` is optional and independent of the above: it gates
+only `POST /auth/sign-in/username` via its own `hasUsernameCredentials`
+check (username + password), and self-skips exactly like the
+email/password ones when unset. `POST /auth/wxyc/lookup-email`'s
+resolution case is gated on a separate `canResolveUsernameToEmail` check
+(username + email, no password — issue #379 review finding #12; an
+earlier version conflated the two, which made a username+password-but-no-
+email env shape eligible to run that assertion and then fail on
+`E2E_TEST_DJ_EMAIL` being `undefined` for a reason unrelated to the
+contract under test). `E2E_TEST_DJ_USERNAME` is deliberately **not**
+wired to a fail-loud gate — see `bs-lml-gate.yml`'s comment on this
+variable and `E2EConfig.testDjUsername`'s doc comment in `setup.ts` for
+the landing order that has to complete first (staging account +
+repository secret, then the gate's env block, then a fail-loud
+assertion).
 
 ## Auth Requirements by Endpoint
 
@@ -143,3 +244,11 @@ be skipped when `E2E_TEST_DJ_EMAIL` / `E2E_TEST_DJ_PASSWORD` are not set.
 | `POST /djs/bin` | Yes | `bin:write` |
 | `GET /schedule` | No | Public |
 | `GET /concerts` | Yes | Anonymous session → JWT |
+| `POST /auth/sign-in/email` | No | Public — establishes a session |
+| `POST /auth/sign-in/username` | No | Public — establishes a session |
+| `POST /auth/sign-in/email-otp` | No | Public — establishes a session |
+| `POST /auth/sign-in/anonymous` | No | Public — establishes a session |
+| `POST /auth/email-otp/send-verification-otp` | No | Public |
+| `POST /auth/wxyc/lookup-email` | No | Public (WXYC-custom, not better-auth) |
+| `GET /auth/token` | Yes | Session bearer → JWT |
+| `POST /auth/sign-out` | Yes | Session bearer |
