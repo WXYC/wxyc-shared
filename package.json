@@ -83,7 +83,7 @@
     "@types/node": "^26.2.0",
     "@vitest/coverage-v8": "^4.1.11",
     "bats": "^1.11.0",
-    "better-auth": "^1.6.25",
+    "better-auth": "^1.7.1",
     "openapi-typescript": "^7.13.0",
     "postgres": "^3.4.9",
     "tsup": "^8.4.0",
