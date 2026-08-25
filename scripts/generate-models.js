@@ -67,7 +67,21 @@ lines.push('// ── Enum schemas (const object + type alias) ─────�
 lines.push('');
 
 for (const [name, values] of enumSchemas) {
-  const entries = values.map((v) => `  ${v}: '${v}'`).join(',\n');
+  // Always quote both the key and the value with JSON.stringify rather than
+  // emitting a bare `${v}: '${v}'` identifier. Every enum this script had
+  // handled before issue #379's OTPType used snake_case values (a valid bare
+  // object-literal key), so the bare form went untested against a value
+  // that isn't a valid identifier -- OTPType's values (`sign-in`,
+  // `email-verification`, ...) come straight from better-auth's own
+  // hyphenated wire vocabulary and produced invalid TypeScript
+  // (`sign-in: 'sign-in'` parses as a subtraction expression). Quoting is
+  // valid for every string value regardless of shape, so this isn't
+  // OTPType-specific defense -- it fixes the same latent risk for any
+  // future enum with a value that isn't a bare identifier. Consumers of an
+  // enum whose values aren't valid identifiers (e.g. OTPType) need bracket
+  // access (`OTPType['sign-in']`) rather than dot access -- an unavoidable
+  // consequence of the wire value itself, not a codegen shortcoming.
+  const entries = values.map((v) => `  ${JSON.stringify(v)}: ${JSON.stringify(v)}`).join(',\n');
   lines.push(`export const ${name} = {`);
   lines.push(entries);
   lines.push('} as const;');
