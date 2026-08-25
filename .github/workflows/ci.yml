@@ -134,7 +134,52 @@ jobs:
       # (swift-corelibs-foundation on Linux), so the full (non-`-slim`)
       # image is required -- the `-slim` variant ships a runtime only, no
       # `swiftc`.
+      # A ~1.1 GiB image pull on a docs-only PR buys nothing, and #403 removed
+      # `pull_request`'s base-branch filter so this workflow now runs on
+      # stacked PRs too -- multiplying that pull across a chain. Gate the pull
+      # on whether anything that can affect the Swift support files actually
+      # changed.
+      #
+      # This is a STEP-level `if:`, and that is what makes it safe. A
+      # JOB-level `if:` would post a check run named `test` with conclusion
+      # `skipped`, and branch protection reads the latest run per check name
+      # per head SHA and counts `skipped` as satisfying the requirement -- so
+      # a red run followed by any event that re-triggered the skip branch
+      # would flip the PR to mergeable with failing tests. That was measured
+      # on #403's own head SHA. A step-level `if:` posts no check run of its
+      # own; the `test` job still runs, still executes every other step, and
+      # still reports its real conclusion.
+      #
+      # Fail-open on purpose: `push` always runs it, and so does any case
+      # where the base commit can't be resolved. A spurious run costs about a
+      # minute; a wrongly-skipped typecheck ships a support file that doesn't
+      # compile to two consumer repos that have no way to find out until they
+      # bump their pin.
+      - name: Detect Swift support-file changes
+        id: swift-support
+        run: |
+          if [ "${{ github.event_name }}" != 'pull_request' ]; then
+            echo 'not a pull_request event -- running the typecheck'
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base='${{ github.event.pull_request.base.sha }}'
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "base commit ${base} not present -- running the typecheck rather than skipping it"
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$base" HEAD \
+               | grep -qE '^(openapi-config/|scripts/copy-swift-support-files\.js$|\.github/workflows/ci\.yml$)'; then
+            echo 'Swift support files touched -- running the typecheck'
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'no Swift support-file changes -- skipping the swiftc container'
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Typecheck CalendarDate.swift (Swift 6, strict concurrency)
+        if: steps.swift-support.outputs.run == 'true'
         run: |
           docker run --rm \
             -v "$PWD/openapi-config/swift-support:/support:ro" \
