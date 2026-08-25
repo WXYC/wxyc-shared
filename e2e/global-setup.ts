@@ -171,7 +171,8 @@ export default async function setup(): Promise<void> {
   const hasUsernameCredentials = Boolean(config.testDjUsername && config.testDjPassword);
   if (hasCredentials) {
     try {
-      const signInResp = hasUsernameCredentials
+      let mintRoute: 'email' | 'username' = 'email';
+      let signInResp = hasUsernameCredentials
         ? await authClient.post<{ token?: string }>(
             '/sign-in/username',
             { username: config.testDjUsername, password: config.testDjPassword },
@@ -182,12 +183,38 @@ export default async function setup(): Promise<void> {
             { email: config.testDjEmail, password: config.testDjPassword },
             { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
           );
+      if (hasUsernameCredentials) mintRoute = 'username';
+
+      // Issue #379 review fix-pass #4, finding #4: once E2E_TEST_DJ_USERNAME
+      // exists, /sign-in/username is the SOLE source of the shared DJ
+      // session -- a bad or mismatched username secret would otherwise
+      // leave this fixture unset and 401 every credentialed assertion
+      // across four files (this one, catalog, recent-entries,
+      // e2e-contracts), not just the username-specific test that's
+      // actually broken. Retry once via /sign-in/email so the fixture
+      // still materializes; this costs an extra covered request, but only
+      // in the failure case -- see this file's and e2e/auth.test.ts's
+      // budget-arithmetic comments for the worst-case accounting.
+      if (hasUsernameCredentials && signInResp.status !== 200) {
+        console.error(
+          `[global-setup] /sign-in/username failed with status ${signInResp.status} -- retrying the shared DJ session mint via /sign-in/email so the fixture doesn't go unset. This usually means E2E_TEST_DJ_USERNAME (or its paired password) is misconfigured; the username-specific set-auth-token assertion in e2e/auth.test.ts will report that explicitly via mintRoute.`
+        );
+        signInResp = await authClient.post<{ token?: string }>(
+          '/sign-in/email',
+          { email: config.testDjEmail, password: config.testDjPassword },
+          { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
+        );
+        mintRoute = 'email';
+      }
+
       if (signInResp.status === 200) {
         const setAuthTokenHeader = signInResp.headers.get('set-auth-token');
         const sessionToken = setAuthTokenHeader || signInResp.body?.token;
         const cookies = extractSetCookieHeaders(signInResp.headers);
         if (sessionToken) {
           process.env.E2E_GLOBAL_DJ_SESSION_TOKEN = sessionToken;
+          process.env.E2E_GLOBAL_DJ_SESSION_ROUTE = mintRoute;
+          console.log(`[global-setup] shared DJ session minted via /sign-in/${mintRoute}`);
         } else {
           console.error('[global-setup] credentialed sign-in returned 200 but no session token');
         }
@@ -198,7 +225,9 @@ export default async function setup(): Promise<void> {
           process.env.E2E_GLOBAL_DJ_COOKIE_HEADER = cookies.map((c) => c.split(';')[0]).join('; ');
         }
       } else {
-        console.error(`[global-setup] credentialed sign-in failed with status ${signInResp.status}`);
+        console.error(
+          `[global-setup] credentialed sign-in failed with status ${signInResp.status} (route: ${mintRoute}) -- shared DJ session fixture will be unset; every credentialed consumer self-skips or asserts non-null on that.`
+        );
       }
     } catch (error) {
       console.error('[global-setup] credentialed sign-in threw:', error);

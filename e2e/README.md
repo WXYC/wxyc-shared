@@ -49,7 +49,13 @@ credentialed mint from `/sign-in/email` to `/sign-in/username`) the moment
 it's set, with no code change required — the downstream `wxyc-canary`
 smoke step's own sign-in adds one more on top, for a worst-case 8 of 10
 requests against the ceiling (2 requests of headroom) once all three
-secrets exist.
+secrets exist. If `/sign-in/username` itself ever fails (a misconfigured
+or mismatched secret), `global-setup.ts` retries the shared mint once via
+`/sign-in/email` rather than leaving the fixture unset — that fallback
+costs one more request, 9 of 10 worst case, still under the ceiling. The
+table also carries explicit zero-cost rows for the two files that touch
+no auth surface at all (`flowsheet.test.ts`, `types/generated-types.test.ts`),
+so the row list stays exhaustive against the full nine-file glob.
 
 `e2e/global-setup.ts` polls BOTH origins before minting anything (the
 backend's `/healthcheck` and the auth service's own built-in `GET /ok` —

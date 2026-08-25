@@ -4016,8 +4016,8 @@ components:
         seconds, the plugin's own default (Backend-Service passes no
         `rateLimit` override in its `emailOTP(...)` config) — so
         POST /auth/sign-in/email-otp shares its window with
-        POST /auth/email-otp/send-verification-otp, NOT with the other two
-        `/sign-in*` paths in this section. Only `/sign-in/email`,
+        POST /auth/email-otp/send-verification-otp, NOT with the other
+        three `/sign-in*` paths in this section. Only `/sign-in/email`,
         `/sign-in/username`, and `/sign-in/anonymous` actually get the
         generic 3-per-10s rule; neither the username plugin nor the
         anonymous plugin declares a `rateLimit` array of its own to
@@ -11340,9 +11340,10 @@ paths:
           description: >
             Rate limited — Express's authMutationRateLimit (10 requests /
             15 min per X-Real-IP), the SAME shared bucket the five
-            better-auth-native operations in this section share (sign-in/
-            email, sign-in/username, sign-in/email-otp, sign-in/anonymous,
-            email-otp/send-verification-otp). This is the ONE operation in
+            better-auth-native operations in this section share
+            (sign-in/email, sign-in/username, sign-in/email-otp,
+            sign-in/anonymous, email-otp/send-verification-otp). This is
+            the ONE operation in
             this section with only one rate-limit layer, not two:
             lookupEmailHandler is a plain Express handler registered before
             the better-auth router (apps/auth/app.ts), so better-auth's own
@@ -11513,11 +11514,11 @@ paths:
             window: despite matching the `/sign-in*` prefix, this exact
             path is overridden by the emailOTP plugin's own `rateLimit`
             array (dist/plugins/email-otp/index.mjs) to 3 requests / 60
-            seconds — the SAME window as POST /auth/email-otp/send-
-            verification-otp, not the 10-second window
-            /sign-in/email, /sign-in/username, and /sign-in/anonymous get.
-            See AuthRateLimitedResponse's description for the full
-            override mechanism.
+            seconds — the SAME window as
+            POST /auth/email-otp/send-verification-otp, not the
+            10-second window /sign-in/email, /sign-in/username, and
+            /sign-in/anonymous get. See AuthRateLimitedResponse's
+            description for the full override mechanism.
           headers:
             X-Retry-After:
               schema:

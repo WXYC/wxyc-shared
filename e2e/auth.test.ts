@@ -371,11 +371,29 @@ describe('Auth E2E', () => {
     // budget-arithmetic comment for the trade that makes (the email
     // route's equivalent assertion above moves to POST /auth/sign-out
     // instead of running here a second time).
-    it.skipIf(!hasUsernameCredentials)(
+    //
+    // Gated on `hasCredentials && hasUsernameCredentials`, NOT
+    // `hasUsernameCredentials` alone: global-setup.ts's shared mint only
+    // runs at all under `hasCredentials` (email + password), and only
+    // CHOOSES the username route when `hasUsernameCredentials` is also
+    // true. An env shape with username + password but no email would make
+    // `hasUsernameCredentials` true while global-setup mints nothing at
+    // all, so this test would hard-fail on a null fixture instead of
+    // skipping — the same class of bug `canResolveUsernameToEmail` exists
+    // to avoid for the lookup-email-resolution assertion below.
+    it.skipIf(!hasCredentials || !hasUsernameCredentials)(
       'POST /auth/sign-in/username returns set-auth-token header',
       () => {
         const shared = getSharedDjSession();
-        expect(shared, 'expected e2e/global-setup.ts to have minted a shared DJ session via /sign-in/username').not.toBeNull();
+        expect(shared, 'expected e2e/global-setup.ts to have minted a shared DJ session').not.toBeNull();
+        // e2e/global-setup.ts falls back to /sign-in/email when
+        // /sign-in/username itself fails, so the shared fixture isn't
+        // proof this route works unless mintRoute confirms it actually
+        // went through -- see SharedDjSession's doc comment in setup.ts.
+        expect(
+          shared!.mintRoute,
+          'the shared DJ session fell back to /sign-in/email (see e2e/global-setup.ts) -- /sign-in/username itself failed, which usually means E2E_TEST_DJ_USERNAME (or its password) is misconfigured'
+        ).toBe('username');
         expect(shared!.setAuthTokenHeader).toBeTruthy();
       }
     );
@@ -586,20 +604,39 @@ describe('Auth E2E', () => {
     // one secret is provisioned, with no code change required. Do not
     // read the "email creds" column below as the permanent steady state:
     //
+    //   The glob (`e2e/**/*.test.ts` plus `tests/e2e-contracts.test.ts`,
+    //   see vitest.e2e.config.ts) resolves to nine files -- every one gets
+    //   its own row below, even the two that cost nothing, so a future
+    //   contributor adding a live call to one of them sees exactly where
+    //   to re-verify the total rather than a table that quietly stopped
+    //   being exhaustive:
+    //
     //   | Source                                     | No creds | Email creds (today) | + username creds |
     //   |----------------------------------------------|:--------:|:--------------------:|:-----------------:|
-    //   | e2e/global-setup.ts                           |    2     |          3            |         3          |
+    //   | e2e/global-setup.ts                           |    2     |          3            |       3 (4*)       |
     //   | e2e/auth.test.ts (this file)                  |    1     |          2            |         3          |
     //   | e2e/contract/openapi-compliance.test.ts       |    1     |          1            |         1          |
     //   | e2e/catalog.test.ts                           |    0     |          0            |         0          |
     //   | e2e/recent-entries.test.ts                    |    0     |          0            |         0          |
     //   | e2e/concerts.test.ts                          |    0     |          0            |         0          |
     //   | e2e/proxy.test.ts                             |    0     |          0            |         0          |
+    //   | e2e/flowsheet.test.ts                         |    0     |          0            |         0          |
+    //   | e2e/types/generated-types.test.ts             |    0     |          0            |         0          |
     //   | tests/e2e-contracts.test.ts                   |    0     |          0            |         0          |
-    //   | **Total (this run)**                          |  **4**   |        **6**          |       **7**        |
+    //   | **Total (this run)**                          |  **4**   |        **6**          |     **7 (8*)**     |
     //   | wxyc-canary smoke step (bs-lml-gate.yml only)  |   n/a    |         +1             |        +1          |
-    //   | **Grand total**                                |  **4**   |        **7**          |       **8**        |
-    //   | Headroom under the 10-request/15-min ceiling   |    6     |          3            |         2          |
+    //   | **Grand total**                                |  **4**   |        **7**          |    **8 (9*)**      |
+    //   | Headroom under the 10-request/15-min ceiling   |    6     |          3            |     2 (1*)         |
+    //
+    //   * FAILURE-CASE ROW, not the expected path: if /sign-in/username
+    //     itself fails (a misconfigured or mismatched E2E_TEST_DJ_USERNAME
+    //     or its password), e2e/global-setup.ts retries the shared DJ
+    //     session mint once via /sign-in/email rather than leaving the
+    //     fixture unset -- see that file's fallback comment. That retry
+    //     costs one extra covered request, worst case 9 of 10 with the
+    //     canary included -- still under the ceiling, with 1 request of
+    //     headroom rather than 2. This is a fallback path, not a steady
+    //     state: a healthy username credential never triggers it.
     //
     //   Per-source detail:
     //     - e2e/global-setup.ts: 1x /sign-in/anonymous (unconditional) +
@@ -607,7 +644,8 @@ describe('Auth E2E', () => {
     //       unconditional) + 1x credentialed sign-in, ONLY when a DJ
     //       account is configured -- via /sign-in/email normally, or via
     //       /sign-in/username instead once E2E_TEST_DJ_USERNAME exists
-    //       (see that file's own comment for why the route switches).
+    //       (see that file's own comment for why the route switches), plus
+    //       the failure-case retry above when that route itself fails.
     //     - e2e/auth.test.ts: 1x /email-otp/send-verification-otp
     //       (unconditional -- needs a fresh synthetic address every time,
     //       so nothing to share) + POST /auth/sign-out's own dedicated
@@ -631,6 +669,9 @@ describe('Auth E2E', () => {
     //     - catalog / recent-entries / concerts / proxy / e2e-contracts:
     //       all read a shared fixture (or exchange it for a JWT via the
     //       free GET /auth/token) and cost nothing themselves.
+    //     - flowsheet / types/generated-types: touch no auth surface at
+    //       all -- zero-cost rows kept in this table on purpose (see the
+    //       exhaustiveness note above), not omitted as "obviously fine".
     //
     //   The math has to hold with ZERO slack spent on a deliberate 429
     //   probe, so per the review's own instruction: don't exercise 429

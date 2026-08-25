@@ -305,6 +305,17 @@ export interface SharedDjSession {
   setAuthTokenHeader: string | null;
   /** A ready-to-send `Cookie:` header value (`name=value; name2=value2`), or `null` if none were set. */
   cookieHeader: string | null;
+  /**
+   * Which route actually produced this session. Not simply "username
+   * whenever `E2E_TEST_DJ_USERNAME` is set": `e2e/global-setup.ts` retries
+   * once via `/sign-in/email` when `/sign-in/username` itself fails (a
+   * misconfigured or mismatched username secret), so this can be `'email'`
+   * even with the username credential configured. Consumers that assert
+   * something specific to the username route (e.g. "POST
+   * /auth/sign-in/username returns set-auth-token header") must check this
+   * rather than assuming it from `hasUsernameCredentials` alone.
+   */
+  mintRoute: 'email' | 'username';
 }
 
 /**
@@ -322,6 +333,7 @@ export function getSharedDjSession(): SharedDjSession | null {
     sessionToken,
     setAuthTokenHeader: process.env.E2E_GLOBAL_DJ_SET_AUTH_TOKEN_HEADER || null,
     cookieHeader: process.env.E2E_GLOBAL_DJ_COOKIE_HEADER || null,
+    mintRoute: process.env.E2E_GLOBAL_DJ_SESSION_ROUTE === 'username' ? 'username' : 'email',
   };
 }
 
