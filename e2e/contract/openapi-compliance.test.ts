@@ -14,7 +14,14 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { parse } from 'yaml';
 import { join } from 'path';
-import { createE2EClient, E2EClient, getE2EConfig } from '../setup.js';
+import {
+  createE2EClient,
+  createE2EAuthClient,
+  E2EClient,
+  getE2EConfig,
+  getSharedAnonymousSession,
+  getSharedLookupEmailNullProbe,
+} from '../setup.js';
 
 interface OpenAPISpec {
   components: {
@@ -38,6 +45,13 @@ interface SchemaObject {
 }
 
 let client: E2EClient;
+/**
+ * Bound to `config.authUrl` (the better-auth origin), not `config.baseUrl`
+ * (the backend API `client` above uses) -- the issue #379 auth schemas live
+ * at `/auth/*` on the auth service, not the backend. See
+ * `createE2EAuthClient`'s doc comment in `../setup.ts`.
+ */
+let authClient: E2EClient;
 let spec: OpenAPISpec;
 let schemas: Record<string, SchemaObject>;
 
@@ -180,6 +194,7 @@ describe('OpenAPI Compliance', () => {
   beforeAll(async () => {
     const config = getE2EConfig();
     client = createE2EClient(config);
+    authClient = createE2EAuthClient(config);
 
     // Load OpenAPI spec
     const specPath = join(__dirname, '../../api.yaml');
@@ -352,5 +367,98 @@ describe('OpenAPI Compliance', () => {
     });
 
 
+  });
+
+  // Issue #379 -- the better-auth core surface added to api.yaml. Uses
+  // `authClient` (bound to the auth origin) rather than `client`. Anonymous
+  // sign-in needs no credentials, so this suite runs unconditionally
+  // (unlike `e2e/auth.test.ts`'s credentialed behavioral assertions).
+  //
+  // Issue #379 review finding #9: three of the four tests here used to open
+  // with `if (!response.ok) return` and a console.log, silently passing
+  // whenever the auth service answered with ANYTHING other than 2xx --
+  // including a 429 from the shared rate-limit budget e2e/auth.test.ts's
+  // budget-arithmetic comment documents, which this file's tests inherit
+  // (this file runs after auth.test.ts in the same `npm run test:e2e`
+  // invocation). `E2EClient.request` never catches a `fetch` failure, so a
+  // GENUINELY unreachable auth service throws out of this suite and fails
+  // it loudly already -- the skip-on-`!ok` pattern was never actually
+  // covering "service down"; it was covering "service reachable but
+  // answered with an error," which these tests exist specifically to
+  // catch. Removed in favor of asserting the expected status directly, the
+  // same way `e2e/auth.test.ts`'s assertions already do.
+  //
+  // Fix-pass #2, finding #2: this block's own anonymous sign-in and
+  // lookup-email calls (3 live requests total against the shared,
+  // cross-file rate-limit budget) are now read from `e2e/global-setup.ts`'s
+  // shared fixtures instead. The ONE exception is the schema-shape test
+  // immediately below: it legitimately needs its own fresh, raw
+  // `/sign-in/anonymous` response to validate against
+  // AuthTokenAndUserResult -- the shared fixture only carries the session
+  // token and user id, not the full response body a schema check needs --
+  // so it keeps its own live call. See e2e/auth.test.ts's
+  // budget-arithmetic comment for the full per-file accounting.
+  describe('Auth Endpoints (#379)', () => {
+    it('POST /auth/sign-in/anonymous response matches AuthTokenAndUserResult schema', async () => {
+      // Deliberately its own live call -- see this block's header comment.
+      const response = await authClient.post<unknown>('/sign-in/anonymous', {});
+
+      expect(response.status, 'expected the auth service to answer 200 -- see this block\'s header comment').toBe(
+        200
+      );
+      const result = validateAgainstSchema(response.body, 'AuthTokenAndUserResult', schemas);
+      expect(result.valid, `schema validation errors: ${JSON.stringify(result.errors)}`).toBe(true);
+    });
+
+    it('GET /auth/token response matches AuthTokenResponse schema', async () => {
+      const shared = getSharedAnonymousSession();
+      expect(shared, 'expected e2e/global-setup.ts to have minted a shared anonymous session').not.toBeNull();
+
+      const response = await authClient.get<unknown>('/token', {
+        headers: { Authorization: `Bearer ${shared!.sessionToken}` },
+      });
+
+      expect(response.status).toBe(200);
+      const result = validateAgainstSchema(response.body, 'AuthTokenResponse', schemas);
+      expect(result.valid, `schema validation errors: ${JSON.stringify(result.errors)}`).toBe(true);
+    });
+
+    it('POST /auth/wxyc/lookup-email response matches LookupEmailResponse schema', () => {
+      // Reads e2e/global-setup.ts's shared no-match probe rather than
+      // issuing its own /wxyc/lookup-email call -- the same underlying
+      // response (a synthetic, guaranteed-nonexistent identifier) serves
+      // both this schema check and e2e/auth.test.ts's behavioral
+      // no-match assertion.
+      const probe = getSharedLookupEmailNullProbe();
+      expect(probe, 'expected e2e/global-setup.ts to have run the shared lookup-email probe').not.toBeNull();
+      expect(probe!.status, 'expected the auth service to have answered 200 -- see this block\'s header comment').toBe(
+        200
+      );
+      const result = validateAgainstSchema(probe!.body, 'LookupEmailResponse', schemas);
+      expect(result.valid, `schema validation errors: ${JSON.stringify(result.errors)}`).toBe(true);
+    });
+
+    it('reaches the auth origin, not the backend origin', async () => {
+      // Issue #379 review finding #9's second half: the old version of this
+      // test asserted only `status >= 400` against a made-up path, which a
+      // client mis-pointed at the BACKEND origin would also satisfy (an
+      // unmatched Express route also 404s) -- so it could not actually tell
+      // "reaching the right origin" apart from "reaching the wrong one,"
+      // despite its name. GET /ok is better-auth's own built-in liveness
+      // route (dist/api/routes/ok.mjs, always registered, no auth) -- the
+      // backend origin has no such route at all, so a client mis-pointed at
+      // it would 404 here instead of matching the shape below. Costs no
+      // rate-limited request (/ok is not in apps/auth/app.ts's
+      // rateLimitedPaths).
+      const response = await authClient.get<{ ok?: boolean }>('/ok');
+      expect(response.status, 'GET /auth/ok should be 200 on the real auth origin').toBe(200);
+      expect(response.body?.ok).toBe(true);
+
+      // Belt-and-suspenders: a genuinely unknown path on the (now-confirmed)
+      // auth origin should still 4xx rather than fall through to something
+      // schema-shaped.
+      const notFound = await authClient.get('/definitely-not-a-real-auth-path');
+      expect(notFound.status).toBeGreaterThanOrEqual(400);
+    });
   });
 });

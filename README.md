@@ -624,7 +624,7 @@ This workflow assumes the following one-time setup is done in the wxyc-shared re
 2. **Staging URLs** as repo *variables* (not secrets — staging hostnames aren't sensitive): `BS_STAGING_BASE_URL`, `BS_STAGING_AUTH_URL`, `LML_STAGING_BASE_URL`.
 3. **Bypass tracker issue**: a pinned issue in this repo. Set `vars.GATE_BYPASS_ISSUE_NUMBER` to its number.
 4. **Staging API key**: `LML_API_KEY_STAGING` (added by phase 3).
-5. **E2E credentials**: already present (`E2E_TEST_DJ_EMAIL`, `E2E_TEST_DJ_PASSWORD`).
+5. **E2E credentials**: already present (`E2E_TEST_DJ_EMAIL`, `E2E_TEST_DJ_PASSWORD`). Issue #379 added `E2E_TEST_DJ_USERNAME` (the username half of the same staging DJ account) to gate the `POST /auth/sign-in/username` and `POST /auth/wxyc/lookup-email` resolution assertions — **not yet provisioned**. Until the staging account exists and this secret is set, those assertions self-skip (same pattern as the email/password ones without credentials); do not add a fail-loud `E2E_REQUIRE_CREDENTIALS`-style gate for it ahead of provisioning, or every gate run turns red on a missing env var.
 
 Once the dispatchers in BS (phase 4) and LML (phase 3) are live, the gate fires automatically.
 
