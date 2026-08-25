@@ -17,9 +17,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import {
   createE2EClient,
-  createE2EAuthHelper,
+  exchangeSessionForJwt,
+  getSharedDjSession,
   type E2EClient,
-  type E2EAuthHelper,
   waitForService,
   getE2EConfig,
 } from './setup.js';
@@ -27,7 +27,6 @@ import type { AlbumSearchResult, FormatEntry, GenreEntry } from '../src/dtos/ind
 
 describe('Catalog E2E', () => {
   let client: E2EClient;
-  let authHelper: E2EAuthHelper;
   const config = getE2EConfig();
 
   const hasCredentials = Boolean(config.testDjEmail && config.testDjPassword);
@@ -35,15 +34,19 @@ describe('Catalog E2E', () => {
   beforeAll(async () => {
     await waitForService(`${config.baseUrl}/healthcheck`);
     client = createE2EClient();
-    authHelper = createE2EAuthHelper();
 
-    // Authenticate if credentials are available
+    // Authenticate using the DJ session e2e/global-setup.ts already minted
+    // for this run, rather than signing in again -- issue #379 review
+    // fix-pass #2, finding #2. See e2e/auth.test.ts's budget-arithmetic
+    // comment for why sharing this across files is load-bearing.
     if (hasCredentials) {
-      await authHelper.authenticateClient(
-        client,
-        config.testDjEmail!,
-        config.testDjPassword!
-      );
+      const shared = getSharedDjSession();
+      if (shared) {
+        const exchanged = await exchangeSessionForJwt(shared.sessionToken, config.authUrl);
+        if (exchanged) {
+          client.setAuthToken(exchanged.token);
+        }
+      }
     }
   });
 

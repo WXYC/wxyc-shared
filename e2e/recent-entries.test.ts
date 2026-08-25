@@ -30,9 +30,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   createE2EClient,
-  createE2EAuthHelper,
+  exchangeSessionForJwt,
+  getSharedDjSession,
   type E2EClient,
-  type E2EAuthHelper,
   waitForService,
   getE2EConfig,
   pollUntil,
@@ -59,7 +59,6 @@ const uniqueSuffix = Date.now().toString(36);
 
 describe('Recent Entries E2E (Backend flowsheet source-of-truth)', () => {
   let client: E2EClient;
-  let authHelper: E2EAuthHelper;
   const config = getE2EConfig();
 
   const hasCredentials = Boolean(config.testDjEmail && config.testDjPassword);
@@ -68,18 +67,23 @@ describe('Recent Entries E2E (Backend flowsheet source-of-truth)', () => {
     await waitForService(`${config.baseUrl}/healthcheck`);
 
     client = createE2EClient();
-    authHelper = createE2EAuthHelper();
 
+    // Authenticate using the DJ session e2e/global-setup.ts already minted
+    // for this run, rather than signing in again -- issue #379 review
+    // fix-pass #2, finding #2. See e2e/auth.test.ts's budget-arithmetic
+    // comment for why sharing this across files is load-bearing.
     if (hasCredentials) {
-      const { payload } = await authHelper.authenticateClient(
-        client,
-        config.testDjEmail!,
-        config.testDjPassword!
-      );
+      const shared = getSharedDjSession();
+      if (shared) {
+        const exchanged = await exchangeSessionForJwt(shared.sessionToken, config.authUrl);
+        if (exchanged) {
+          client.setAuthToken(exchanged.token);
 
-      // Start or join a show so POST /flowsheet can add entries
-      const djId = payload.sub || payload.id;
-      await client.post('/flowsheet/join', { dj_id: djId });
+          // Start or join a show so POST /flowsheet can add entries
+          const djId = exchanged.payload.sub || exchanged.payload.id;
+          await client.post('/flowsheet/join', { dj_id: djId });
+        }
+      }
     }
   });
 
