@@ -96,6 +96,19 @@ describe("swift6.yaml typeMappings (#357)", () => {
   });
 
   it("does not remap date-time (Foundation.Date stays correct for true instants)", () => {
+    // The generator keys typeMappings on its OWN internal type names, and for
+    // instants that name is `DateTime` -- NOT the OpenAPI spelling `date-time`.
+    // Asserting only the `date-time` key is vacuous: the generator ignores that
+    // key entirely, so the assertion passes through the very regression it
+    // names. Measured, not reasoned: adding `DateTime: ProbeDateTime` to
+    // swift6.yaml and regenerating retypes 44 model files and takes the
+    // surviving `Date` property declarations from 67 to 0, while
+    // `typeMappings["date-time"]` stays undefined throughout.
+    //
+    // `DateTime` is therefore the load-bearing assertion. The `date-time` line
+    // stays as a cheap guard against someone adding the key under the
+    // plausible-but-inert spelling and believing they had changed something.
+    expect(config.typeMappings.DateTime).toBeUndefined();
     expect(config.typeMappings["date-time"]).toBeUndefined();
   });
 });
@@ -134,9 +147,17 @@ describe("postgenerate:swift destination is derived, not a hardcoded twin (#357)
     expect(destination).not.toContain("WXYCAPI");
   });
 
-  it("falls back to Classes/OpenAPIs/ when useSPMFileStructure is false", () => {
+  it("falls back to <projectName>/Classes/OpenAPIs/ when useSPMFileStructure is false", () => {
+    // Measured against the real generator, not inferred: running it with
+    // `useSPMFileStructure: false` emits `WXYCAPI/Classes/OpenAPIs/Models/...`,
+    // i.e. the projectName segment is present in BOTH layouts. An earlier
+    // version of this branch returned `generated/swift/Classes/OpenAPIs` and
+    // this test certified it -- so the one branch that exists purely to
+    // survive a silent flag flip was itself the silent desync, copying the
+    // support file outside the emitted package and producing exactly the
+    // "cannot find type 'CalendarDate' in scope" it was written to prevent.
     const destination = deriveModelsRoot({ projectName: "WXYCAPI", useSPMFileStructure: false });
-    expect(destination).toBe(join("generated", "swift", "Classes", "OpenAPIs"));
+    expect(destination).toBe(join("generated", "swift", "WXYCAPI", "Classes", "OpenAPIs"));
   });
 
   it("throws rather than silently emitting a bad path when projectName is missing", () => {

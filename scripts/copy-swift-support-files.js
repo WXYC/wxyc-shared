@@ -50,7 +50,7 @@ export function deriveModelsRoot(config) {
   }
   return config.useSPMFileStructure
     ? join('generated', 'swift', 'Sources', projectName)
-    : join('generated', 'swift', 'Classes', 'OpenAPIs');
+    : join('generated', 'swift', projectName, 'Classes', 'OpenAPIs');
 }
 
 function main() {

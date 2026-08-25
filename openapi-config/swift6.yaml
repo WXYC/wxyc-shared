@@ -1,7 +1,11 @@
 # OpenAPI Generator config for Swift (swift6 generator)
 # Models-only output written to generated/swift (gitignored, in-repo).
-# wxyc-ios-64 vendors this generated output directly (Shared/WXYCAPIModels/);
-# wxyc-dj-ios still hand-maintains its own DTOs, until its adoption PR lands.
+# BOTH Swift consumers vendor this generated output directly -- wxyc-ios-64
+# into Shared/WXYCAPIModels/, wxyc-dj-ios into Packages/WXYCAPIModels/ (~262
+# files, merged 2026-08-17). A flag change here reaches both, and they are not
+# symmetric: ios-64 rsyncs Infrastructure/ whole, dj-ios stages it through a
+# six-name INFRA_KEEP allow-list, so a NEW support file lands in ios-64 for
+# free and is silently dropped by dj-ios until that list is updated.
 # See the Code Generation section of CLAUDE.md.
 #
 # NOTE: generateApis: false does NOT suppress the APIs/ dir under the swift6

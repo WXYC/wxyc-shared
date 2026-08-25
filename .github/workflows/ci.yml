@@ -169,7 +169,18 @@ jobs:
             echo 'run=true' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only "$base" HEAD \
+          # Capture the diff into a variable and check ITS exit status before
+          # grepping, rather than piping straight into grep. The default shell
+          # here is `bash -e {0}` -- no `pipefail` -- so in a pipeline a failing
+          # `git diff` is masked by grep's exit status; grep would see empty
+          # input, match nothing, and set run=false. That is fail-CLOSED, in a
+          # step whose whole documented posture is fail-open.
+          if ! changed=$(git diff --name-only "$base" HEAD); then
+            echo 'git diff failed -- running the typecheck rather than skipping it'
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if printf '%s\n' "$changed" \
                | grep -qE '^(openapi-config/|scripts/copy-swift-support-files\.js$|\.github/workflows/ci\.yml$)'; then
             echo 'Swift support files touched -- running the typecheck'
             echo 'run=true' >> "$GITHUB_OUTPUT"
@@ -181,10 +192,18 @@ jobs:
       - name: Typecheck CalendarDate.swift (Swift 6, strict concurrency)
         if: steps.swift-support.outputs.run == 'true'
         run: |
+          # Globs the directory rather than naming CalendarDate.swift, because
+          # the copy script it guards (scripts/copy-swift-support-files.js)
+          # is directory-scoped too -- it vendors every *.swift in
+          # openapi-config/swift-support. Naming one file would let a second
+          # support file be vendored into both consumer repos having never
+          # compiled anywhere, which is the exact outcome this step exists to
+          # prevent. Compiling them in one invocation also matches how they
+          # actually build, so a cross-file reference resolves here.
           docker run --rm \
             -v "$PWD/openapi-config/swift-support:/support:ro" \
             swift:6.2.4-noble \
-            swiftc -typecheck -swift-version 6 -strict-concurrency=complete /support/CalendarDate.swift
+            sh -c 'swiftc -typecheck -swift-version 6 -strict-concurrency=complete /support/*.swift'
 
       - name: Build
         run: npm run build
