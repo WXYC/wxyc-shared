@@ -143,7 +143,10 @@ export const CONTRACTS = {
    *           (`dist/plugins/bearer/index.mjs`).
    * Consumer: wxyc-ios-64 / WXYC-Android's `AuthNetworkClient.signInAnonymously`
    *           (the only credential-free auth mechanism those apps have);
-   *           `e2e/setup.ts:getAnonymousToken`.
+   *           `e2e/global-setup.ts` (mints the shared anonymous session
+   *           this contract's assertions in `tests/e2e-contracts.test.ts`
+   *           and every other e2e file read via `getSharedAnonymousSession`
+   *           in `e2e/setup.ts`).
    *
    * Status: ENFORCED. Verified 2026-08-24 against a live POST to
    * api.wxyc.org: the header and body values authenticate interchangeably

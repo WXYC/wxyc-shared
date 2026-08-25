@@ -4005,12 +4005,25 @@ components:
         429-declaring operations in this section — every one except
         POST /auth/wxyc/lookup-email, a plain Express handler that never
         reaches better-auth's request pipeline at all (see that
-        operation's own 429 description): 3 requests / 10 seconds on any
-        `/sign-in*` path (getDefaultSpecialRules), 3 requests / 60 seconds
-        on `/email-otp/send-verification-otp` specifically. Keyed per
-        exact path per IP (createRateLimitKey(ip, path)) — NOT shared
-        across the paths in this section, unlike the express-layer limiter
-        below. Two things a naive client gets wrong: the body has no
+        operation's own 429 description). The window is NOT uniform across
+        those five: `resolveRateLimitConfig` (dist/api/rate-limiter/index.mjs)
+        applies `getDefaultSpecialRules()`'s generic `/sign-in*` rule (3
+        requests / 10 seconds) first, then walks each installed plugin's
+        OWN `rateLimit` array and OVERWRITES the window/max on an exact
+        `pathMatcher` match. The emailOTP plugin
+        (dist/plugins/email-otp/index.mjs) declares exactly such an
+        override for `path === "/sign-in/email-otp"` — 3 requests / 60
+        seconds, the plugin's own default (Backend-Service passes no
+        `rateLimit` override in its `emailOTP(...)` config) — so
+        POST /auth/sign-in/email-otp shares its window with
+        POST /auth/email-otp/send-verification-otp, NOT with the other two
+        `/sign-in*` paths in this section. Only `/sign-in/email`,
+        `/sign-in/username`, and `/sign-in/anonymous` actually get the
+        generic 3-per-10s rule; neither the username plugin nor the
+        anonymous plugin declares a `rateLimit` array of its own to
+        override it. Keyed per exact path per IP (createRateLimitKey(ip,
+        path)) — NOT shared across the paths in this section, unlike the
+        express-layer limiter below. Two things a naive client gets wrong: the body has no
         `code` field (just `message`) and is NOT reliably
         `Content-Type: application/json` — it's built via
         `new Response(JSON.stringify(...), {status: 429, ...})` with no
@@ -11132,8 +11145,8 @@ paths:
             global originCheckMiddleware refuses a cookie-bearing request
             with no Origin header before any credential check. Reachable
             when a stale better-auth session cookie survives on the client
-            from a prior sign-in (native clients suppress cookies to avoid
-            this — see wxyc-dj-ios CLAUDE.md's CookielessSession).
+            from a prior sign-in — native clients suppress cookies
+            entirely to avoid this (see wxyc-dj-ios's `CookielessSession`).
           content:
             application/json:
               schema:
@@ -11494,12 +11507,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthErrorResponse'
         '429':
-          description: 'Rate limited — see POST /auth/sign-in/email (same two-layer shape and header pair; this path shares the /auth/sign-in* prefix rule).'
+          description: >
+            Rate limited — same two-layer shape and header pair as
+            POST /auth/sign-in/email, but NOT the same internal-layer
+            window: despite matching the `/sign-in*` prefix, this exact
+            path is overridden by the emailOTP plugin's own `rateLimit`
+            array (dist/plugins/email-otp/index.mjs) to 3 requests / 60
+            seconds — the SAME window as POST /auth/email-otp/send-
+            verification-otp, not the 10-second window
+            /sign-in/email, /sign-in/username, and /sign-in/anonymous get.
+            See AuthRateLimitedResponse's description for the full
+            override mechanism.
           headers:
             X-Retry-After:
               schema:
                 type: string
-              description: Same contract as POST /auth/sign-in/email.
+              description: Same contract as POST /auth/sign-in/email, but see this response's description for the different (60s) window.
             Retry-After:
               schema:
                 type: string
@@ -11595,7 +11618,16 @@ paths:
       description: >
         `Authorization: Bearer <session token>` in, a signed JWT out —
         verifiable by Backend-Service's regular routes against the JWKS at
-        GET /auth/jwks without a database round-trip. Only GET is
+        GET /auth/jwks without a database round-trip. The JWT's TTL is 15
+        minutes (better-auth's jwt plugin default, `dist/plugins/jwt/sign.mjs`:
+        `options?.jwt?.expirationTime ?? "15m"` — Backend-Service's `jwt()`
+        config only sets `jwt.definePayload`, never `expirationTime`, so the
+        default stands). This is the number a client sizes its refresh
+        leeway against, and the reason a per-consumer JWT mint (rather than
+        sharing one JWT across processes) is the cheap, correct default —
+        see `e2e/setup.ts`'s `exchangeSessionForJwt`, which every e2e file
+        in this repo calls independently off a shared SESSION token rather
+        than sharing one short-lived JWT. Only GET is
         registered for this path: any other method 404s (better-call has no
         route to match, not a 405 — verified against production). A missing,
         malformed, or expired/revoked session bearer 401s (UNAUTHORIZED);

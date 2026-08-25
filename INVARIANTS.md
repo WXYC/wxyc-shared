@@ -29,7 +29,7 @@ If an entry here is wrong, two things break: someone wastes a half-day diagnosin
 > Backend routes accept a JWT bearer token (verified via JWKS), not a better-auth session token.
 
 - **Provider:** `Backend-Service/apps/backend/middleware/requirePermissions` -- verifies via JWKS endpoint exposed by the auth service.
-- **Consumer:** any HTTP client. The two-step exchange is: better-auth `/auth/sign-in/email` to get session cookies, then `/auth/token` with those cookies to mint a short-lived JWT, then `Authorization: Bearer <jwt>` against backend routes. See `wxyc-canary/signInDj` and `e2e/setup.ts:E2EAuthHelper` for reference implementations.
+- **Consumer:** any HTTP client. The two-step exchange is: better-auth `/auth/sign-in/email` to get a session token, then `/auth/token` with that token to mint a short-lived JWT, then `Authorization: Bearer <jwt>` against backend routes. See `wxyc-canary/signInDj` and `e2e/setup.ts:exchangeSessionForJwt` (used from the shared session `e2e/global-setup.ts` mints) for reference implementations.
 - **What breaks if violated:** every authenticated backend request 401s. The canary deploy on 2026-04-30 ate hours because clients were sending the session token directly and the symptom was a generic 401.
 - **Status:** **ENFORCED.** Asserting it nails the contract so a regression in either direction (backend stops accepting JWT, or starts accepting session tokens) gets caught.
 
@@ -74,7 +74,7 @@ If an entry here is wrong, two things break: someone wastes a half-day diagnosin
 > `POST /auth/sign-in/anonymous` returns `{token, user}`, where `user.id` is the newly-created anonymous user's id and a session token arrives on either the `set-auth-token` response header or the body's `token` field.
 
 - **Provider:** better-auth's anonymous plugin (`dist/plugins/anonymous/index.mjs` `signInAnonymous`) plus the bearer plugin's response-header mirror (`dist/plugins/bearer/index.mjs`).
-- **Consumer:** wxyc-ios-64 / WXYC-Android's `AuthNetworkClient.signInAnonymously` — the only credential-free auth mechanism those apps have; `e2e/setup.ts:getAnonymousToken`.
+- **Consumer:** wxyc-ios-64 / WXYC-Android's `AuthNetworkClient.signInAnonymously` — the only credential-free auth mechanism those apps have; `e2e/global-setup.ts` (mints the shared anonymous session this contract's assertions in `tests/e2e-contracts.test.ts`, and every other e2e file, read via `getSharedAnonymousSession` in `e2e/setup.ts`).
 - **What breaks if violated:** a client reading only the header (or only the body) stops obtaining a session token, and every anonymous-gated route (`/proxy/*`, `/concerts` after a `/auth/token` exchange) 401s from launch.
 - **Status (2026-08-24):** **ENFORCED.** Verified directly against a live `POST` to `api.wxyc.org`: the header and body token values authenticate interchangeably as a bearer on `GET /auth/token` — the bearer plugin re-signs a bare (unsigned) token using the server secret when it arrives with no signature segment, so a client reading either succeeds. The response body also carries the `admin()` plugin's `role`/`banned`/`banReason`/`banExpires` fields and WXYC's `user.additionalFields`; see `AuthUser` in `api.yaml` for the complete, verified shape (issue #379).
 

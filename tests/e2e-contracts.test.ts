@@ -528,7 +528,7 @@ describe('Cross-service contracts (E2E)', () => {
   // `e2e/global-setup.ts`'s shared anonymous session rather than signing
   // in again.
 
-  it('omits set-auth-token on the first GET /auth/token after anonymous sign-in', async () => {
+  it('omits set-auth-token on GET /auth/token while the session is nowhere near session.updateAge', async () => {
     const shared = getSharedAnonymousSession();
     expect(shared, 'expected e2e/global-setup.ts to have minted a shared anonymous session').not.toBeNull();
     const authClient = createE2EAuthClient();

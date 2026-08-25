@@ -40,9 +40,26 @@ Before this existed, seven files independently signed in a combined 15
 times against that one 10-request bucket in a single `npm run test:e2e`
 run. See `e2e/auth.test.ts`'s budget-arithmetic comment (in its
 `better-auth core surface (issue #379)` describe block) for the full,
-current per-file accounting — the whole run now costs 6 covered requests
-(4 without a configured DJ account), leaving headroom under the ceiling
-even after the downstream `wxyc-canary` smoke step's own sign-in.
+current per-file accounting, parameterized on which credentials are
+configured — 4 covered requests with none, 6 with `E2E_TEST_DJ_EMAIL` /
+`_PASSWORD` (today's actual state), 7 once `E2E_TEST_DJ_USERNAME` is also
+provisioned. `bs-lml-gate.yml` already wires that third secret through, so
+the run activates two more assertions (and reroutes the shared
+credentialed mint from `/sign-in/email` to `/sign-in/username`) the moment
+it's set, with no code change required — the downstream `wxyc-canary`
+smoke step's own sign-in adds one more on top, for a worst-case 8 of 10
+requests against the ceiling (2 requests of headroom) once all three
+secrets exist.
+
+`e2e/global-setup.ts` polls BOTH origins before minting anything (the
+backend's `/healthcheck` and the auth service's own built-in `GET /ok` —
+an earlier version only polled the backend, so a slow-starting auth
+service could make the very first mint fail before anything had a chance
+to come up), and every one of its live fetches carries an explicit
+timeout. Set `E2E_SKIP_SHARED_AUTH_MINTS=true` to skip every mint
+entirely for a targeted single-file run of a file that needs no auth at
+all (e.g. `flowsheet.test.ts`), so that run doesn't spend covered
+requests against the shared budget for fixtures nothing in it reads.
 
 ## Test Categories
 
@@ -146,9 +163,12 @@ even after the downstream `wxyc-canary` smoke step's own sign-in.
 `createE2EClient` binds `config.baseUrl` (the backend API origin, default
 port 8080) — that's what every suite above except auth uses. The `/auth/*`
 paths live on the separate auth origin (`config.authUrl`, default port
-8081), so anything talking to them directly (not through `E2EAuthHelper`,
-which already targets `authUrl` internally) needs `createE2EAuthClient()`
-instead. Both factories accept the same `Partial<E2EConfig>` override.
+8081), so anything talking to them directly needs `createE2EAuthClient()`
+instead (both factories accept the same `Partial<E2EConfig>` override).
+`e2e/global-setup.ts` and every test file's own `authClient` use this
+factory; there is no separate auth-helper class anymore (a `E2EAuthHelper`
+that predated the shared-session design was retired once it had zero
+remaining callers — see "Shared session fixtures" above).
 
 ## Configuration
 
@@ -161,6 +181,7 @@ E2E_TEST_DJ_EMAIL=test@wxyc.org          # Test DJ account email
 E2E_TEST_DJ_PASSWORD=testpassword        # Test DJ account password
 E2E_TEST_DJ_USERNAME=testdj              # Username half of the same account — optional, see below
 E2E_REQUIRE_CREDENTIALS=true             # Fail loud (not skip) if the DJ email/password are unset — see below
+E2E_SKIP_SHARED_AUTH_MINTS=true          # Skip every e2e/global-setup.ts mint — see "Shared session fixtures" above
 E2E_DB_URL=postgres://user:pw@host:5432/db  # Stack DB, for suites that seed rows (concerts)
 E2E_SCHEMA_NAME=wxyc_schema              # Postgres schema the backend reads (default wxyc_schema)
 ```

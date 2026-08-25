@@ -27,22 +27,84 @@
  * spawning any worker process, so the values are guaranteed present (or
  * absent, on failure -- see each getter's own doc comment in `./setup.ts`)
  * by the time a test file's own `beforeAll` runs.
+ *
+ * Issue #379 review fix-pass #3 additions:
+ *   - finding #2: once `E2E_TEST_DJ_USERNAME` is provisioned, the
+ *     credentialed mint below switches from `/sign-in/email` to
+ *     `/sign-in/username` -- see that section's own comment for why.
+ *   - finding #7a: every live fetch below carries an explicit
+ *     `AbortSignal.timeout`, and this file now also polls the AUTH
+ *     origin's own readiness (better-auth's built-in `GET /ok`) before
+ *     minting anything -- the pre-existing backend `/healthcheck` poll
+ *     only ever covered the BACKEND origin, and no bs-lml-gate.yml step
+ *     polls `BS_STAGING_AUTH_URL` before the E2E step runs.
+ *   - finding #7b: `E2E_SKIP_SHARED_AUTH_MINTS=true` skips every mint
+ *     below entirely -- set it for a targeted single-file run of a file
+ *     that needs no auth at all (e.g. `flowsheet.test.ts`), so that run
+ *     doesn't spend covered requests against the shared budget for
+ *     fixtures nothing in it will read. Vitest's `globalSetup` API gives
+ *     this module no reliable, stable way to introspect which test files
+ *     were actually selected for the run, so an explicit opt-out is the
+ *     documented mechanism rather than fragile file-list heuristics.
  */
 import { createE2EAuthClient, extractSetCookieHeaders, getE2EConfig, waitForService } from './setup.js';
 
+/** Default timeout for each individual live request this file makes. */
+const FETCH_TIMEOUT_MS = 10_000;
+
+/**
+ * Poll better-auth's own built-in `GET /ok` liveness route (verified in
+ * `e2e/contract/openapi-compliance.test.ts`'s origin-verification test --
+ * `dist/api/routes/ok.mjs`, always registered, no auth) until it answers
+ * `{ok: true}`. `waitForService` (this module's sibling helper) can't be
+ * reused here: it probes with `HEAD`, and better-auth only registers `GET`
+ * for this path -- a wrong-method request 404s (the same 401-vs-404 split
+ * `GET /auth/token`'s api.yaml description documents), which would read as
+ * permanently unhealthy even once the service is actually up.
+ */
+async function waitForAuthService(authUrl: string, timeoutMs = 15000, intervalMs = 1000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const response = await fetch(`${authUrl}/ok`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { ok?: boolean };
+        if (body.ok) return;
+      }
+    } catch {
+      // Not ready yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Auth service at ${authUrl}/ok did not become ready within ${timeoutMs}ms`);
+}
+
 export default async function setup(): Promise<void> {
+  if (process.env.E2E_SKIP_SHARED_AUTH_MINTS === 'true') {
+    console.log('[global-setup] E2E_SKIP_SHARED_AUTH_MINTS=true -- skipping every shared mint.');
+    return;
+  }
+
   const config = getE2EConfig();
 
-  // Best-effort: if the auth service isn't up yet (a fresh local stack;
-  // staging is already health-polled by earlier bs-lml-gate.yml steps
-  // before this ever runs), don't hang the whole run waiting on it here --
-  // each consumer's own `getShared*` getters return `null` on a missing
-  // fixture, and every consumer already has its own `hasCredentials`-style
-  // self-skip or explicit non-null assertion for that case.
+  // Best-effort: if a service isn't up yet (a fresh local stack; staging is
+  // already health-polled by earlier bs-lml-gate.yml steps before this ever
+  // runs), don't hang the whole run waiting on it here -- each consumer's
+  // own `getShared*` getters return `null` on a missing fixture, and every
+  // consumer already has its own `hasCredentials`-style self-skip or
+  // explicit non-null assertion for that case.
   try {
     await waitForService(`${config.baseUrl}/healthcheck`, 15000, 1000);
   } catch (error) {
     console.error('[global-setup] backend healthcheck did not become ready in time:', error);
+  }
+  try {
+    await waitForAuthService(config.authUrl, 15000, 1000);
+  } catch (error) {
+    console.error('[global-setup] auth service (GET /ok) did not become ready in time:', error);
   }
 
   const authClient = createE2EAuthClient();
@@ -54,7 +116,8 @@ export default async function setup(): Promise<void> {
   try {
     const anonResp = await authClient.post<{ token?: string; user?: { id?: string } }>(
       '/sign-in/anonymous',
-      {}
+      {},
+      { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
     );
     if (anonResp.status === 200) {
       const headerToken = anonResp.headers.get('set-auth-token');
@@ -90,13 +153,35 @@ export default async function setup(): Promise<void> {
   // Skipped entirely when no DJ account is configured -- every consumer
   // already self-skips its own credentialed assertions via hasCredentials
   // in that case, so there is nothing to share.
+  //
+  // Issue #379 review fix-pass #3, finding #2: once E2E_TEST_DJ_USERNAME is
+  // provisioned (bs-lml-gate.yml already wires the secret through), mint
+  // via /sign-in/username INSTEAD of /sign-in/email. This is what lets
+  // e2e/auth.test.ts's "POST /auth/sign-in/username returns set-auth-token
+  // header" assertion become free (reading this shared fixture) rather
+  // than a second live sign-in -- the email route's equivalent assertion
+  // moves to piggyback on that file's POST /auth/sign-out test, which
+  // already makes its own dedicated /sign-in/email call to get a session
+  // to invalidate. See e2e/auth.test.ts's budget-arithmetic comment for
+  // the full trade this makes; a session token authenticates identically
+  // as a bearer regardless of which route minted it, so every OTHER
+  // consumer of this fixture (catalog, recent-entries, e2e-contracts) is
+  // unaffected by which route was used.
   const hasCredentials = Boolean(config.testDjEmail && config.testDjPassword);
+  const hasUsernameCredentials = Boolean(config.testDjUsername && config.testDjPassword);
   if (hasCredentials) {
     try {
-      const signInResp = await authClient.post<{ token?: string }>('/sign-in/email', {
-        email: config.testDjEmail,
-        password: config.testDjPassword,
-      });
+      const signInResp = hasUsernameCredentials
+        ? await authClient.post<{ token?: string }>(
+            '/sign-in/username',
+            { username: config.testDjUsername, password: config.testDjPassword },
+            { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
+          )
+        : await authClient.post<{ token?: string }>(
+            '/sign-in/email',
+            { email: config.testDjEmail, password: config.testDjPassword },
+            { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
+          );
       if (signInResp.status === 200) {
         const setAuthTokenHeader = signInResp.headers.get('set-auth-token');
         const sessionToken = setAuthTokenHeader || signInResp.body?.token;
@@ -126,9 +211,11 @@ export default async function setup(): Promise<void> {
   // no-match assertion and openapi-compliance.test.ts's schema-compliance
   // assertion for the same response.
   try {
-    const lookupResp = await authClient.post<{ email?: string | null }>('/wxyc/lookup-email', {
-      identifier: `e2e-global-nonexistent-${Date.now()}`,
-    });
+    const lookupResp = await authClient.post<{ email?: string | null }>(
+      '/wxyc/lookup-email',
+      { identifier: `e2e-global-nonexistent-${Date.now()}` },
+      { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
+    );
     if (lookupResp.status === 200) {
       process.env.E2E_GLOBAL_LOOKUP_EMAIL_NULL_STATUS = String(lookupResp.status);
       process.env.E2E_GLOBAL_LOOKUP_EMAIL_NULL_BODY = JSON.stringify(lookupResp.body ?? {});
