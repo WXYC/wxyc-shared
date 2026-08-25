@@ -198,21 +198,16 @@ export const CONTRACTS = {
    *
    *           The surviving rationale for keeping that capture surface at
    *           all is wire-compatibility with a future encoding change —
-   *           NOT "the token actually rotates." The wxyc-swift-auth plan
-   *           was amended to say so in WXYC/wiki#121, and wxyc-ios-64#970
-   *           closed as completed once its D1 landed as a no-op-with-test
-   *           (wxyc-ios-64#995): ios-64 pins that a set-auth-token header
-   *           on the JWT exchange leaves the stored token untouched, and
-   *           deliberately does not persist the value.
-   *
-   *           Still open, each against comments that describe rotation as
-   *           real: wxyc-dj-ios#112 (the captureRotatedSessionToken name
-   *           and its issue-#66 doc comments) and Backend-Service#2260
-   *           (auth.definition.ts, inherited from the f23a45c8/BS#966
-   *           commit comment). Separately, wxyc-ios-64#997 carries the
-   *           orphaned-anonymous-user mitigation that #970 originally set
-   *           out to deliver — its real shape is a client-side keep-alive
-   *           for sessions idle past expiresAt, not a capture.
+   *           NOT "the token actually rotates." wxyc-ios-64 already
+   *           implements it that way: it pins that a `set-auth-token`
+   *           header on the JWT exchange leaves the stored token
+   *           untouched, and deliberately does not persist the value.
+   *           Comments in several client repos still describe rotation as
+   *           real; where they disagree with this contract, this contract
+   *           is right. INVARIANTS.md tracks which of those corrections
+   *           are still outstanding — deliberately there and not here,
+   *           since this file ships on a version tag and a "still open"
+   *           list in it goes stale the moment one of them closes.
    *
    * Status: ENFORCED. Both assertable halves hold unconditionally against
    * a live stack: (1) a brand-new session's first GET /auth/token omits
