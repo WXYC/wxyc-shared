@@ -91,8 +91,10 @@ describe("CLAUDE.md's codegen consumer table (#302)", () => {
 // generated Swift output directly (WXYC/wxyc-ios-64#598) rather than
 // hand-authoring it — and WXYC/wxyc-shared#357 (CalendarDate) made the gap
 // concrete by giving that vendored output a real behavioral consumer.
-// wxyc-dj-ios still hand-authors its Swift DTOs until its own adoption PR
-// (WXYC/wxyc-dj-ios#79) lands, so the row must keep that half accurate too.
+// wxyc-dj-ios vendors it too (WXYC/wxyc-dj-ios#75, PR #78 merged 2026-08-17),
+// keeping a documented handful of DTOs hand-authored *beside* the vendored
+// tree rather than instead of it — so the row must not describe either
+// consumer as hand-authoring in place of vendoring.
 describe("CLAUDE.md's codegen consumer table names the Swift consumer correctly (#357)", () => {
   const claudeMd = readFileSync(join(__dirname, "..", "CLAUDE.md"), "utf-8");
 
@@ -110,18 +112,33 @@ describe("CLAUDE.md's codegen consumer table names the Swift consumer correctly 
     expect(swiftRow()).not.toMatch(/\|\s*Nobody\s*\|/);
   });
 
-  it("does not claim wxyc-ios-64 hand-authors its Swift DTOs", () => {
-    // wxyc-ios-64 vendors generated output into Shared/WXYCAPIModels/; only
-    // wxyc-dj-ios still hand-authors, and only until its adoption PR lands.
-    // Isolate the wxyc-ios-64 clause (up to the `;`) in the "Where those
-    // types actually come from" cell, so a hand-author mention of the
-    // *other* consumer (wxyc-dj-ios) later in the same cell can't produce a
-    // false negative for this assertion.
+  it("names wxyc-dj-ios as a consumer too, not just wxyc-ios-64", () => {
+    // Both Swift consumers vendor this output. An earlier version of this row
+    // named only ios-64 and cast dj-ios as still-hand-authoring-until-#79,
+    // which was already false when written: dj-ios's own vendored tree
+    // (Packages/WXYCAPIModels/, ~262 files) merged 2026-08-17.
+    expect(swiftRow()).toMatch(/wxyc-dj-ios/);
+  });
+
+  it("attributes hand-authoring to dj-ios only, never to wxyc-ios-64", () => {
+    // The invariant is about ATTRIBUTION, not sentence order, so assert it
+    // per sentence rather than by slicing the cell at a `;`. That earlier
+    // heuristic (`whereFrom.split(";")[0]`) encoded one particular phrasing:
+    // rewriting the cell without a semicolon silently widened the slice to
+    // the whole cell and failed on dj-ios's own — correct — hand-author
+    // mention. A guard that breaks when the prose it guards is improved is
+    // measuring the prose, not the claim.
     const cells = swiftRow().split("|").map((c) => c.trim());
     const whereFrom = cells[4];
     expect(whereFrom, "unexpected table cell layout").toMatch(/wxyc-ios-64/);
-    const ios64Clause = whereFrom.split(";")[0];
-    expect(ios64Clause).not.toMatch(/hand-author/);
+    const handAuthorSentences = whereFrom
+      .split(/(?<=\.)\s+/)
+      .filter((sentence) => /hand-author/.test(sentence));
+    for (const sentence of handAuthorSentences) {
+      expect(sentence, "hand-authoring must not be attributed to wxyc-ios-64").not.toMatch(
+        /wxyc-ios-64/,
+      );
+    }
   });
 });
 
