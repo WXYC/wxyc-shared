@@ -4541,19 +4541,44 @@ describe('OpenAPI Specification', () => {
       // CI can see. Treat a failure as "go re-read routes.mjs", never as
       // "the mirror has been re-verified".
       //
-      // Re-verified 2026-07-31 for the 1.6.20→1.6.25 bump: no device-auth wire
-      // changes across 1.6.21–1.6.25 (only a 1.6.21 Zod-v4 compat fix), so the
-      // field/enum/security snapshots above still hold. (1.6.24 also regressed
-      // jwtClient()'s CLIENT type — better-auth#10515 — which is suppressed in
-      // src/auth-client/index.ts and unrelated to the wire contract here.)
+      // Bumping this string is a three-part job, and doing only the third part
+      // defeats the whole mechanism: re-diff routes.mjs against the new
+      // version, update the enums/fields above to match, THEN bump.
       //
-      // Bumping this string is therefore a three-part job, and doing only the
-      // third part defeats the whole mechanism: re-diff routes.mjs against the
-      // new version, update the enums/fields above to match, THEN bump.
+      // Re-verified 2026-08-25 for the 1.6.25→1.7.1 bump. `routes.mjs` diffs by
+      // ~670 lines, but every wire-relevant line moves as a reformat, not a
+      // change — checked by property rather than by reading the diff:
+      //   - error-codes.mjs: all 13 codes identical, none added or removed.
+      //   - schema.mjs: the nine deviceCode fields are identical in name, type,
+      //     and required flag. The ONLY delta is an added `indexes: [...]`
+      //     declaring UNIQUE on deviceCode and userCode — a storage concern,
+      //     not a wire one. It is a migration concern for whoever runs
+      //     better-auth (Backend-Service), not for this mirror.
+      //   - The mixed-casing contract holds: camelCase `userCode` in the
+      //     plugin's own model and in approve/deny bodies, snake_case
+      //     `user_code` on the RFC 8628 wire (8 occurrences, unchanged).
+      //   - status literals still exactly "pending" | "approved" | "denied".
+      //   - `getSessionFromCtx` still resolves approve/deny (4 call sites,
+      //     unchanged), so #399's SessionBearerAuth-not-BearerAuth decision
+      //     stands.
+      //
+      // Two surfaces outside device-auth that this repo now also mirrors were
+      // checked, since #399 widened the spec past the QR flow:
+      //   - Rate limiting: api/rate-limiter/index.mjs is a large internal
+      //     refactor (multi-window TTL handling), but getDefaultSpecialRules()
+      //     returns identical VALUES — 3/10s on /sign-in*, /sign-up*,
+      //     /change-password*, /change-email*, and 3/60s on the
+      //     password-reset/OTP-send family. That is what AuthRateLimitedResponse
+      //     and the device-429 layering argument rest on.
+      //   - CONTRACTS.SET_AUTH_TOKEN_NEVER_ROTATES: the /auth/token roll-forward
+      //     is byte-identical — `updateSession(session.session.token, {expiresAt,
+      //     updatedAt})`, keyed on the token, writing only the two timestamps,
+      //     with no `token: generateId` anywhere in session.mjs. plugins/bearer
+      //     is identical outright. The contract survives the bump.
       const ba = JSON.parse(
         readFileSync(join(__dirname, '..', 'node_modules', 'better-auth', 'package.json'), 'utf-8')
       ) as { version: string };
-      expect(ba.version).toBe('1.6.25');
+      expect(ba.version).toBe('1.7.1');
     });
   });
   describe('Song like tallies (POST /likes/tally)', () => {
