@@ -61,13 +61,6 @@ export function createWXYCAuthClient(baseURL: string) {
     plugins: [
       adminClient(),
       usernameClient(),
-      // better-auth 1.6.24–1.6.25 regressed jwtClient()'s return type so it no longer
-      // satisfies BetterAuthClientPlugin (upstream better-auth#10515; fixed by #10513,
-      // shipping in 1.6.26). We use the JWT plugin only for its /token endpoint, which
-      // getJWTToken() below reaches via raw fetch — the collapsed action inference is
-      // unused here. This directive self-removes: once on >=1.6.26 the error is gone and
-      // tsc flags the unused @ts-expect-error, forcing us to delete it (and drop the shim).
-      // @ts-expect-error better-auth#10515 — remove when on >=1.6.26.
       jwtClient(),
     ],
   });
