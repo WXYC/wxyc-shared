@@ -196,20 +196,23 @@ export const CONTRACTS = {
    *           is a no-op today wherever the guard already compares
    *           decoded-token equality.
    *
-   *           The wxyc-swift-auth plan has NOT yet been corrected. Its
-   *           Phase B/D1 text still describes rotation as real ("D1 —
-   *           rotation capture", `rotatedSessionToken // set-auth-token
-   *           when the server rotated"), and wxyc-ios-64#970 is still open
-   *           under the title "capture set-auth-token rotation in
-   *           mintJWT". WXYC/wiki#121 is the open PR that rewrites that
-   *           rationale to the surviving one — wire-compatibility with a
-   *           future encoding change, not "the token actually rotates."
-   *           Stated in the future tense deliberately: this file ships in
-   *           the published @wxyc/shared package, so a past-tense claim
-   *           here would assert to every consumer that a correction had
-   *           landed upstream while the plan they'd go read still said the
-   *           opposite. When wiki#121 merges, replace this paragraph with
-   *           the plain statement of the amended rationale.
+   *           The surviving rationale for keeping that capture surface at
+   *           all is wire-compatibility with a future encoding change —
+   *           NOT "the token actually rotates." The wxyc-swift-auth plan
+   *           was amended to say so in WXYC/wiki#121, and wxyc-ios-64#970
+   *           closed as completed once its D1 landed as a no-op-with-test
+   *           (wxyc-ios-64#995): ios-64 pins that a set-auth-token header
+   *           on the JWT exchange leaves the stored token untouched, and
+   *           deliberately does not persist the value.
+   *
+   *           Still open, each against comments that describe rotation as
+   *           real: wxyc-dj-ios#112 (the captureRotatedSessionToken name
+   *           and its issue-#66 doc comments) and Backend-Service#2260
+   *           (auth.definition.ts, inherited from the f23a45c8/BS#966
+   *           commit comment). Separately, wxyc-ios-64#997 carries the
+   *           orphaned-anonymous-user mitigation that #970 originally set
+   *           out to deliver — its real shape is a client-side keep-alive
+   *           for sessions idle past expiresAt, not a capture.
    *
    * Status: ENFORCED. Both assertable halves hold unconditionally against
    * a live stack: (1) a brand-new session's first GET /auth/token omits
