@@ -192,9 +192,12 @@ export const CONTRACTS = {
    *           appears (`dist/plugins/bearer/index.mjs`).
    * Consumer: wxyc-dj-ios `AuthService.captureRotatedSessionToken` — its
    *           name predates this correction; the value it captures is a
-   *           same-token re-encoding, not a new token, and persisting it
-   *           is a no-op today wherever the guard already compares
-   *           decoded-token equality.
+   *           same-token re-encoding, not a new token. Its guard is a raw
+   *           string compare, so the first renewal does overwrite the
+   *           stored bare `<token>` with the signed `<token>.<HMAC>`
+   *           form — a real write, not a no-op, but a harmless one:
+   *           ANONYMOUS_SIGN_IN_SHAPE records that the two
+   *           forms authenticate interchangeably as a bearer.
    *
    *           The surviving rationale for keeping that capture surface at
    *           all is wire-compatibility with a future encoding change —
@@ -204,10 +207,11 @@ export const CONTRACTS = {
    *           untouched, and deliberately does not persist the value.
    *           Comments in several client repos still describe rotation as
    *           real; where they disagree with this contract, this contract
-   *           is right. INVARIANTS.md tracks which of those corrections
-   *           are still outstanding — deliberately there and not here,
-   *           since this file ships on a version tag and a "still open"
-   *           list in it goes stale the moment one of them closes.
+   *           is right. `INVARIANTS.md` in the wxyc-shared repo (not
+   *           shipped in this package — see it on GitHub) tracks which of
+   *           those corrections are still outstanding. Deliberately there
+   *           and not here: this file ships on a version tag, so a "still
+   *           open" list in it goes stale the moment one of them closes.
    *
    * Status: ENFORCED. Both assertable halves hold unconditionally against
    * a live stack: (1) a brand-new session's first GET /auth/token omits
