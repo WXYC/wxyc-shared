@@ -13,8 +13,45 @@ on:
     branches: [main]
     paths-ignore:
       - 'LICENSE'
+  # No `branches:` filter here, unlike `push:` above. `pull_request.branches`
+  # filters on the BASE branch, so `[main]` skipped this entire workflow for
+  # any PR based on another PR's branch -- i.e. every stacked PR, which is the
+  # shape CLAUDE.md asks for when a change is too large to review in one unit
+  # ("Chain PRs in a logical order when needed"). Those PRs reported zero
+  # checks and merged unverified; the first CI run against their content
+  # happened on `push: main`, after the fact.
+  #
+  # check-version-bump.yml and breaking-changes.yml have no base filter and
+  # were unaffected -- so a stacked api.yaml PR got the two api.yaml guards
+  # and no build, lint, or test.
+  #
+  # `types:` is spelled out to add `edited` to the default set (`opened`,
+  # `synchronize`, `reopened`). Dropping the base filter alone is necessary
+  # but NOT sufficient: when a parent PR merges, GitHub auto-retargets its
+  # child onto the parent's base, and that retarget arrives as `edited`. With
+  # only the default types the child would sit on a brand-new base showing the
+  # stale green it earned against the old one -- the same unverified-merge
+  # hazard this workflow is being fixed to close, one link further up the
+  # chain.
+  #
+  # GitHub has no narrower activity type for "the base changed", so `edited`
+  # also fires on every title and body edit, and this job runs for those too.
+  # DO NOT "optimize" that away with a job-level `if:` on
+  # `github.event.changes.base`. It looks free and it is not: a job skipped by
+  # a conditional still posts a check run -- same name, conclusion `skipped`.
+  # Branch protection reads the LATEST run per name per head SHA and counts
+  # `skipped` as satisfied, so red CI followed by any body edit would post a
+  # `skipped` run on top of the failure and flip the PR to mergeable. That was
+  # measured on this very PR's head SHA, which briefly carried the pair:
+  #
+  #   test  completed  skipped   02:15:49Z
+  #   test  completed  success   02:14:37Z
+  #
+  # A run on a docs edit costs about a minute. Masking a failing run costs an
+  # unverified merge -- the exact defect this change exists to prevent, walked
+  # back in through a different door.
   pull_request:
-    branches: [main]
+    types: [opened, synchronize, reopened, edited]
     paths-ignore:
       - 'LICENSE'
 
