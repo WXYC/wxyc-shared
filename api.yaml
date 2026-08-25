@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.46.0
+  version: 1.47.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -34,6 +34,37 @@ components:
       type: http
       scheme: bearer
       description: JWT token from Better Auth
+    SessionBearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        A better-auth SESSION token (the `token` this document's sign-in
+        responses return, either on `set-auth-token` or in the body) —
+        NEVER the JWT `BearerAuth` names. The two are not interchangeable.
+
+        The criterion, stated as a rule rather than a list because an
+        earlier version of this description named a closed set of two
+        operations and was already wrong about the device-authorization
+        routes fourteen lines away: an operation takes a session bearer
+        when better-auth ITSELF resolves the caller (its handler reaches
+        for `getSessionFromCtx`, which the bearer plugin feeds from a
+        session token), and the JWT `BearerAuth` when the caller is a
+        Backend-Service route gated by `requirePermissions`'s JWKS
+        verification. Everything under `/auth/*` that needs a caller
+        identity is the former; everything else in this document is the
+        latter.
+
+        As of this writing that resolves to `GET /auth/token`, `POST
+        /auth/sign-out`, `POST /auth/device/approve`, `POST
+        /auth/device/deny`, and the optional-session arm of `GET
+        /auth/device`. Treat that as the current membership of the rule
+        above, not as the definition — a new `/auth/*` operation joins it
+        by construction.
+
+        Declared distinct from `BearerAuth` specifically so a generated
+        client can't reuse its ordinary JWT-holding credential store here
+        by accident — see the issue #379 review finding that added this
+        scheme.
     LMLBearerAuth:
       type: http
       scheme: bearer
@@ -3629,6 +3660,474 @@ components:
         error:
           $ref: '#/components/schemas/DeviceAuthActionErrorCode'
         error_description:
+          type: string
+
+    # ===================
+    # Auth — better-auth core surface (issue #379, wxyc-swift-auth Phase A).
+    # Mirrors better-auth 1.6.30. Every path in this paragraph is inside the
+    # BACKEND-SERVICE checkout, not this one: Backend-Service's
+    # apps/auth/node_modules/better-auth is the version that actually
+    # resolves for the auth app (apps/auth/package.json ranges to ^1.6.30),
+    # while the copy hoisted to Backend-Service's OWN repo root (1.6.26) is
+    # NOT what apps/auth loads and was the wrong pin an earlier version of
+    # this comment named. wxyc-shared also depends on better-auth, at a
+    # third version again -- that one is this repo's own dev dependency and
+    # governs nothing about what the deployed auth service serves, so do not
+    # reach for it when re-verifying this mirror -- plus one WXYC-custom route,
+    # /auth/wxyc/lookup-email, which is marked below and sits outside the
+    # pinned-mirror's scope. Wire shapes verified against
+    # node_modules/better-auth/dist/{api/routes,plugins/{username,anonymous,
+    # jwt,email-otp,bearer}}/*.mjs plus direct probes against api.wxyc.org
+    # for status-code edge cases (the GET /auth/token 401-vs-404 split
+    # below). $ref-closed within this subset: no schema here $refs the
+    # shared ApiErrorResponse, whose `details` field (additionalProperties:
+    # true) forces JSONValue codegen and would pull that into the auth
+    # subset's public surface — see the wxyc-swift-auth plan's Phase A1
+    # $ref-closure constraint.
+    # ===================
+
+    AuthUser:
+      type: object
+      description: >
+        The better-auth user row as every sign-in / token-exchange response
+        in this section embeds it — parseUserOutput's serialization of the
+        `user` table plus the admin() plugin's fields plus WXYC's
+        `user.additionalFields` (Backend-Service
+        shared/authentication/src/auth.definition.ts). Shared across every
+        sign-in response below: the row shape does not depend on which route
+        created or found it. Verified field-for-field against a live
+        POST /auth/sign-in/anonymous response.
+      required:
+        - id
+        - email
+        - emailVerified
+        - name
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        emailVerified:
+          type: boolean
+        name:
+          type: string
+        image:
+          type: string
+          nullable: true
+        role:
+          type: string
+          nullable: true
+          description: >
+            The admin() plugin's system role flag on `user.role` (default
+            "user") — NOT a WXYC station role. Station role (member, dj,
+            musicDirector, stationManager, admin) lives on
+            `organization_member.role` and is resolved separately into the
+            JWT's `role` claim (buildJwtPayload / selectMemberRole in
+            auth.definition.ts); it is not this field. See that file's own
+            comment: "auth_user.role ... carries no station role."
+        banned:
+          type: boolean
+          nullable: true
+        banReason:
+          type: string
+          nullable: true
+        banExpires:
+          type: string
+          format: date-time
+          nullable: true
+        username:
+          type: string
+          nullable: true
+        displayUsername:
+          type: string
+          nullable: true
+        isAnonymous:
+          type: boolean
+          nullable: true
+        hasCompletedOnboarding:
+          type: boolean
+          description: WXYC additionalField; defaults false at creation.
+        realName:
+          type: string
+          nullable: true
+        djName:
+          type: string
+          nullable: true
+        appSkin:
+          type: string
+          description: WXYC additionalField; defaults "modern-light" at creation.
+        capabilities:
+          type: array
+          items:
+            type: string
+          description: WXYC additionalField; defaults [] at creation.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    EmailSignInRequest:
+      type: object
+      description: Body for POST /auth/sign-in/email.
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        callbackURL:
+          type: string
+          description: >
+            Redirect target after sign-in / email verification. WXYC's
+            native clients never send this — a callbackURL flips `redirect`
+            true in the response and sets a Location header, both meant for
+            a browser.
+        rememberMe:
+          type: boolean
+          default: true
+          description: When false, the session is not remembered (shorter-lived cookie).
+
+    UsernameSignInRequest:
+      type: object
+      description: Body for POST /auth/sign-in/username.
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        callbackURL:
+          type: string
+        rememberMe:
+          type: boolean
+
+    AuthSignInResult:
+      type: object
+      description: >
+        Response body for POST /auth/sign-in/email and POST
+        /auth/sign-in/username — identical shape, since both routes end in
+        the same session-create + setSessionCookie call (better-auth
+        dist/api/routes/sign-in.mjs signInEmail; dist/plugins/username
+        signInUsername). `token` also arrives on the `set-auth-token`
+        response header (see the two paths below); the body is the
+        documented fallback when a caller can't read response headers.
+      required:
+        - redirect
+        - token
+        - user
+      properties:
+        redirect:
+          type: boolean
+          description: True when callbackURL was supplied and the client should follow Location.
+        token:
+          type: string
+          description: The session token.
+        url:
+          type: string
+          description: >
+            The callbackURL echoed back. NOT nullable — when no callbackURL
+            was supplied, better-auth's handler passes `url:
+            ctx.body.callbackURL` (undefined) straight into `ctx.json(...)`
+            (dist/api/routes/sign-in.mjs signInEmail), and JSON
+            serialization drops an undefined-valued key rather than
+            emitting `null`. The key is therefore OMITTED entirely in that
+            case, not present-and-null — see this schema's `required` list,
+            which does not include `url`.
+        user:
+          $ref: '#/components/schemas/AuthUser'
+
+    OTPSignInRequest:
+      type: object
+      description: >
+        Body for POST /auth/sign-in/email-otp. `name`/`image` are dead on
+        this deployment: Backend-Service sets `disableSignUp: true` on the
+        emailOTP plugin (shared/authentication/src/auth.definition.ts), and
+        that flag gates THIS route (dist/plugins/email-otp/routes.mjs
+        signInEmailOTP: `if (!user) { if (opts.disableSignUp) throw
+        APIError.from("BAD_REQUEST", INVALID_OTP); ... }`), not just
+        send-verification-otp as an earlier version of this comment claimed.
+        A correct code for an email with no existing account 400s
+        INVALID_OTP rather than auto-registering, so `name`/`image` are
+        never reached and registration via this route is unreachable on
+        this deployment. See LookupEmailResponse's description, which
+        already documented the true anti-enumeration behavior this field
+        list previously contradicted.
+      required:
+        - email
+        - otp
+      properties:
+        email:
+          type: string
+        otp:
+          type: string
+        name:
+          type: string
+        image:
+          type: string
+
+    AuthTokenAndUserResult:
+      type: object
+      description: >
+        Response body shared by POST /auth/sign-in/anonymous and POST
+        /auth/sign-in/email-otp — both answer `{token, user}` with no
+        redirect/url (better-auth dist/plugins/anonymous/index.mjs
+        signInAnonymous; dist/plugins/email-otp/routes.mjs signInEmailOTP).
+        One type for two endpoints, per the DeviceAuthActionResponse
+        precedent above.
+      required:
+        - token
+        - user
+      properties:
+        token:
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+
+    AuthTokenResponse:
+      type: object
+      description: Response body for GET /auth/token — the short-lived JWT.
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          description: A signed JWT, verifiable against the JWKS at GET /auth/jwks.
+
+    AuthSignOutResult:
+      type: object
+      description: >
+        Response body for POST /auth/sign-out. Always `{success: true}` on
+        200 — a failure to delete the session server-side is logged, not
+        surfaced (better-auth dist/api/routes/sign-out.mjs signOut).
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+
+    LookupEmailRequest:
+      type: object
+      description: >
+        Body for POST /auth/wxyc/lookup-email — a WXYC-custom route (see the
+        path's own comment), not a better-auth one.
+      required:
+        - identifier
+      properties:
+        identifier:
+          type: string
+
+    LookupEmailResponse:
+      type: object
+      description: >
+        `email: null` means no account matches `identifier` — the one
+        precise failure this route can report (apps/auth/lookup-email.ts).
+        Everything downstream of a resolved email is deliberately vague
+        (anti-enumeration): send-verification-otp answers success for an
+        unknown address, and sign-in/email-otp answers the same INVALID_OTP
+        for a wrong code as for no account.
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          nullable: true
+
+    OTPType:
+      type: string
+      description: >
+        The `type` values better-auth's email-otp plugin schema declares.
+        WXYC's OTP sign-in flow always sends "sign-in". "change-email" is
+        declared by the plugin's own schema but always 400s on
+        POST /auth/email-otp/send-verification-otp — a dedicated
+        /email-otp/request-email-change route exists for it. Named rather
+        than left as an inline enum on SendLoginCodeRequest.type: an
+        unnamed inline enum is emitted by the Python generator
+        (datamodel-code-generator) as a bare `Type` class, silently
+        renumbering (`Type1`, `Type2`, ...) every other unnamed inline enum
+        in the document depending on declaration order — see the issue
+        #379 review finding that named this one.
+      enum:
+        - sign-in
+        - email-verification
+        - forget-password
+        - change-email
+
+    SendLoginCodeRequest:
+      type: object
+      description: Body for POST /auth/email-otp/send-verification-otp.
+      required:
+        - email
+        - type
+      properties:
+        email:
+          type: string
+        type:
+          $ref: '#/components/schemas/OTPType'
+
+    AuthSendCodeResult:
+      type: object
+      description: >
+        Response body for POST /auth/email-otp/send-verification-otp.
+        Always `{success: true}` on 2xx — disableSignUp: true makes the
+        server answer identically for an unknown address (anti-enumeration),
+        so a 2xx here does not confirm the account exists.
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+
+    AuthErrorResponse:
+      type: object
+      description: >
+        better-auth's uniform error body (@better-auth/core's
+        `APIError.from`/`defineErrorCodes`: `{message, code}`). Purpose-built
+        rather than a $ref to the shared ApiErrorResponse — see this
+        section's header comment. Answers every non-2xx response from this
+        section's better-auth-native operations except the 429s — see
+        AuthRateLimitedResponse and AuthPlainErrorResponse, below, for the
+        two DIFFERENT shapes a 429 can actually carry.
+      required:
+        - message
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+          description: >
+            A defineErrorCodes key, e.g. INVALID_EMAIL_OR_PASSWORD,
+            INVALID_USERNAME_OR_PASSWORD, INVALID_EMAIL, EMAIL_NOT_VERIFIED,
+            UNAUTHORIZED, INVALID_OTP, OTP_EXPIRED, TOO_MANY_ATTEMPTS,
+            ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY,
+            COULD_NOT_CREATE_SESSION, FAILED_TO_CREATE_USER,
+            MISSING_OR_NULL_ORIGIN, VALIDATION_ERROR (better-call's generic
+            body/query-schema failure, e.g. a missing required field —
+            better-call/dist/endpoint.mjs: `throw new APIError(400,
+            {message: validationError.message, code: "VALIDATION_ERROR"})`
+            — thrown before any handler code runs, so it can occur on any
+            operation in this section that takes a body). Left open rather
+            than enumerated — unlike DeviceAuth's closed, small RFC 8628
+            vocabulary, better-auth's general error surface is broad and
+            not practically exhaustible per operation.
+
+    AuthRateLimitedResponse:
+      type: object
+      description: >
+        `{message: string}` — better-auth's OWN internal per-path rate
+        limiter (dist/api/rate-limiter/index.mjs `rateLimitResponse`),
+        which is what a client actually meets FIRST on FIVE of the six
+        429-declaring operations in this section — every one except
+        POST /auth/wxyc/lookup-email, a plain Express handler that never
+        reaches better-auth's request pipeline at all (see that
+        operation's own 429 description). The window is NOT uniform across
+        those five: `resolveRateLimitConfig` (dist/api/rate-limiter/index.mjs)
+        applies `getDefaultSpecialRules()`'s generic `/sign-in*` rule (3
+        requests / 10 seconds) first, then walks each installed plugin's
+        OWN `rateLimit` array and OVERWRITES the window/max on an exact
+        `pathMatcher` match. The emailOTP plugin
+        (dist/plugins/email-otp/index.mjs) declares exactly such an
+        override for `path === "/sign-in/email-otp"` — 3 requests / 60
+        seconds, the plugin's own default (Backend-Service passes no
+        `rateLimit` override in its `emailOTP(...)` config) — so
+        POST /auth/sign-in/email-otp shares its window with
+        POST /auth/email-otp/send-verification-otp, NOT with the other
+        three `/sign-in*` paths in this section. Only `/sign-in/email`,
+        `/sign-in/username`, and `/sign-in/anonymous` actually get the
+        generic 3-per-10s rule; neither the username plugin nor the
+        anonymous plugin declares a `rateLimit` array of its own to
+        override it. Keyed per exact path per IP (createRateLimitKey(ip,
+        path)) — NOT shared across the paths in this section, unlike the
+        express-layer limiter below. Two things a naive client gets wrong: the body has no
+        `code` field (just `message`) and is NOT reliably
+        `Content-Type: application/json` — it's built via
+        `new Response(JSON.stringify(...), {status: 429, ...})` with no
+        explicit Content-Type header, so it falls back to the Fetch spec's
+        `text/plain;charset=UTF-8` default for a string body; the JSON is
+        valid, but a client that gates JSON-parsing on Content-Type (as
+        this repo's own e2e harness does) will not auto-decode it. The
+        window-reset hint arrives on THIS layer's own `X-Retry-After`
+        response header (seconds) — a non-standard header name, chosen by
+        better-auth itself, and distinct from the standard `Retry-After`
+        the OTHER layer sets (see AuthPlainErrorResponse) — not in the
+        body. See AuthPlainErrorResponse for the second, express-layer
+        limiter a client can reach only after clearing this one.
+
+        Also referenced from the device-authorization section above, where
+        the ordering INVERTS. `getDefaultSpecialRules()` matches only
+        `/sign-in*`, `/sign-up*`, `/change-password*`, `/change-email*` and
+        the password-reset family, and the device-authorization plugin
+        declares no `rateLimit` array of its own, so `/device/*` falls
+        through to better-auth's GENERAL default — 100 requests / 10 s
+        (`create-context.mjs`: `window: options.rateLimit?.window || 10`,
+        `max: ... || 100`), not the 3-per-10-60s a path in this section
+        gets. That is looser than the express layer's shared 10-per-15-min,
+        so on the three device paths the express limiter is mounted in
+        front of (/device/code, /device/approve, /device/deny) this shape
+        is UNREACHABLE and those operations declare only
+        AuthPlainErrorResponse. It is reachable on exactly the two device
+        paths the express layer deliberately skips — POST /device/token and
+        GET /device — which is why those two declare only this shape.
+      required:
+        - message
+      properties:
+        message:
+          type: string
+
+    AuthPlainErrorResponse:
+      type: object
+      description: >
+        `{error: string}` — the shape Backend-Service's own Express layer
+        answers with, distinct from both of better-auth's own shapes
+        (`{message, code}` on AuthErrorResponse; `{message}` with no code
+        on AuthRateLimitedResponse). Two sources share it: the WXYC-custom
+        /auth/wxyc/lookup-email route (apps/auth/app.ts lookupEmailHandler,
+        `res.json({error: ...})`) and the express-rate-limit mutation
+        limiter (apps/auth/app.ts authMutationRateLimit — 10 requests
+        / 15 min, keyed on X-Real-IP, SHARED across all nine mount
+        prefixes it's attached to via one reused middleware instance —
+        `message: {error: ...}`). Those nine prefixes are NOT all in this
+        section: six are (/auth/sign-in, /auth/sign-up,
+        /auth/email-otp/send-verification-otp, /auth/forget-password,
+        /auth/wxyc/lookup-email, /auth/wxyc/complete-onboarding) and three
+        are device-authorization paths from the section above
+        (/auth/device/code, /auth/device/approve, /auth/device/deny). The
+        budget is one bucket across all nine, so device traffic and
+        sign-in traffic from the same X-Real-IP consume each other's
+        allowance — which the control room, sharing one egress address,
+        can reach in ordinary use. THREE different roles depending on the
+        operation: on FIVE of the six 429-declaring operations below, this
+        is the SECOND layer — better-auth's own tighter, per-path
+        AuthRateLimitedResponse limiter (3 requests per 10-60s, depending
+        on path) is what a client meets first in practice, since its
+        window is far easier to exhaust than this shared 10-per-15-min
+        budget, and a client reaches this shape directly only by avoiding
+        the internal limiter (e.g. spacing requests out) while still
+        accumulating past 10 requests across the shared budget. On the
+        sixth, POST /auth/wxyc/lookup-email, this is the ONLY layer — that
+        operation never reaches better-auth's internal limiter at all (see
+        its own 429 description), so its 429 is always this shape, never a
+        "second" layer reached after a first. On the three device-
+        authorization operations this is likewise the ONLY layer, for the
+        opposite reason to lookup-email's: those DO reach better-auth's
+        internal limiter, but `/device/*` matches none of its special rules
+        and falls through to the general 100-per-10s default, which this
+        10-per-15-min bucket always exhausts first — see
+        AuthRateLimitedResponse's device paragraph. `express-rate-limit@8.6.2`
+        (apps/auth's pinned version) also sets the standard `Retry-After`
+        header (plus `RateLimit` / `RateLimit-Policy`, from its
+        `standardHeaders: 'draft-7'` config) on every 429 this schema
+        answers — verified against
+        node_modules/express-rate-limit/dist/index.cjs.
+      required:
+        - error
+      properties:
+        error:
           type: string
 
     RateLimitInfo:
@@ -10420,9 +10919,20 @@ paths:
   # ===================
   # Device Authorization (RFC 8628) — issue #195. Schemas live under
   # components/schemas/DeviceAuth*. /device/code + /device/token are PUBLIC;
-  # /device/approve + /device/deny require a Better Auth session (BearerAuth);
+  # /device/approve + /device/deny require a Better Auth session
+  # (SessionBearerAuth -- their handlers reach for `getSessionFromCtx`, so
+  # the credential is a session token, NOT the JWT `BearerAuth` names);
   # GET /device accepts an optional session (used only to claim the code).
-  # Mirrors better-auth 1.6.20 + Backend-Service#1495.
+  # Mirrors better-auth 1.6.20 + Backend-Service#1495. (Refreshed at issue
+  # #379: apps/auth's node_modules-resolved version -- the one that
+  # actually runs -- is 1.6.30, not the 1.6.26 hoisted at the
+  # Backend-Service REPO root that an earlier version of this comment
+  # named. Both of those paths are in Backend-Service, not in this repo;
+  # wxyc-shared's own better-auth dependency is a third version again and
+  # governs nothing here. See the /auth core-surface section
+  # below, which mirrors 1.6.30. The device-authorization plugin's wire
+  # shapes were not re-diffed against 1.6.30; re-verify if a device-auth
+  # defect is ever suspected.)
   # ===================
 
   /auth/device/code:
@@ -10453,6 +10963,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceAuthCodeError'
+        '429':
+          description: >
+            Rate limited by Express's authMutationRateLimit — 10 requests /
+            15 min per X-Real-IP, ONE bucket shared with /auth/sign-in/*,
+            /auth/wxyc/lookup-email, /auth/device/approve, /auth/device/deny
+            and the rest of the nine mount prefixes (apps/auth/app.ts
+            `rateLimitedPaths`). ADR 0008 includes this path because the
+            8-char user_code namespace is brute-forceable in principle.
+
+            Unlike the /auth/sign-in/* operations, this response models a
+            single shape rather than a oneOf: the layering INVERTS here.
+            better-auth's own internal limiter has no special rule matching
+            /device/*, so it falls through to the general 100-per-10s
+            default — looser than this 10-per-15-min bucket, which
+            therefore always answers first. AuthRateLimitedResponse is not
+            reachable on this path. See both schemas' descriptions for the
+            full derivation.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+              description: >
+                Seconds until the shared express-layer bucket resets
+                (`standardHeaders: 'draft-7'`). The better-auth layer's
+                X-Retry-After is never set on this path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
 
   /auth/device/token:
     post:
@@ -10461,8 +11000,16 @@ paths:
       description: >
         The browser polls this until the DJ approves. Public (no session
         required). RFC 8628 polling states (authorization_pending, slow_down)
-        are returned as 400 errors, not 2xx. Deliberately not rate-limited by
-        the auth-service — the plugin enforces the polling interval server-side.
+        are returned as 400 errors, not 2xx. Deliberately excluded from the
+        EXPRESS mutation limiter — the plugin enforces the polling interval
+        server-side via lastPolledAt and answers a too-fast poller with a
+        structured `slow_down` body, which an HTTP 429 in front would shadow
+        and break every polling client (apps/auth/app.ts states this as the
+        reason). That exclusion is specific to the express layer and does NOT
+        mean the path is unlimited: better-auth's own limiter still applies
+        its general 100-per-10s default, which is why a 429 is declared
+        below. A client polling at the interval the plugin hands it will
+        never approach that ceiling.
       security: []
       requestBody:
         required: true
@@ -10485,6 +11032,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceAuthTokenError'
+        '429':
+          description: >
+            Rate limited by better-auth's OWN internal limiter at its
+            general default — 100 requests / 10 s, keyed per exact path per
+            IP. NOT the express mutation limiter, which deliberately skips
+            this path (see the operation description). Distinguish this from
+            the RFC 8628 `slow_down` state, which is a 400 with a structured
+            body and is the response a merely-too-eager conforming poller
+            gets; reaching this 429 means ignoring the interval by an order
+            of magnitude. The body is `{message}` with no `code`, and is not
+            reliably served as application/json — see
+            AuthRateLimitedResponse.
+          headers:
+            X-Retry-After:
+              schema:
+                type: string
+              description: >
+                Seconds until better-auth's window resets. Note the
+                non-standard header name — the express layer's standard
+                `Retry-After` is never set on this path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthRateLimitedResponse'
         '500':
           description: 'server_error — user lookup or session creation failed.'
           content:
@@ -10500,9 +11071,19 @@ paths:
         Returns the current status of a device authorization. A session is
         optional: anonymous callers get the status; a signed-in DJ additionally
         claims a pending code for their account.
+
+        Not covered by the express mutation limiter, and for a mechanical
+        reason rather than a policy one: `app.use(path, mw)` is a PREFIX
+        match, so mounting it on '/auth/device' would also swallow
+        /auth/device/token and shadow that path's `slow_down` body behind a
+        429. apps/auth/app.ts accepts the resulting gap as defence-in-depth
+        (the ~1.1e12 user_code space over a 5-minute TTL makes brute-forcing
+        a live pending code impractical) and notes that real oracle abuse
+        would be answered with a method+exact-path limiter. better-auth's
+        own general 100-per-10s default still applies — see the 429 below.
       security:
         - {}
-        - BearerAuth: []
+        - SessionBearerAuth: []
       parameters:
         - name: user_code
           in: query
@@ -10523,6 +11104,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceAuthVerifyError'
+        '429':
+          description: >
+            Rate limited by better-auth's OWN internal limiter at its
+            general default — 100 requests / 10 s, keyed per exact path per
+            IP. NOT the express mutation limiter, which cannot be mounted
+            here without shadowing /auth/device/token (see the operation
+            description). The body is `{message}` with no `code`, and is not
+            reliably served as application/json — see
+            AuthRateLimitedResponse.
+          headers:
+            X-Retry-After:
+              schema:
+                type: string
+              description: >
+                Seconds until better-auth's window resets. Note the
+                non-standard header name — the express layer's standard
+                `Retry-After` is never set on this path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthRateLimitedResponse'
 
   /auth/device/approve:
     post:
@@ -10533,7 +11135,7 @@ paths:
         to approved so the polling browser receives a session. The auth-service
         gates this to roles >= dj; a member is rejected with access_denied (403).
       security:
-        - BearerAuth: []
+        - SessionBearerAuth: []
       requestBody:
         required: true
         content:
@@ -10569,6 +11171,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceAuthActionError'
+        '429':
+          description: >
+            Rate limited by Express's authMutationRateLimit — 10 requests /
+            15 min per X-Real-IP, ONE bucket shared with /auth/sign-in/*,
+            /auth/device/code, /auth/device/deny and the rest of the nine
+            mount prefixes. Worth knowing for this operation specifically:
+            the budget is consumed by the DJ's own sign-ins from the same
+            egress address, so a control room that has just signed several
+            people in can meet this on a first approve attempt. Single shape
+            rather than a oneOf — better-auth's internal limiter falls
+            through to its looser general default on /device/*, so it never
+            answers first here; see POST /auth/device/code's 429 for the
+            full derivation.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+              description: >
+                Seconds until the shared express-layer bucket resets. The
+                better-auth layer's X-Retry-After is never set on this path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
 
   /auth/device/deny:
     post:
@@ -10579,7 +11205,7 @@ paths:
         Requires a Better Auth session. Not role-gated by the auth-service — the
         plugin's own userId check already prevents denying someone else's code.
       security:
-        - BearerAuth: []
+        - SessionBearerAuth: []
       requestBody:
         required: true
         content:
@@ -10613,3 +11239,665 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceAuthActionError'
+        '429':
+          description: >
+            Rate limited by Express's authMutationRateLimit — 10 requests /
+            15 min per X-Real-IP, ONE bucket shared with /auth/sign-in/*,
+            /auth/device/code, /auth/device/approve and the rest of the nine
+            mount prefixes. ADR 0008 includes /deny to bound noise from a
+            stuck client, which is also what makes a 429 here relatively
+            likely: a client retrying a denial in a loop is the exact
+            traffic shape the mount exists to stop. Single shape rather than
+            a oneOf — see POST /auth/device/code's 429 for the derivation.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+              description: >
+                Seconds until the shared express-layer bucket resets. The
+                better-auth layer's X-Retry-After is never set on this path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  # ===================
+  # Auth — better-auth core surface (issue #379, wxyc-swift-auth Phase A).
+  # Mirrors better-auth 1.6.30 (apps/auth's node_modules-resolved version —
+  # see the components/schemas/Auth* section header for the root-vs-app
+  # pin distinction) plus one WXYC-custom route (/auth/wxyc/lookup-email,
+  # marked below). Schemas live under components/schemas/Auth* — see that
+  # section's header comment for the verification sources and the
+  # $ref-closure constraint. Every operation here is x-wxyc-service:
+  # backend-service — that marker is REPO-scoped (whose codebase the
+  # handler ships from, per this document's info.description), not
+  # host/origin-scoped: the auth app's handlers live in the Backend-Service
+  # repo (apps/auth/), which is the actual criterion. That the auth app
+  # also happens to be deployed on the same host (api.wxyc.org) as the rest
+  # of Backend-Service is a true, separate fact about today's topology, not
+  # the reason for the marker's value — a future redeploy of apps/auth to
+  # its own host would not change which service this marker names.
+  # ===================
+
+  /auth/sign-in/email:
+    post:
+      x-wxyc-service: backend-service
+      summary: Sign in with email and password
+      description: >
+        The org-canonical DJ sign-in route. `requireEmailVerification: true`
+        is set server-side, so an unverified account 403s here (it does not
+        for /auth/sign-in/email-otp, which marks the account verified on a
+        correct code instead — mailbox possession being the proof the
+        verification email would have demanded).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailSignInRequest'
+      responses:
+        '200':
+          description: Signed in.
+          headers:
+            set-auth-token:
+              schema:
+                type: string
+              description: >
+                The bearer plugin's response-header mirror of the session
+                token — the primary channel; `token` in the body is the
+                documented fallback for a caller that can't read response
+                headers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSignInResult'
+        '400':
+          description: >
+            INVALID_EMAIL — `email` failed `z.email()`'s shape check, run
+            BEFORE any user lookup (dist/api/routes/sign-in.mjs
+            signInEmail: `if (!z.email().safeParse(email).success) throw
+            APIError.from("BAD_REQUEST", INVALID_EMAIL)`) — or
+            VALIDATION_ERROR, the generic body-schema failure any operation
+            with a request body can produce (e.g. a missing `password`
+            field) — see AuthErrorResponse.code.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '401':
+          description: 'INVALID_EMAIL_OR_PASSWORD — user not found, or the password did not verify.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '403':
+          description: >
+            EMAIL_NOT_VERIFIED, or MISSING_OR_NULL_ORIGIN — better-auth's
+            global originCheckMiddleware refuses a cookie-bearing request
+            with no Origin header before any credential check. Reachable
+            when a stale better-auth session cookie survives on the client
+            from a prior sign-in — native clients suppress cookies
+            entirely to avoid this (see wxyc-dj-ios's `CookielessSession`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '429':
+          description: >
+            Rate limited. What a client meets FIRST in practice:
+            better-auth's own internal limiter, 3 requests / 10 seconds for
+            this exact path — see AuthRateLimitedResponse. Only reachable
+            after clearing that (e.g. by spacing requests out) is the
+            second, shared layer: Express's authMutationRateLimit, 10
+            requests / 15 min per X-Real-IP, covering every
+            /auth/sign-in/* path — see AuthPlainErrorResponse. Both layers
+            set a retry hint, under DIFFERENT header names — see this
+            response's `headers` block — so check for whichever one is
+            present rather than assuming X-Retry-After's absence means no
+            hint was given.
+          headers:
+            X-Retry-After:
+              schema:
+                type: string
+              description: >
+                Seconds until the internal limiter's window resets. Set
+                only on the better-auth-layer 429 (AuthRateLimitedResponse).
+            Retry-After:
+              schema:
+                type: string
+              description: >
+                Seconds until the shared express-layer bucket resets. Set
+                only on the express-layer 429 (AuthPlainErrorResponse) —
+                express-rate-limit@8.6.2's standard `Retry-After` header,
+                emitted because apps/auth/app.ts configures
+                `standardHeaders: 'draft-7'` (verified against
+                node_modules/express-rate-limit/dist/index.cjs
+                setRetryAfterHeader). That layer also sets `RateLimit` and
+                `RateLimit-Policy` on every response, 429 or not; not
+                modeled as separate headers here since they carry no
+                information beyond this one for a client's purposes. Never
+                present on the same response as X-Retry-After above — the
+                two layers are mutually exclusive per response.
+          content:
+            application/json:
+              schema:
+                description: >
+                  One of two shapes depending on which of the two layers
+                  above answered. Modeled as a oneOf rather than a single
+                  schema so a generated client's type reflects both real
+                  possibilities rather than silently assuming the
+                  better-auth shape always wins — verified this generates
+                  cleanly across all four codegen targets: openapi-typescript
+                  emits a proper union type (the one generator that surfaces
+                  a per-status response body at all); the Python
+                  (datamodel-code-generator), Swift (openapi-generator-cli
+                  swift6), and Kotlin generators don't model inline
+                  path-response bodies by status code in the first place, so
+                  both member schemas simply continue to generate as
+                  independent, unaffected models. NOTE: the better-auth-layer
+                  member (AuthRateLimitedResponse) is not reliably decodable
+                  as JSON in the first place regardless of this modeling —
+                  see that schema's own description for the Content-Type
+                  caveat; a `oneOf` communicates the shape a caller gets IF
+                  it parses the body as JSON, not a guarantee that
+                  Content-Type says so.
+                oneOf:
+                  - $ref: '#/components/schemas/AuthRateLimitedResponse'
+                  - $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  /auth/sign-in/username:
+    post:
+      x-wxyc-service: backend-service
+      summary: Sign in with username and password
+      description: >
+        Validates the identifier's *shape* before any lookup — better-auth's
+        default username pattern is `/^[a-zA-Z0-9_.]+$/` (Backend-Service
+        registers `username({ minUsernameLength: 2 })` with no
+        usernameValidator override), so an email-shaped identifier posted
+        here 422s on shape alone. Route selection (email vs. username) is a
+        client responsibility — see wxyc-dj-ios's SignInIdentifier for the
+        `@`-based router this document does not encode.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsernameSignInRequest'
+      responses:
+        '200':
+          description: Signed in.
+          headers:
+            set-auth-token:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSignInResult'
+        '400':
+          description: >
+            VALIDATION_ERROR — the generic body-schema failure any
+            operation with a request body can produce (e.g. a missing
+            `password` field), thrown by better-call before any handler
+            code runs. Distinct from the 422 below: this is a malformed
+            REQUEST (wrong shape entirely), not a semantically-invalid
+            username value — see AuthErrorResponse.code.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '401':
+          description: 'INVALID_USERNAME_OR_PASSWORD — user not found, or the password did not verify.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '403':
+          description: 'EMAIL_NOT_VERIFIED, or MISSING_OR_NULL_ORIGIN (see POST /auth/sign-in/email).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '422':
+          description: >
+            USERNAME_TOO_SHORT, USERNAME_TOO_LONG, or INVALID_USERNAME — the
+            identifier failed shape validation before any credential check
+            (e.g. an email-shaped identifier posted to this route).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '429':
+          description: 'Rate limited — see POST /auth/sign-in/email (same two-layer shape and header pair; this path shares the /auth/sign-in* prefix rule).'
+          headers:
+            X-Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+            Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AuthRateLimitedResponse'
+                  - $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  /auth/wxyc/lookup-email:
+    post:
+      x-wxyc-service: backend-service
+      summary: Resolve a login identifier to its verification email
+      description: >
+        WXYC-CUSTOM ROUTE — lookupEmailHandler in Backend-Service
+        apps/auth/app.ts, not a better-auth endpoint, and NOT covered by
+        this file's better-auth pinned-mirror comment above. Backend-Service
+        owns its declared-vs-handler fidelity directly, so this is also the
+        one operation in this section upstream declared-response-vs-handler
+        verification (wxyc-shared#328) can fully cover once that lands. The
+        OTP sign-in flow's leg 1: resolves a username to the address
+        /auth/email-otp/send-verification-otp mails a code to. An identifier
+        already containing '@' is echoed back unchanged by the handler
+        without a lookup (email-shaped identifiers skip this route
+        entirely). A mild enumeration vector (confirms whether a username
+        exists) that the response never displays and the rate limiter
+        bounds — see AuthPlainErrorResponse and LookupEmailResponse.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LookupEmailRequest'
+      responses:
+        '200':
+          description: >
+            Resolved (or not — see LookupEmailResponse's `email: null`
+            case).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupEmailResponse'
+        '400':
+          description: '"identifier required" — identifier missing or not a string.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+        '429':
+          description: >
+            Rate limited — Express's authMutationRateLimit (10 requests /
+            15 min per X-Real-IP), the SAME shared bucket the five
+            better-auth-native operations in this section share
+            (sign-in/email, sign-in/username, sign-in/email-otp,
+            sign-in/anonymous, email-otp/send-verification-otp). This is
+            the ONE operation in
+            this section with only one rate-limit layer, not two:
+            lookupEmailHandler is a plain Express handler registered before
+            the better-auth router (apps/auth/app.ts), so better-auth's own
+            internal per-path limiter (AuthRateLimitedResponse) never
+            applies here — a request to this path never reaches
+            better-auth's request pipeline at all, so this operation's 429
+            is ALWAYS AuthPlainErrorResponse-shaped, never a oneOf like the
+            five above.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+              description: >
+                Seconds until the shared express-layer bucket resets — see
+                POST /auth/sign-in/email's Retry-After header description.
+                No X-Retry-After equivalent exists on this operation's 429
+                (that header is specific to better-auth's internal limiter,
+                which this operation never reaches — see above).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+        '500':
+          description: '"Internal server error" — unexpected failure resolving the identifier.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  /auth/email-otp/send-verification-otp:
+    post:
+      x-wxyc-service: backend-service
+      summary: Mail a one-time sign-in code
+      description: >
+        The OTP sign-in flow's leg 2. `disableSignUp: true` makes this
+        answer `{success: true}` for an unknown address too (the code is
+        generated and immediately discarded server-side) — anti-enumeration
+        by design, so a 200 here never confirms the account exists. Paired
+        with POST /auth/sign-in/email-otp, which redeems the code.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendLoginCodeRequest'
+      responses:
+        '200':
+          description: Code sent (or silently discarded for an unknown address — see above).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSendCodeResult'
+        '400':
+          description: >
+            INVALID_EMAIL (malformed address — the one leg of this flow
+            that CAN report a bad email, since an '@'-containing identifier
+            skips the /auth/wxyc/lookup-email leg entirely), or "Invalid OTP
+            type" (type: change-email — see SendLoginCodeRequest).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '429':
+          description: >
+            Rate limited. What a client meets FIRST in practice:
+            better-auth's own internal limiter, 3 requests / 60 seconds for
+            this exact path (this path's window is 60s, not the 10s
+            /sign-in* paths get — getDefaultSpecialRules' second rule) —
+            see AuthRateLimitedResponse. Only reachable after clearing
+            that is the second, shared layer: Express's
+            authMutationRateLimit, 10 requests / 15 min per X-Real-IP,
+            covering this path by exact match — see AuthPlainErrorResponse.
+            Both layers set a retry hint under different header names —
+            see this response's `headers` block.
+          headers:
+            X-Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+            Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AuthRateLimitedResponse'
+                  - $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  /auth/sign-in/email-otp:
+    post:
+      x-wxyc-service: backend-service
+      summary: Redeem a mailed one-time code to sign in
+      description: >
+        A peer of the two password routes, not a variant of them — same
+        setSessionCookie call, same globally-mounted bearer() plugin, so the
+        same set-auth-token contract. One asymmetry: this route marks an
+        unverified account's email verified and proceeds (mailbox
+        possession is the proof the verification email would have
+        demanded), where the password routes 403 EMAIL_NOT_VERIFIED
+        instead. OTP verification is atomic and single-use (better-auth's
+        atomicVerifyOTP): a correct code can be consumed by only one
+        concurrent caller. Registration-on-first-sign-in is declared by the
+        plugin but unreachable on this deployment — see OTPSignInRequest's
+        description. NO LIVE COVERAGE OF THIS ROUTE TODAY: wxyc-shared's
+        e2e suite (e2e/auth.test.ts) exercises the SEND leg
+        (POST /auth/email-otp/send-verification-otp's success shape) but
+        does not call this operation at all, live, in any shape — not the
+        success path (impossible for an automated harness with no mailbox
+        access — a real run requires reading a mailed 6-digit code) and
+        not even the guaranteed-wrong-code 400/403 paths, which a
+        synthetic code COULD exercise without needing a real mailbox. That
+        coverage gap is a deliberate, budget-driven omission, not an
+        oversight: this path shares the `/auth/sign-in*` prefix rate-limit
+        rule, and the e2e suite's whole-run request budget against the
+        shared 10-request/15-min bucket (apps/auth/app.ts
+        authMutationRateLimit) is already fully committed elsewhere — see
+        the budget-arithmetic comment in e2e/auth.test.ts. Add a
+        synthetic-wrong-code assertion here only after re-verifying the
+        whole-run budget still holds with one more covered request.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTPSignInRequest'
+      responses:
+        '200':
+          description: >
+            Signed in. Registration-on-first-sign-in is declared by the
+            plugin's schema but unreachable here — see this operation's
+            description.
+          headers:
+            set-auth-token:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenAndUserResult'
+        '400':
+          description: >
+            INVALID_OTP (wrong code, already-consumed code, or no
+            outstanding code for this email) or OTP_EXPIRED (past the 5
+            minute TTL — the expired record is deleted, so a retry also
+            reads as INVALID_OTP).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '403':
+          description: >
+            TOO_MANY_ATTEMPTS — 5 wrong tries against one outstanding code
+            (allowedAttempts: 5) locks that code out; the DJ must request a
+            new one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '429':
+          description: >
+            Rate limited — same two-layer shape and header pair as
+            POST /auth/sign-in/email, but NOT the same internal-layer
+            window: despite matching the `/sign-in*` prefix, this exact
+            path is overridden by the emailOTP plugin's own `rateLimit`
+            array (dist/plugins/email-otp/index.mjs) to 3 requests / 60
+            seconds — the SAME window as
+            POST /auth/email-otp/send-verification-otp, not the
+            10-second window /sign-in/email, /sign-in/username, and
+            /sign-in/anonymous get. See AuthRateLimitedResponse's
+            description for the full override mechanism.
+          headers:
+            X-Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email, but see this response's description for the different (60s) window.
+            Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AuthRateLimitedResponse'
+                  - $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  /auth/sign-in/anonymous:
+    post:
+      x-wxyc-service: backend-service
+      summary: Create a throwaway anonymous session
+      description: >
+        The mechanism wxyc-ios-64 and WXYC-Android use for endpoints gated
+        on any session rather than a DJ login (e.g. `/proxy/*`, `/concerts`
+        after a /auth/token exchange). No request body. An anonymous session
+        cannot sign in anonymously a second time (ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY)
+        — a client must persist and reuse the session token rather than
+        re-calling this on every launch.
+      security: []
+      parameters:
+        - name: X-Device-Fingerprint
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: >
+            Declared for CORS (apps/auth/app.ts allows this header on
+            preflight) but NOT READ by this route — better-auth's anonymous
+            sign-in handler never consults it, and no association between
+            the header value and the newly-minted user.id is written
+            anywhere at sign-in time. The header's one real reader in
+            Backend-Service is a different, unmodeled endpoint,
+            `POST /auth/check-request-ban`
+            (apps/auth/check-request-ban-handler.ts:91), which looks the
+            value up against a fingerprint-ban table. Sending it here is
+            harmless but inert; it exists on this operation only so a
+            client that already attaches it to every request (for the ban
+            check) doesn't need to special-case sign-in.
+      responses:
+        '200':
+          description: Anonymous session created.
+          headers:
+            set-auth-token:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenAndUserResult'
+        '400':
+          description: >
+            ANONYMOUS_USERS_CANNOT_SIGN_IN_AGAIN_ANONYMOUSLY (the caller's
+            current session, if any, is already anonymous) or
+            COULD_NOT_CREATE_SESSION.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '429':
+          description: 'Rate limited — /auth/sign-in/* is a prefix match, so this path is covered too (same two-layer shape and header pair as POST /auth/sign-in/email).'
+          headers:
+            X-Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+            Retry-After:
+              schema:
+                type: string
+              description: Same contract as POST /auth/sign-in/email.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AuthRateLimitedResponse'
+                  - $ref: '#/components/schemas/AuthPlainErrorResponse'
+        '500':
+          description: 'FAILED_TO_CREATE_USER — unexpected failure creating the anonymous user row.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+
+  /auth/token:
+    get:
+      x-wxyc-service: backend-service
+      summary: Exchange a session bearer for a short-lived JWT
+      description: >
+        `Authorization: Bearer <session token>` in, a signed JWT out —
+        verifiable by Backend-Service's regular routes against the JWKS at
+        GET /auth/jwks without a database round-trip. The JWT's TTL is 15
+        minutes (better-auth's jwt plugin default, `dist/plugins/jwt/sign.mjs`:
+        `options?.jwt?.expirationTime ?? "15m"` — Backend-Service's `jwt()`
+        config only sets `jwt.definePayload`, never `expirationTime`, so the
+        default stands). This is the number a client sizes its refresh
+        leeway against, and the reason a per-consumer JWT mint (rather than
+        sharing one JWT across processes) is the cheap, correct default —
+        see `e2e/setup.ts`'s `exchangeSessionForJwt`, which every e2e file
+        in this repo calls independently off a shared SESSION token rather
+        than sharing one short-lived JWT. Only GET is
+        registered for this path: any other method 404s (better-call has no
+        route to match, not a 405 — verified against production). A missing,
+        malformed, or expired/revoked session bearer 401s (UNAUTHORIZED);
+        that is the only failure mode this path itself produces for a
+        GET — there is no 404 for "wrong bearer," only for "wrong method or
+        unknown path." `set-auth-token` on the 200 is conditional: the
+        session token value itself never changes (better-auth's rolling
+        renewal calls `updateSession(token, {expiresAt, updatedAt})`, which
+        keys on the token and only rewrites the two timestamp columns), but
+        better-auth re-issues the session COOKIE — and the bearer plugin
+        mirrors it onto this header — only on a rolling renewal, once per
+        `session.updateAge` (Backend-Service: 1 day); an ordinary call
+        inside that window omits the header entirely and the client keeps
+        using the token it already has. See INVARIANTS.md's
+        `SET_AUTH_TOKEN_NEVER_ROTATES` contract.
+      security:
+        - SessionBearerAuth: []
+      parameters:
+        - name: X-Device-Fingerprint
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: >
+            Declared for CORS (apps/auth/app.ts allows this header) but NOT
+            READ by this route — better-auth's session/JWT-mint handler
+            never consults it, and no user↔fingerprint association is
+            written here. The header's one real reader anywhere in
+            Backend-Service is `POST /auth/check-request-ban`
+            (apps/auth/check-request-ban-handler.ts:91), an unmodeled,
+            unrelated endpoint that looks the value up against a ban table.
+            Sending it on this operation is harmless but inert.
+      responses:
+        '200':
+          description: JWT minted.
+          headers:
+            set-auth-token:
+              schema:
+                type: string
+              description: >
+                Present only when this call triggered a rolling session
+                renewal — see the operation description. Absent on a
+                typical call. When present, the value is the SAME session
+                token the caller authenticated with, re-encoded as
+                `<token>.<HMAC-base64url>` (see
+                `SET_AUTH_TOKEN_NEVER_ROTATES` in INVARIANTS.md) — never a
+                different token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenResponse'
+        '401':
+          description: 'UNAUTHORIZED — missing, malformed, or expired/revoked session bearer.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+
+  /auth/sign-out:
+    post:
+      x-wxyc-service: backend-service
+      summary: Invalidate the current session
+      description: >
+        `Authorization: Bearer <session token>` in; deletes the session
+        server-side (best-effort — a DB failure is logged, not surfaced) and
+        clears the session cookie. Always 200 `{success: true}` — there is
+        no distinct "already signed out" response, and a garbage or absent
+        bearer still 200s (deleteSession is a no-op when no session token is
+        found). After this call the session token 401s on GET /auth/token
+        (see INVARIANTS.md).
+      security:
+        - SessionBearerAuth: []
+      responses:
+        '200':
+          description: Signed out (unconditionally — see above).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSignOutResult'

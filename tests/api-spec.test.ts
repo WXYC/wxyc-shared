@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.46.0');
+      expect(spec.info.version).toBe('1.47.0');
     });
 
     it('should have components section', () => {
@@ -4081,7 +4081,7 @@ describe('OpenAPI Specification', () => {
     // still requires a Bearer token, so it belongs under the global default.
     const PUBLIC_OPERATIONS: ReadonlyArray<readonly [string, string, string]> = [
       // [method, path, why it is genuinely public]
-      ['get', '/auth/device', 'RFC 8628 status lookup — a session is optional by design: anonymous callers get the status, a signed-in DJ additionally claims the code for their account. Declared `security: [{}, { BearerAuth: [] }]`, the other spelling of anonymously-callable, and pinned in that exact shape by the device-flow describe further down'],
+      ['get', '/auth/device', 'RFC 8628 status lookup — a session is optional by design: anonymous callers get the status, a signed-in DJ additionally claims the code for their account. Declared `security: [{}, { SessionBearerAuth: [] }]`, the other spelling of anonymously-callable, and pinned in that exact shape by the device-flow describe further down. The second member names SessionBearerAuth, not BearerAuth: the optional credential here is a better-auth SESSION token (the handler calls getSessionFromCtx), not a JWT'],
       ['post', '/auth/device/code', 'RFC 8628 device-code request — the whole point is that the device has no token yet'],
       ['post', '/auth/device/token', 'RFC 8628 token poll — same, this is where the token comes from'],
       ['get', '/concerts/{id}', 'deliberately public per BS#1694 / #236: the wxyc.org share Worker cannot mint anonymous sessions, and the response is publicly cacheable. Note the sibling GET /concerts is requirePermissions({}) and correctly does NOT appear here'],
@@ -4094,6 +4094,12 @@ describe('OpenAPI Specification', () => {
       ['get', '/flowsheet/search', 'public playlist-archive search'],
       ['get', '/library/genres', 'deliberately public per BS#1682 — station-wide reference data, and dj-site#1004 SSR cannot attach a JWT. POST /library/genres stays catalog:write'],
       ['get', '/schedule', 'no auth middleware on schedule_route.get("/")'],
+      ['post', '/auth/sign-in/email', 'better-auth sign-in route — the whole point is that the caller has no session yet'],
+      ['post', '/auth/sign-in/username', 'better-auth sign-in route — same'],
+      ['post', '/auth/sign-in/email-otp', 'better-auth OTP redemption — same; this is where a session is first created for the OTP flow'],
+      ['post', '/auth/sign-in/anonymous', 'better-auth anonymous sign-in — same, by definition'],
+      ['post', '/auth/email-otp/send-verification-otp', 'mails a one-time code to an unauthenticated caller; disableSignUp: true makes it answer identically for an unknown address (anti-enumeration)'],
+      ['post', '/auth/wxyc/lookup-email', 'WXYC-custom OTP-flow leg 1 (apps/auth/app.ts lookupEmailHandler) — resolves a login identifier before any session exists. Rate-limited; see AuthPlainErrorResponse'],
     ] as const;
 
     // Seven lines left this list in #372, and none of them by being reviewed
@@ -4119,11 +4125,15 @@ describe('OpenAPI Specification', () => {
 
     // Two spellings make an operation anonymously callable, and a guard that
     // knows only one is a guard with a door in the back. `security: []` is the
-    // blunt override. `security: [{}, { BearerAuth: [] }]` — a requirement
-    // list with an empty-object member — says "no credential also satisfies
-    // this", which is the same reachability with a different shape; GET
-    // /auth/device uses it deliberately. Match both, or the next endpoint
-    // written in the second style ships unreviewed past a green test.
+    // blunt override. `security: [{}, { SessionBearerAuth: [] }]` — a
+    // requirement list with an empty-object member — says "no credential also
+    // satisfies this", which is the same reachability with a different shape;
+    // GET /auth/device uses it deliberately. Match both, or the next endpoint
+    // written in the second style ships unreviewed past a green test. Note the
+    // check is on the empty-object member alone and so is indifferent to WHICH
+    // scheme the other members name — that is correct here, since the question
+    // is reachability without a credential, not which credential an
+    // authenticated caller would present.
     function isAnonymouslyCallable(security: unknown): boolean {
       if (!Array.isArray(security)) return false;
       if (security.length === 0) return true;
@@ -4234,8 +4244,17 @@ describe('OpenAPI Specification', () => {
   describe('Device Authorization (RFC 8628) — #195', () => {
     // Field-list / enum snapshot against api.yaml (the #186 CatalogExportRow house
     // style — NOT a live runtime diff; the plugin's per-route zod schemas are
-    // module-internal and unexported). The contract mirrors better-auth 1.6.25 +
-    // Backend-Service#1495. Error enums are the RUNTIME superset of the declared zod.
+    // module-internal and unexported). Error enums are the RUNTIME superset of
+    // the declared zod.
+    //
+    // WHICH better-auth these shapes came from, stated precisely because the
+    // answer is not the version this repo installs: the device-plugin wire
+    // shapes were read off 1.6.20 (+ Backend-Service#1495) and have not been
+    // re-diffed since. The version apps/auth actually loads is 1.6.30
+    // (Backend-Service's apps/auth/node_modules/better-auth) — see api.yaml's
+    // device-section header. The pin at the bottom of this describe asserts on
+    // wxyc-shared's OWN dev dependency, which is a third version again; read
+    // that test's comment before treating its string as the mirrored version.
     type Schema = {
       type?: string;
       required?: string[];
@@ -4245,7 +4264,13 @@ describe('OpenAPI Specification', () => {
     type Operation = {
       security?: Array<Record<string, unknown[]>>;
       parameters?: Array<{ name: string; in: string; required?: boolean }>;
-      responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+      responses?: Record<
+        string,
+        {
+          content?: Record<string, { schema?: { $ref?: string } }>;
+          headers?: Record<string, unknown>;
+        }
+      >;
     };
     const getSchema = (name: string) => spec.components.schemas[name] as Schema;
     const props = (name: string) => Object.keys(getSchema(name).properties ?? {}).sort();
@@ -4348,30 +4373,69 @@ describe('OpenAPI Specification', () => {
 
     // ---- security per endpoint ----
 
-    it('makes code/token public; approve/deny require BearerAuth; GET /device accepts an optional session', () => {
+    // The session-bearing device operations declare SessionBearerAuth, NOT the
+    // JWT-carrying BearerAuth they were originally written with. Their handlers
+    // call `getSessionFromCtx` (better-auth
+    // dist/plugins/device-authorization/routes.mjs), which the bearer plugin
+    // feeds from a SESSION token — the credential BearerAuth's own description
+    // ("JWT token from Better Auth") explicitly is not. The mistake was not
+    // cosmetic: a generated client reading this document would have reached for
+    // its JWT credential store on approve/deny and been rejected, and the
+    // SessionBearerAuth scheme exists precisely to make that reach impossible.
+    it('declares the session-bearing device ops under SessionBearerAuth, not the JWT BearerAuth', () => {
       expect((spec.paths['/auth/device/code'] as { post: Operation }).post.security).toEqual([]);
       expect((spec.paths['/auth/device/token'] as { post: Operation }).post.security).toEqual([]);
       expect((spec.paths['/auth/device/approve'] as { post: Operation }).post.security).toEqual([
-        { BearerAuth: [] },
+        { SessionBearerAuth: [] },
       ]);
-      expect((spec.paths['/auth/device/deny'] as { post: Operation }).post.security).toEqual([{ BearerAuth: [] }]);
+      expect((spec.paths['/auth/device/deny'] as { post: Operation }).post.security).toEqual([
+        { SessionBearerAuth: [] },
+      ]);
       // GET /device works unauthenticated (200 + status); a session only claims the code.
-      expect((spec.paths['/auth/device'] as { get: Operation }).get.security).toEqual([{}, { BearerAuth: [] }]);
+      expect((spec.paths['/auth/device'] as { get: Operation }).get.security).toEqual([
+        {},
+        { SessionBearerAuth: [] },
+      ]);
+    });
+
+    // Guards the regression directly rather than only pinning the good state:
+    // no device operation may name BearerAuth at all. Without this, a future
+    // edit re-introducing the JWT scheme on one of the five would only be
+    // caught if it also happened to change the exact `toEqual` shapes above.
+    it('names BearerAuth on no device operation', () => {
+      const deviceRoutes = [
+        '/auth/device',
+        '/auth/device/code',
+        '/auth/device/token',
+        '/auth/device/approve',
+        '/auth/device/deny',
+      ];
+      const httpMethods = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
+      for (const route of deviceRoutes) {
+        const item = spec.paths[route] as Record<string, Operation>;
+        expect(item, route).toBeDefined();
+        for (const method of httpMethods) {
+          const op = item[method];
+          if (!op) continue;
+          const names = (op.security ?? []).flatMap((req) => Object.keys(req));
+          expect(names, `${method.toUpperCase()} ${route}`).not.toContain('BearerAuth');
+        }
+      }
     });
 
     // ---- per-status error blocks reference the right envelope ----
 
-    it('models /device/token errors per status (400 + 500), both DeviceAuthTokenError', () => {
+    it('models /device/token errors per status (400 + 429 + 500); the two plugin statuses are DeviceAuthTokenError', () => {
       const r = (spec.paths['/auth/device/token'] as { post: Operation }).post.responses!;
-      expect(Object.keys(r).sort()).toEqual(['200', '400', '500']);
+      expect(Object.keys(r).sort()).toEqual(['200', '400', '429', '500']);
       expect(r['400'].content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/DeviceAuthTokenError');
       expect(r['500'].content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/DeviceAuthTokenError');
     });
 
-    it('models approve/deny errors per status (400 + 401 + 403), all DeviceAuthActionError', () => {
+    it('models approve/deny errors per status (400 + 401 + 403 + 429); the three plugin statuses are DeviceAuthActionError', () => {
       for (const route of ['/auth/device/approve', '/auth/device/deny']) {
         const r = (spec.paths[route] as { post: Operation }).post.responses!;
-        expect(Object.keys(r).sort(), route).toEqual(['200', '400', '401', '403']);
+        expect(Object.keys(r).sort(), route).toEqual(['200', '400', '401', '403', '429']);
         for (const code of ['400', '401', '403']) {
           expect(r[code].content?.['application/json']?.schema?.$ref, `${route} ${code}`).toBe(
             '#/components/schemas/DeviceAuthActionError'
@@ -4380,17 +4444,58 @@ describe('OpenAPI Specification', () => {
       }
     });
 
-    it('models /device/code and GET /device errors as 400-only, each its own error envelope', () => {
+    it('models /device/code and GET /device errors as 400 + 429, each with its own 400 envelope', () => {
       const codeR = (spec.paths['/auth/device/code'] as { post: Operation }).post.responses!;
-      expect(Object.keys(codeR).sort()).toEqual(['200', '400']);
+      expect(Object.keys(codeR).sort()).toEqual(['200', '400', '429']);
       expect(codeR['400'].content?.['application/json']?.schema?.$ref).toBe(
         '#/components/schemas/DeviceAuthCodeError'
       );
       const verifyR = (spec.paths['/auth/device'] as { get: Operation }).get.responses!;
-      expect(Object.keys(verifyR).sort()).toEqual(['200', '400']);
+      expect(Object.keys(verifyR).sort()).toEqual(['200', '400', '429']);
       expect(verifyR['400'].content?.['application/json']?.schema?.$ref).toBe(
         '#/components/schemas/DeviceAuthVerifyError'
       );
+    });
+
+    // Every device operation is rate-limited, but by DIFFERENT layers, and the
+    // shape a client must decode differs accordingly. The three paths mounted
+    // behind Express's authMutationRateLimit (apps/auth/app.ts
+    // `rateLimitedPaths`) answer `{error}` — AuthPlainErrorResponse — and set
+    // the standard `Retry-After`. The two the express layer deliberately skips
+    // (/device/token, whose `slow_down` body a 429 would shadow; GET /device,
+    // which cannot be mounted without prefix-matching /device/token) fall
+    // through to better-auth's own limiter, which answers `{message}` —
+    // AuthRateLimitedResponse — and sets the non-standard `X-Retry-After`.
+    //
+    // The single-shape modeling is load-bearing and the derivation is easy to
+    // get backwards: on /auth/sign-in/* the 429 is a oneOf because better-auth's
+    // 3-per-10s special rule bites BEFORE the shared 10-per-15-min express
+    // bucket. On /device/* that ordering INVERTS — `getDefaultSpecialRules()`
+    // matches no device path, so better-auth falls back to its general
+    // 100-per-10s default, which the express bucket always exhausts first. Any
+    // future edit that "harmonizes" these into a oneOf for consistency with the
+    // sign-in routes would be documenting an unreachable branch.
+    it('models each device 429 against the layer that actually answers it', () => {
+      const plainLimited = ['/auth/device/code', '/auth/device/approve', '/auth/device/deny'];
+      for (const route of plainLimited) {
+        const r = (spec.paths[route] as { post: Operation }).post.responses!['429'];
+        expect(r.content?.['application/json']?.schema?.$ref, route).toBe(
+          '#/components/schemas/AuthPlainErrorResponse'
+        );
+        expect(Object.keys(r.headers ?? {}), route).toEqual(['Retry-After']);
+      }
+
+      const betterAuthLimited: Array<[string, 'get' | 'post']> = [
+        ['/auth/device/token', 'post'],
+        ['/auth/device', 'get'],
+      ];
+      for (const [route, method] of betterAuthLimited) {
+        const r = (spec.paths[route] as Record<string, Operation>)[method].responses!['429'];
+        expect(r.content?.['application/json']?.schema?.$ref, route).toBe(
+          '#/components/schemas/AuthRateLimitedResponse'
+        );
+        expect(Object.keys(r.headers ?? {}), route).toEqual(['X-Retry-After']);
+      }
     });
 
     it('wires each endpoint 200 success response to its own response schema', () => {
@@ -4421,14 +4526,30 @@ describe('OpenAPI Specification', () => {
 
     // ---- version forcing-function ----
 
-    it('pins the verified better-auth version so a bump forces a conscious re-verification', () => {
-      // The contract above mirrors better-auth 1.6.25. Re-verified 2026-07-31 for the
-      // 1.6.20→1.6.25 bump: no device-auth wire changes across 1.6.21–1.6.25 (only a
-      // 1.6.21 Zod-v4 compat fix), so the field/enum/security snapshots above still hold.
-      // (1.6.24 also regressed jwtClient()'s CLIENT type — better-auth#10515 — which is
-      // suppressed in src/auth-client/index.ts and unrelated to the wire contract here.)
-      // If this fails after a bump, re-verify routes.mjs against the new version, update
-      // the enums/fields above, then bump this string.
+    it('pins this repo\'s better-auth dev dependency as a tripwire on the mirrored wire shapes', () => {
+      // READ THIS BEFORE BUMPING THE STRING. What this asserts on is
+      // wxyc-shared's OWN node_modules/better-auth — a dev dependency of a
+      // package that serves no HTTP traffic. It is NOT the version the shapes
+      // above were verified against, and it is NOT the version the deployed
+      // auth service runs (that is Backend-Service's apps/auth copy, 1.6.30 at
+      // the time of writing). This repo has no visibility into Backend-Service's
+      // lockfile, so it cannot assert on the version that actually matters.
+      //
+      // It earns its place anyway, as a TRIPWIRE rather than a verification: a
+      // dependabot bump here is the event most likely to coincide with an
+      // upstream wire change, and it is the only better-auth signal this repo's
+      // CI can see. Treat a failure as "go re-read routes.mjs", never as
+      // "the mirror has been re-verified".
+      //
+      // Re-verified 2026-07-31 for the 1.6.20→1.6.25 bump: no device-auth wire
+      // changes across 1.6.21–1.6.25 (only a 1.6.21 Zod-v4 compat fix), so the
+      // field/enum/security snapshots above still hold. (1.6.24 also regressed
+      // jwtClient()'s CLIENT type — better-auth#10515 — which is suppressed in
+      // src/auth-client/index.ts and unrelated to the wire contract here.)
+      //
+      // Bumping this string is therefore a three-part job, and doing only the
+      // third part defeats the whole mechanism: re-diff routes.mjs against the
+      // new version, update the enums/fields above to match, THEN bump.
       const ba = JSON.parse(
         readFileSync(join(__dirname, '..', 'node_modules', 'better-auth', 'package.json'), 'utf-8')
       ) as { version: string };
