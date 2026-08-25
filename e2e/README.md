@@ -21,6 +21,51 @@ npm run test:e2e
 npm run test:e2e -- e2e/flowsheet.test.ts
 ```
 
+## Shared session fixtures (`global-setup.ts`)
+
+`vitest.e2e.config.ts` registers `e2e/global-setup.ts` as a vitest
+`globalSetup` module. It runs once, in the main process, before any test
+file below is forked, and mints the anonymous session, the credentialed
+(DJ) session, and a `POST /auth/wxyc/lookup-email` "no match" probe that
+every other file in this directory would otherwise re-mint on its own —
+against the SAME shared, cross-service rate-limit bucket
+(`apps/auth/app.ts`'s `authMutationRateLimit`: 10 requests / 15 min per
+`X-Real-IP`, one reused Express middleware instance mounted across nine
+path prefixes). It exposes the results via `process.env`, which every
+worker process inherits at fork time; `e2e/setup.ts`'s `getSharedAnonymousSession`
+/ `getSharedDjSession` / `getSharedLookupEmailNullProbe` /
+`exchangeSessionForJwt` are the one place every consumer reads them from.
+
+Before this existed, seven files independently signed in a combined 15
+times against that one 10-request bucket in a single `npm run test:e2e`
+run — over the ceiling, so a full run could rate-limit itself.
+`catalog`, `concerts`, `proxy`, and `recent-entries` now read the shared
+fixtures instead of minting their own; `auth.test.ts` and
+`tests/e2e-contracts.test.ts` still sign in for themselves and move over
+in the two PRs that follow this one, which is where the full per-file
+accounting lands.
+
+When `E2E_TEST_DJ_USERNAME` is provisioned, the shared credentialed mint
+reroutes from `/sign-in/email` to `/sign-in/username` with no code change
+required. If `/sign-in/username` itself then fails (a misconfigured or
+mismatched secret), `global-setup.ts` retries the shared mint once via
+`/sign-in/email` rather than leaving the fixture unset — that fallback
+costs one more request.
+
+Note this accounting only holds because e2e test FILES run sequentially
+(`fileParallelism: false`); concurrent files spend the same one bucket in
+bursts.
+
+`e2e/global-setup.ts` polls BOTH origins before minting anything (the
+backend's `/healthcheck` and the auth service's own built-in `GET /ok` —
+an earlier version only polled the backend, so a slow-starting auth
+service could make the very first mint fail before anything had a chance
+to come up), and every one of its live fetches carries an explicit
+timeout. Set `E2E_SKIP_SHARED_AUTH_MINTS=true` to skip every mint
+entirely for a targeted single-file run of a file that needs no auth at
+all (e.g. `flowsheet.test.ts`), so that run doesn't spend covered
+requests against the shared budget for fixtures nothing in it reads.
+
 ## Test Categories
 
 ### Auth E2E (`auth.test.ts`)

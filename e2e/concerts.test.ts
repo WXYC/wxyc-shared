@@ -29,7 +29,14 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import postgres from 'postgres';
-import { createE2EClient, getAnonymousJwt, getE2EConfig, waitForService, type E2EClient } from './setup.js';
+import {
+  createE2EClient,
+  exchangeSessionForJwt,
+  getSharedAnonymousSession,
+  getE2EConfig,
+  waitForService,
+  type E2EClient,
+} from './setup.js';
 import { ConcertStatus, type Concert, type ConcertsResponse } from '../src/generated/models/index.js';
 
 // Namespaced so teardown is a prefix DELETE and nothing leaks across runs
@@ -253,7 +260,24 @@ describe('Concerts E2E', () => {
   beforeAll(async () => {
     await waitForService(`${config.baseUrl}/healthcheck`);
     client = createE2EClient();
-    client.setAuthToken(await getAnonymousJwt(config.authUrl));
+
+    // Authenticate using the anonymous session e2e/global-setup.ts already
+    // minted for this run, rather than signing in again -- issue #379
+    // review fix-pass #2, finding #2. See e2e/auth.test.ts's
+    // budget-arithmetic comment for why sharing this across files is
+    // load-bearing.
+    const shared = getSharedAnonymousSession();
+    if (!shared) {
+      throw new Error(
+        'Expected e2e/global-setup.ts to have minted a shared anonymous session ' +
+          '(E2E_GLOBAL_ANON_SESSION_TOKEN unset) -- every test in this file needs it.'
+      );
+    }
+    const exchanged = await exchangeSessionForJwt(shared.sessionToken, config.authUrl);
+    if (!exchanged) {
+      throw new Error('Failed to exchange the shared anonymous session for a JWT.');
+    }
+    client.setAuthToken(exchanged.token);
 
     if (!hasDb) return;
 

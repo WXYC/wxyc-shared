@@ -7,6 +7,13 @@ export default defineConfig({
     // e2e/**/*.test.ts includes all subdirectories (contract/, types/, etc.)
     // tests/e2e-contracts.test.ts is the cross-service invariants suite.
     include: ['e2e/**/*.test.ts', 'tests/e2e-contracts.test.ts'],
+    // Mints the shared anonymous/credentialed sessions the test files below
+    // read, once for the whole run, instead of each file signing in for
+    // itself -- see e2e/global-setup.ts's own doc comment for the request
+    // budget this exists to hold. Depends on the sequential file execution
+    // configured below: a shared credentialed session is only safe when one
+    // file at a time is using it.
+    globalSetup: ['./e2e/global-setup.ts'],
     testTimeout: 30000,
     hookTimeout: 30000,
     // E2E test FILES must run sequentially, not in parallel (this does not
