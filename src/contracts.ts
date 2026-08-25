@@ -130,6 +130,102 @@ export const CONTRACTS = {
    */
   LIVE_FS_EVENT_ENVELOPE_SHAPE:
     'every liveFs event carries the shape { type, payload, timestamp }',
+
+  /**
+   * `POST /auth/sign-in/anonymous` returns `{token, user}`, where `user.id`
+   * is the newly-created anonymous user's id and a session token arrives on
+   * EITHER the `set-auth-token` response header or the body's `token` field
+   * (whichever a caller reads).
+   *
+   * Provider: better-auth's anonymous plugin
+   *           (`dist/plugins/anonymous/index.mjs` signInAnonymous) plus the
+   *           bearer plugin's response-header mirror
+   *           (`dist/plugins/bearer/index.mjs`).
+   * Consumer: wxyc-ios-64 / WXYC-Android's `AuthNetworkClient.signInAnonymously`
+   *           (the only credential-free auth mechanism those apps have);
+   *           `e2e/global-setup.ts` (mints the shared anonymous session
+   *           this contract's assertions in `tests/e2e-contracts.test.ts`
+   *           and every other e2e file read via `getSharedAnonymousSession`
+   *           in `e2e/setup.ts`).
+   *
+   * Status: ENFORCED. Verified 2026-08-24 against a live POST to
+   * api.wxyc.org: the header and body values authenticate interchangeably
+   * as a bearer on GET /auth/token (the bearer plugin re-signs a bare
+   * token using the server secret when it arrives with no signature
+   * segment), so a client reading either succeeds. The full response body
+   * also carries the admin() plugin's `role`/`banned`/`banReason`/`banExpires`
+   * fields and WXYC's `user.additionalFields` — see `AuthUser` in
+   * `api.yaml` for the complete, verified shape.
+   */
+  ANONYMOUS_SIGN_IN_SHAPE:
+    'POST /auth/sign-in/anonymous returns {token, user.id}, with the session token on set-auth-token or the body',
+
+  /**
+   * The session token VALUE embedded in `set-auth-token` never changes for
+   * the life of a session. `GET /auth/token`'s rolling renewal re-issues
+   * the session cookie (and the bearer plugin mirrors it onto
+   * `set-auth-token`) only once per `session.updateAge` (Backend-Service:
+   * 1 day), but the re-issued value is a DETERMINISTIC RE-ENCODING of the
+   * same token — `<token>.<HMAC-base64url>` — never a new token; liveness
+   * comes from `expiresAt` being extended server-side under that same
+   * token, not from the client persisting a rotated credential. Whenever
+   * `set-auth-token` is present, its value starts with the caller's
+   * current session token followed by `.`; on an ordinary call inside the
+   * renewal window the header is simply absent and the client keeps using
+   * the token it already has.
+   *
+   * This corrects an earlier, false version of this contract
+   * (SET_AUTH_TOKEN_ROTATES_ON_RENEWAL) that assumed the re-emitted header
+   * carried a NEW token. It does not: see wxyc-ios-64#970's premise
+   * correction, verified directly against the better-auth 1.6.30 dist
+   * Backend-Service's apps/auth actually loads.
+   *
+   * Provider: better-auth's session refresh (`GET /auth/token`'s
+   *           roll-forward calls `internalAdapter.updateSession(token,
+   *           {expiresAt, updatedAt})` — dist/api/routes/session.mjs —
+   *           which keys on the token and rewrites only the two timestamp
+   *           columns; `token: generateId(32)` runs once at session
+   *           creation and no code path rewrites it) plus the bearer
+   *           plugin's `after` hook, which mirrors the session cookie's
+   *           value (already `<token>.<hmac>` — better-call's signed-cookie
+   *           format) onto `set-auth-token` whenever a fresh `set-cookie`
+   *           appears (`dist/plugins/bearer/index.mjs`).
+   * Consumer: wxyc-dj-ios `AuthService.captureRotatedSessionToken` — its
+   *           name predates this correction; the value it captures is a
+   *           same-token re-encoding, not a new token, and persisting it
+   *           is a no-op today wherever the guard already compares
+   *           decoded-token equality.
+   *
+   *           The wxyc-swift-auth plan has NOT yet been corrected. Its
+   *           Phase B/D1 text still describes rotation as real ("D1 —
+   *           rotation capture", `rotatedSessionToken // set-auth-token
+   *           when the server rotated"), and wxyc-ios-64#970 is still open
+   *           under the title "capture set-auth-token rotation in
+   *           mintJWT". WXYC/wiki#121 is the open PR that rewrites that
+   *           rationale to the surviving one — wire-compatibility with a
+   *           future encoding change, not "the token actually rotates."
+   *           Stated in the future tense deliberately: this file ships in
+   *           the published @wxyc/shared package, so a past-tense claim
+   *           here would assert to every consumer that a correction had
+   *           landed upstream while the plan they'd go read still said the
+   *           opposite. When wiki#121 merges, replace this paragraph with
+   *           the plain statement of the amended rationale.
+   *
+   * Status: ENFORCED. Both assertable halves hold unconditionally against
+   * a live stack: (1) a brand-new session's first GET /auth/token omits
+   * set-auth-token entirely (nowhere near session.updateAge); (2) whenever
+   * a sign-in response carries BOTH the header and the body's raw `token`
+   * (every sign-in route in this section does), the header value starts
+   * with `<body.token>.`. Asserting the renewal case itself — that the
+   * header, when it DOES appear on a later call, still carries the SAME
+   * token — would need a session aged past session.updateAge (1 day) or a
+   * shortened local override, neither available to this harness; that
+   * positive-renewal case is left unasserted rather than pinned with an
+   * `it.skip` whose target (a NEW token appearing) was never true to begin
+   * with.
+   */
+  SET_AUTH_TOKEN_NEVER_ROTATES:
+    'the session token value in set-auth-token never changes for a session; renewal re-encodes the same token as <token>.<hmac> and extends expiresAt, it does not issue a new token',
 } as const;
 
 /** A reference to one of the named cross-service contracts. */

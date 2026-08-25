@@ -6,9 +6,15 @@
  * names the contract that broke.
  *
  * Two contracts (PLAY_ORDER_PER_SHOW_MONOTONIC, ROTATION_DEDUP_PER_ALBUM_BIN)
- * are NOT yet enforced on the server side. Those tests are `it.skip`-ed; the
- * assertion bodies still describe target state. To enable them, replace
- * `it.skip` with `it` once the BS-side fix lands (see comments inline).
+ * are NOT yet enforced -- both blocked server-side. Those tests are
+ * `it.skip`-ed; the assertion bodies still describe target state. To enable
+ * them, replace `it.skip` with `it` once the blocker clears (see comments
+ * inline, and INVARIANTS.md's "Toggling skipped contracts"). A third
+ * contract, SET_AUTH_TOKEN_NEVER_ROTATES, has an unassertable-without-an-
+ * aged-session HALF (whether a header appearing on a later call still
+ * carries the same token) that is simply omitted rather than `it.skip`-ed --
+ * see that contract's own comment below for why pinning an impossible
+ * positive-rotation assertion was itself the defect this fix pass corrects.
  *
  * Prerequisites:
  *   - Backend service at $E2E_BASE_URL (default http://localhost:8080)
@@ -22,9 +28,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   createE2EClient,
-  createE2EAuthHelper,
+  createE2EAuthClient,
+  exchangeSessionForJwt,
+  getSharedAnonymousSession,
+  getSharedDjSession,
   type E2EClient,
-  type E2EAuthHelper,
   waitForService,
   getE2EConfig,
 } from '../e2e/setup.js';
@@ -57,7 +65,6 @@ const VALID_BACKEND_ROLES = new Set([
 
 describe('Cross-service contracts (E2E)', () => {
   let client: E2EClient;
-  let authHelper: E2EAuthHelper;
   const config = getE2EConfig();
 
   const hasCredentials = Boolean(config.testDjEmail && config.testDjPassword);
@@ -66,18 +73,25 @@ describe('Cross-service contracts (E2E)', () => {
   beforeAll(async () => {
     await waitForService(`${config.baseUrl}/healthcheck`);
     client = createE2EClient();
-    authHelper = createE2EAuthHelper();
 
+    // Authenticate using the DJ session e2e/global-setup.ts already minted
+    // for this run, rather than signing in again -- issue #379 review
+    // fix-pass #2, finding #2. See e2e/auth.test.ts's budget-arithmetic
+    // comment for the full per-file accounting this collapses (this file
+    // alone used to spend 3 live requests here and in the two describes
+    // below; it now spends 0).
     if (hasCredentials) {
-      const { payload } = await authHelper.authenticateClient(
-        client,
-        config.testDjEmail!,
-        config.testDjPassword!
-      );
+      const shared = getSharedDjSession();
+      if (shared) {
+        const exchanged = await exchangeSessionForJwt(shared.sessionToken, config.authUrl);
+        if (exchanged) {
+          client.setAuthToken(exchanged.token);
 
-      // Join a show so we can post flowsheet entries.
-      const djId = payload.sub || payload.id;
-      await client.post('/flowsheet/join', { dj_id: djId });
+          // Join a show so we can post flowsheet entries.
+          const djId = exchanged.payload.sub || exchanged.payload.id;
+          await client.post('/flowsheet/join', { dj_id: djId });
+        }
+      }
     }
   });
 
@@ -173,36 +187,50 @@ describe('Cross-service contracts (E2E)', () => {
   //
   // ENFORCED. The 2026-04-30 canary deploy ate hours diagnosing this
   // because the contract was implicit; this test pins it.
+  //
+  // Reuses the shared DJ session's cookies (e2e/global-setup.ts) instead
+  // of signing in again -- issue #379 review fix-pass #2, finding #2. This
+  // test previously cost its own dedicated /sign-in/email request because
+  // it needs both a cookie-based JWT mint AND the raw cookie value (to
+  // prove that value rejected as a bearer); the shared fixture already
+  // carries both, and /auth/token itself is not rate-limited, so this now
+  // costs nothing against the shared budget.
   it.skipIf(!hasCredentials)(
     `upholds CONTRACTS.BEARER_IS_JWT_NOT_SESSION: ${CONTRACTS.BEARER_IS_JWT_NOT_SESSION}`,
     async () => {
-      // Fresh sign-in to capture both the session cookies and the JWT.
-      const helper = createE2EAuthHelper();
-      const { cookies } = await helper.signIn(
-        config.testDjEmail!,
-        config.testDjPassword!
-      );
-      const jwt = await helper.getJWTToken();
-      expect(jwt, 'sign-in must mint a JWT via /auth/token').not.toBeNull();
+      const shared = getSharedDjSession();
+      expect(shared?.cookieHeader, 'expected the shared DJ session to have captured cookies').toBeTruthy();
+
+      const authClient = createE2EAuthClient();
+      const tokenResponse = await authClient.get<{ token?: string }>('/token', {
+        headers: { cookie: shared!.cookieHeader! },
+      });
+      expect(tokenResponse.status, 'cookie-based sign-in must mint a JWT via /auth/token').toBe(200);
+      const jwtToken = tokenResponse.body?.token;
+      expect(jwtToken, 'sign-in must mint a JWT via /auth/token').toBeTruthy();
+      const payloadB64 = jwtToken!.split('.')[1];
+      const payload: Record<string, unknown> = payloadB64
+        ? JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'))
+        : {};
 
       // 1. JWT is shape-correct (header.payload.sig, RS256, has role + sub).
-      const parts = jwt!.token.split('.');
+      const parts = jwtToken!.split('.');
       expect(parts.length, 'JWT must be a 3-segment compact serialization').toBe(3);
       const header = JSON.parse(
-        Buffer.from(parts[0], 'base64url').toString('utf-8')
+        Buffer.from(parts[0]!, 'base64url').toString('utf-8')
       );
       expect(header.alg, 'JWT must be RS256-signed (JWKS-verifiable)').toBe(
         'RS256'
       );
-      expect(jwt!.payload.role, 'JWT must carry a role claim').toBeTruthy();
+      expect(payload.role, 'JWT must carry a role claim').toBeTruthy();
       expect(
-        VALID_BACKEND_ROLES.has(jwt!.payload.role as string),
-        `JWT role "${jwt!.payload.role}" must be one the backend recognizes`
+        VALID_BACKEND_ROLES.has(payload.role as string),
+        `JWT role "${payload.role}" must be one the backend recognizes`
       ).toBe(true);
 
       // 2. JWT bearer succeeds against a protected route.
       const jwtClient = createE2EClient();
-      jwtClient.setAuthToken(jwt!.token);
+      jwtClient.setAuthToken(jwtToken!);
       const okResp = await jwtClient.get('/library?artist_name=test');
       // 200 (results) or 404 (no match) are both fine; never 401.
       expect(
@@ -214,8 +242,9 @@ describe('Cross-service contracts (E2E)', () => {
       // 3. Session cookie value (NOT a JWT) used as a bearer must be rejected.
       // VIOLATION SYMPTOM: clients send the session token directly, get 401,
       // burn hours diagnosing. This is exactly the canary deploy outage.
-      const sessionTokenLike = cookies
-        .map((c) => c.split('=')[1]?.split(';')[0])
+      const sessionTokenLike = shared!
+        .cookieHeader!.split('; ')
+        .map((c) => c.split('=')[1])
         .find((v) => Boolean(v));
       if (sessionTokenLike) {
         const sessClient = createE2EClient();
@@ -447,6 +476,90 @@ describe('Cross-service contracts (E2E)', () => {
       // Sanity: the entry we just created should still be in the show.
       expect(post.body.show_id).toBeTruthy();
       expect(entryId).toBeGreaterThan(0);
+    }
+  );
+
+  // ── ANONYMOUS_SIGN_IN_SHAPE ───────────────────────────────────────────
+  //
+  // ENFORCED. No credentials needed -- anonymous sign-in requires none by
+  // definition, so this test runs unconditionally. Reads
+  // `e2e/global-setup.ts`'s shared anonymous session rather than signing
+  // in itself -- issue #379 review fix-pass #2, finding #2. The shared
+  // fixture keeps the header and body token values distinct (not just
+  // collapsed into one), which is what lets this test AND the
+  // deterministic-prefix test below both assert their shape-specific
+  // properties with zero additional live requests.
+  it(`upholds CONTRACTS.ANONYMOUS_SIGN_IN_SHAPE: ${CONTRACTS.ANONYMOUS_SIGN_IN_SHAPE}`, async () => {
+    const shared = getSharedAnonymousSession();
+    expect(shared, 'expected e2e/global-setup.ts to have minted a shared anonymous session').not.toBeNull();
+    expect(
+      shared!.setAuthTokenHeader || shared!.bodyToken,
+      'a session token must arrive on the header or the body'
+    ).toBeTruthy();
+    expect(shared!.userId, 'anonymous sign-in must return a user id').toBeTruthy();
+
+    // Whichever token a caller reads must actually authenticate -- this is
+    // the interchangeability the contract statement leans on ("whichever a
+    // caller reads"). /auth/token is not rate-limited, so this costs
+    // nothing against the shared budget.
+    const authClient = createE2EAuthClient();
+    const tokenResponse = await authClient.get<{ token?: string }>('/token', {
+      headers: { Authorization: `Bearer ${shared!.sessionToken}` },
+    });
+    expect(tokenResponse.status, 'the returned session token must mint a JWT').toBe(200);
+    expect(tokenResponse.body?.token).toBeTruthy();
+  });
+
+  // ── SET_AUTH_TOKEN_NEVER_ROTATES ────────────────────────────────────────
+  //
+  // Corrected contract (was SET_AUTH_TOKEN_ROTATES_ON_RENEWAL -- see
+  // wxyc-ios-64#970's premise correction and this contract's doc comment in
+  // src/contracts.ts): the session token value never changes; renewal
+  // re-encodes the same token as `<token>.<hmac>` and only extends
+  // expiresAt. Both halves below are honestly assertable without an aged
+  // session, so BOTH run unconditionally -- there is no `it.skip` here.
+  // Asserting the renewal case itself (a header appearing on a LATER call
+  // still carries the same token, just re-encoded) would need a session
+  // aged past session.updateAge (1 day) or a shortened local override,
+  // neither available to this harness; that case is left unasserted rather
+  // than pinned with an it.skip whose original target -- a NEW token
+  // appearing -- was never true to begin with. See wxyc-ios-64#970 if an
+  // aged-session fixture is ever added. Both assertions below reuse
+  // `e2e/global-setup.ts`'s shared anonymous session rather than signing
+  // in again.
+
+  it('omits set-auth-token on GET /auth/token while the session is nowhere near session.updateAge', async () => {
+    const shared = getSharedAnonymousSession();
+    expect(shared, 'expected e2e/global-setup.ts to have minted a shared anonymous session').not.toBeNull();
+    const authClient = createE2EAuthClient();
+
+    const response = await authClient.get('/token', {
+      headers: { Authorization: `Bearer ${shared!.sessionToken}` },
+    });
+
+    expect(response.status).toBe(200);
+    // A brand-new session is nowhere near session.updateAge (1 day), so no
+    // renewal (and therefore no header) is expected -- see INVARIANTS.md's
+    // status note for this contract.
+    expect(response.headers.get('set-auth-token')).toBeNull();
+  });
+
+  it(
+    `upholds CONTRACTS.SET_AUTH_TOKEN_NEVER_ROTATES (deterministic-prefix property): ${CONTRACTS.SET_AUTH_TOKEN_NEVER_ROTATES}`,
+    () => {
+      // Every sign-in route in this section returns the raw session token in
+      // the body's `token` field AND (per api.yaml) the signed re-encoding on
+      // set-auth-token -- when both are present, the header must start with
+      // the body token followed by "." (the HMAC separator), never a
+      // different token.
+      const shared = getSharedAnonymousSession();
+      expect(shared, 'expected e2e/global-setup.ts to have minted a shared anonymous session').not.toBeNull();
+      expect(shared!.bodyToken, 'anonymous sign-in must return the raw session token in the body').toBeTruthy();
+      expect(shared!.setAuthTokenHeader, 'anonymous sign-in must set set-auth-token').toBeTruthy();
+      expect(
+        shared!.setAuthTokenHeader!.startsWith(`${shared!.bodyToken}.`),
+        `set-auth-token ("${shared!.setAuthTokenHeader}") must start with the body's raw token ("${shared!.bodyToken}") followed by "." -- it is a re-encoding of the same token, never a different one`
+      ).toBe(true);
     }
   );
 });
