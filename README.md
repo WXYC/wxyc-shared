@@ -75,6 +75,8 @@ The script will:
 | `WXYC_DEV_ROOT` | `..` | Directory containing/for WXYC repositories |
 | `BACKEND_BRANCH` | `main` | Backend-Service branch to checkout |
 | `FRONTEND_BRANCH` | `main` | dj-site branch to checkout |
+| `LIBRARY_METADATA_URL` | empty | LML base URL written into Backend-Service's `.env`. Empty is a working config -- Backend-Service gates every LML call site on `isLmlConfigured()`, so LML features no-op cleanly when unset. Never point this at LML production; it proxies Discogs' shared, rate-limited API budget. |
+| `LML_API_KEY` | empty | LML bearer token written into Backend-Service's `.env`, sent as `Authorization: Bearer <key>` |
 
 ### Health Check Endpoints
 

@@ -22,9 +22,11 @@
 #   --help            Show this help message
 #
 # Environment Variables:
-#   WXYC_DEV_ROOT     Directory for WXYC repositories (default: parent of this script)
-#   BACKEND_BRANCH    Backend-Service branch to checkout (default: main)
-#   FRONTEND_BRANCH   dj-site branch to checkout (default: main)
+#   WXYC_DEV_ROOT          Directory for WXYC repositories (default: parent of this script)
+#   BACKEND_BRANCH         Backend-Service branch to checkout (default: main)
+#   FRONTEND_BRANCH        dj-site branch to checkout (default: main)
+#   LIBRARY_METADATA_URL   LML base URL for Backend-Service (default: empty)
+#   LML_API_KEY            LML bearer token for Backend-Service (default: empty)
 
 set -euo pipefail
 
@@ -69,6 +71,20 @@ AUTH_USERNAME=test_dj1
 AUTH_PASSWORD=testpassword123
 TUBAFRENZY_URL=http://localhost:${backend_port}
 MIRROR_API_KEY=wxyc-local-dev-mirror-key
+
+### Library Metadata Lookup (LML) Service
+# Empty is a working default: Backend-Service gates every LML call site on
+# isLmlConfigured(), so an unset URL makes LML features no-op cleanly rather
+# than error. Point this at a real deployment only when you need one (e.g.
+# LIBRARY_METADATA_URL=https://library-metadata-lookup-staging.up.railway.app)
+# -- never at production. LML proxies Discogs, whose rate limit is a shared
+# budget with dj.wxyc.org and the iOS app, and some Backend-Service paths
+# through LML write rather than just read (streaming-check on catalog add,
+# cache refresh).
+LIBRARY_METADATA_URL=${LIBRARY_METADATA_URL}
+# Bearer token sent as "Authorization: Bearer <key>"; required once
+# LML_REQUIRE_AUTH is on.
+LML_API_KEY=${LML_API_KEY}
 EOF
 }
 
@@ -177,6 +193,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WXYC_DEV_ROOT="${WXYC_DEV_ROOT:-$(dirname "$(dirname "$SCRIPT_DIR")")}"
 BACKEND_BRANCH="${BACKEND_BRANCH:-main}"
 FRONTEND_BRANCH="${FRONTEND_BRANCH:-main}"
+LIBRARY_METADATA_URL="${LIBRARY_METADATA_URL:-}"
+LML_API_KEY="${LML_API_KEY:-}"
 
 # Options
 SKIP_CLONE=false
@@ -227,9 +245,11 @@ Options:
   --help                Show this help message
 
 Environment Variables:
-  WXYC_DEV_ROOT     Directory for WXYC repositories (default: $WXYC_DEV_ROOT)
-  BACKEND_BRANCH    Backend-Service branch to checkout (default: $BACKEND_BRANCH)
-  FRONTEND_BRANCH   dj-site branch to checkout (default: $FRONTEND_BRANCH)
+  WXYC_DEV_ROOT          Directory for WXYC repositories (default: $WXYC_DEV_ROOT)
+  BACKEND_BRANCH         Backend-Service branch to checkout (default: $BACKEND_BRANCH)
+  FRONTEND_BRANCH        dj-site branch to checkout (default: $FRONTEND_BRANCH)
+  LIBRARY_METADATA_URL   LML base URL for Backend-Service (default: $LIBRARY_METADATA_URL)
+  LML_API_KEY            LML bearer token for Backend-Service (default: $LML_API_KEY)
 
 Examples:
   # Full setup from scratch

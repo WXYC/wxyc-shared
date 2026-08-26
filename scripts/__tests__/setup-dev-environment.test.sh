@@ -248,6 +248,37 @@ teardown() {
     grep -A30 "generate_backend_env()" "$SCRIPT_PATH" | grep -q "AUTH_PORT="
 }
 
+@test "generate_backend_env includes the LML variables" {
+    grep -q "^LIBRARY_METADATA_URL=" "$SCRIPT_PATH"
+    grep -q "^LML_API_KEY=" "$SCRIPT_PATH"
+}
+
+@test "generate_backend_env defaults the LML variables to empty" {
+    unset LIBRARY_METADATA_URL LML_API_KEY 2>/dev/null || true
+    source "$SCRIPT_PATH"
+    run generate_backend_env 8080 8082 3000 5432
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qx "LIBRARY_METADATA_URL="
+    echo "$output" | grep -qx "LML_API_KEY="
+}
+
+@test "generate_backend_env honors LIBRARY_METADATA_URL and LML_API_KEY overrides" {
+    export LIBRARY_METADATA_URL="https://library-metadata-lookup-staging.up.railway.app"
+    export LML_API_KEY="test-key-abc123"
+    source "$SCRIPT_PATH"
+    run generate_backend_env 8080 8082 3000 5432
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qx "LIBRARY_METADATA_URL=https://library-metadata-lookup-staging.up.railway.app"
+    echo "$output" | grep -qx "LML_API_KEY=test-key-abc123"
+}
+
+@test "help documents LIBRARY_METADATA_URL and LML_API_KEY" {
+    run "$SCRIPT_PATH" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"LIBRARY_METADATA_URL"* ]]
+    [[ "$output" == *"LML_API_KEY"* ]]
+}
+
 # =============================================================================
 # Port Resolution Tests
 # =============================================================================
