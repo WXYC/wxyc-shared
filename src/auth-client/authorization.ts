@@ -1,5 +1,55 @@
-import type { WXYCRole } from "./roles.js";
+import { type WXYCRole } from "./roles.js";
 import type { Capability } from "./capabilities.js";
+
+// ============================================================================
+// Role Canonicalization
+// ============================================================================
+
+/**
+ * The complete role-alias table: every accepted input string (after
+ * lower-casing and trimming) and the canonical station role it resolves to.
+ *
+ * Exported as data deliberately: Backend-Service pins this map by deep-equal
+ * so a change here fails its CI on the dependency bump instead of silently
+ * widening its admin-flag grant. Keep it a literal enumeration — no generic
+ * separator folding. The asymmetry (`music-director` resolves,
+ * `station-manager` does not) is historical, preserved from the switch this
+ * table replaced; widening it is a deliberate follow-up, never a drive-by.
+ */
+export const ROLE_ALIASES: Record<string, WXYCRole> = {
+  admin: "stationManager",
+  owner: "stationManager",
+  stationmanager: "stationManager",
+  station_manager: "stationManager",
+  musicdirector: "musicDirector",
+  music_director: "musicDirector",
+  "music-director": "musicDirector",
+  dj: "dj",
+  member: "member",
+};
+
+/**
+ * Fail-closed canonicalization: resolve a role string (case-insensitive,
+ * trimmed) to a canonical WXYCRole, or `undefined` for anything unrecognized —
+ * including better-auth's global `user` role and prototype keys like
+ * `toString` (the `Object.hasOwn` guard is what keeps a plain-object lookup
+ * from leaking `Object.prototype` members).
+ *
+ * This is the primitive servers build on: Backend-Service's `normalizeRole`
+ * 403s on `undefined`. `roleToAuthorization` below is the fail-open display
+ * projection clients use (`undefined` → `Authorization.NO`).
+ */
+export function canonicalizeRole(
+  role: string | null | undefined
+): WXYCRole | undefined {
+  if (!role) {
+    return undefined;
+  }
+  const normalized = role.toLowerCase().trim();
+  return Object.hasOwn(ROLE_ALIASES, normalized)
+    ? ROLE_ALIASES[normalized]
+    : undefined;
+}
 
 // ============================================================================
 // Authorization Enum
@@ -37,13 +87,11 @@ export const AUTHORIZATION_LABELS: Record<Authorization, string> = {
 // ============================================================================
 
 /**
- * Maps a WXYCRole string to the Authorization enum.
- *
- * Handles variations:
- * - Standard roles: "member", "dj", "musicDirector", "stationManager"
- * - Snake case: "station_manager", "music_director"
- * - Better-auth defaults: "admin", "owner" -> SM (safe fallback)
- * - "user" -> NO (member-level)
+ * Maps a role string to the Authorization enum — the fail-open display
+ * projection of `canonicalizeRole`: anything the alias table doesn't resolve
+ * (including `null`/`undefined` and better-auth's global `user` role) maps to
+ * `Authorization.NO` rather than failing. Servers should use
+ * `canonicalizeRole` directly and reject on `undefined`.
  *
  * @param role - The role string from better-auth
  * @returns The corresponding Authorization enum value
@@ -51,26 +99,14 @@ export const AUTHORIZATION_LABELS: Record<Authorization, string> = {
 export function roleToAuthorization(
   role: WXYCRole | string | null | undefined
 ): Authorization {
-  if (!role) {
-    return Authorization.NO;
-  }
-
-  const normalized = role.toLowerCase().trim();
-
-  switch (normalized) {
-    case "admin":
-    case "owner":
-    case "stationmanager":
-    case "station_manager":
+  switch (canonicalizeRole(role)) {
+    case "stationManager":
       return Authorization.SM;
-    case "musicdirector":
-    case "music_director":
-    case "music-director":
+    case "musicDirector":
       return Authorization.MD;
     case "dj":
       return Authorization.DJ;
     case "member":
-    case "user":
     default:
       return Authorization.NO;
   }

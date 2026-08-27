@@ -233,21 +233,24 @@ import {
   // Role checking
   Authorization,
   roleToAuthorization,
+  canonicalizeRole,
   checkRole,
 
   // Capability checking
   checkCapability,
   hasCapability,
-
-  // Permission system
-  hasPermission,
-  canManageRoster,
 } from '@wxyc/shared/auth-client';
 
-// Check authorization level
+// Check authorization level (fail-open display projection: unknown -> NO)
 const auth = roleToAuthorization(user.role); // "stationManager" -> Authorization.SM
 if (auth >= Authorization.DJ) {
   // User is at least a DJ
+}
+
+// Server-side canonicalization (fail-closed: unknown -> undefined, reject)
+const role = canonicalizeRole(payload.role);
+if (!role) {
+  // 403 — not a recognized station role or alias
 }
 
 // Compile-time enforced authorization checks
@@ -262,12 +265,9 @@ const editorCheck = checkCapability(user, "editor");
 if (editorCheck.authorized) {
   // User can edit website content
 }
-
-// Resource-based permissions
-if (hasPermission(user.role, "catalog", "write")) {
-  // User can modify the music catalog
-}
 ```
+
+Note: per-resource permission grants (what each role may *do*) are not part of this package. The only grant matrix lives in Backend-Service's `auth.roles.ts`, where it is enforced; this package defines who the roles *are*, their order, and the alias strings that resolve to them. Stored and emitted role values are always the four station keys — `canonicalizeRole` merely *accepts* a wider alias set read-side.
 
 ## Available Exports
 
@@ -318,18 +318,16 @@ import { isHeartbeat, AutoDJCommandAction, type AutoDJStatus } from '@wxyc/share
 | `createWXYCAuthClient(baseURL)` | Factory to create auth client |
 | `getJWTToken()` | Get JWT token for API calls |
 | **Authorization** | |
-| `Authorization` | Enum: `NO`, `DJ`, `MD`, `SM`, `ADMIN` |
-| `roleToAuthorization(role)` | Convert role string to Authorization |
+| `Authorization` | Enum: `NO`, `DJ`, `MD`, `SM` (ascending projection of `ROLES`, pinned by test) |
+| `roleToAuthorization(role)` | Role string → Authorization; fail-open (unknown → `NO`) for display gating |
+| `canonicalizeRole(role)` | Role string → `WXYCRole \| undefined`; fail-closed (unknown → `undefined`) for server gating |
+| `ROLE_ALIASES` | The complete accepted-input → role map, exported as data so consumers can pin it |
 | `authorizationToRole(auth)` | Convert Authorization to role string |
 | `checkRole(user, level)` | Check role, returns branded user type |
 | `checkCapability(user, cap)` | Check capability, returns branded user type |
-| **Roles & Permissions** | |
-| `ROLES` | All WXYC roles ordered by privilege |
+| **Roles** | |
+| `ROLES` | All WXYC roles ordered by privilege (the role chain's single declaration) |
 | `WXYCRole` | Type for role strings |
-| `hasPermission(role, resource, action)` | Check resource permission |
-| `canManageRoster(role)` | Check roster management access |
-| `canAssignRoles(role)` | Check if can assign roles to others |
-| `getAssignableRoles(role)` | Get roles this role can assign |
 | **Capabilities** | |
 | `CAPABILITIES` | Cross-cutting capabilities: `editor`, `webmaster` |
 | `Capability` | Type for capability strings |

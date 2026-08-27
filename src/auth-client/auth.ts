@@ -12,7 +12,6 @@ export function isSystemAdmin(user: { role?: string | null }): boolean {
   return user.role === "admin";
 }
 
-export * from "./permissions.js";
 export * from "./roles.js";
 export * from "./capabilities.js";
 export * from "./authorization.js";

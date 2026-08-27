@@ -100,8 +100,7 @@ export async function getJWTToken(): Promise<string | null> {
 // Re-export types from better-auth for convenience
 export type { Session, User } from "better-auth/types";
 
-// Permission system
-export * from "./permissions.js";
+// Role & authorization system
 export * from "./roles.js";
 export * from "./capabilities.js";
 export * from "./authorization.js";
