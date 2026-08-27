@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.47.0
+  version: 1.47.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -350,9 +350,10 @@ components:
           type: string
           nullable: true
           description: >-
-            Resolved public display name of the DJ on the row's show. Nullable
-            per the PII-safe resolution chain (BS#1371): user.djName ->
-            shows.legacy_dj_name -> null; never the real-name PII column.
+            The DJ's public on-air handle, never the DJ's legal name.
+            Resolved through the PII-safe chain (BS#1371): per-show override
+            -> the DJ's chosen handle (`user.djName`) -> the legacy
+            tubafrenzy handle (`shows.legacy_dj_name`) -> `null`.
 
     FlowsheetEntryResponse:
       description: Flowsheet entry as returned by the API with all possible fields
@@ -427,10 +428,11 @@ components:
           type: string
           nullable: true
           description: >-
-            Resolved public display name of the show's DJ. Same PII-safe
-            resolution chain as `FlowsheetEntryFields.dj_name` (BS#1371):
-            per-show override -> `user.djName` -> `shows.legacy_dj_name`
-            (tubafrenzy's `DJ_HANDLE`) -> null. Never the real-name column.
+            The DJ's public on-air handle, never the DJ's legal name. Same
+            PII-safe resolution chain as `FlowsheetEntryFields.dj_name`
+            (BS#1371): per-show override -> the DJ's chosen handle
+            (`user.djName`) -> the legacy tubafrenzy handle
+            (`shows.legacy_dj_name`, tubafrenzy's `DJ_HANDLE`) -> `null`.
         specialty_id:
           type: integer
           nullable: true
@@ -537,6 +539,12 @@ components:
           properties:
             dj_name:
               type: string
+              description: >-
+                The DJ's public on-air handle, never the DJ's legal name —
+                same already-resolved `flowsheet.dj_name` value as
+                `FlowsheetEntryFields.dj_name` (BS#1371). Not currently
+                `$ref`'d by any operation in this document; kept accurate in
+                case that changes.
             isStart:
               type: boolean
 
@@ -737,6 +745,11 @@ components:
           type: string
         dj_name:
           type: string
+          description: >-
+            The DJ's public on-air handle, never the DJ's legal name. Read
+            from the denormalized `flowsheet.dj_name` column, itself
+            populated at entry-insert time via the PII-safe chain (BS#1371);
+            `"Unknown DJ"` substitutes when that resolves to nothing.
         show_id:
           type: integer
 
@@ -1000,6 +1013,12 @@ components:
               enum: [show_start]
             dj_name:
               type: string
+              description: >-
+                The DJ's public on-air handle at show start, never the DJ's
+                legal name: per-show override, else the DJ's chosen handle
+                (`user.djName`). The legacy-tubafrenzy-handle fallback in the
+                full BS#1371 chain doesn't apply here — a new show has no
+                legacy row yet.
             timestamp:
               type: string
               format: date-time
@@ -1019,6 +1038,10 @@ components:
               enum: [show_end]
             dj_name:
               type: string
+              description: >-
+                The DJ's public on-air handle, never the DJ's legal name.
+                Same PII-safe resolution chain as `FlowsheetEntryFields.dj_name`
+                (BS#1371).
             timestamp:
               type: string
               format: date-time
@@ -1037,6 +1060,11 @@ components:
               enum: [dj_join]
             dj_name:
               type: string
+              description: >-
+                The public handle (`user.djName`) of the DJ who joined, never
+                the DJ's legal name. Unlike the full BS#1371 chain, this does
+                not consult a per-show override or the legacy tubafrenzy
+                handle.
 
     FlowsheetV2DJLeaveEntry:
       description: V2 DJ leave event - when a DJ leaves an active show
@@ -1052,6 +1080,11 @@ components:
               enum: [dj_leave]
             dj_name:
               type: string
+              description: >-
+                The public handle (`user.djName`) of the DJ who left, never
+                the DJ's legal name. Unlike the full BS#1371 chain, this does
+                not consult a per-show override or the legacy tubafrenzy
+                handle.
 
     FlowsheetV2TalksetEntry:
       description: V2 talkset entry - DJ talk segment
@@ -1186,7 +1219,12 @@ components:
       properties:
         dj_name:
           type: string
-          description: Display name of the DJ currently on air.
+          description: >-
+            The DJ's public on-air handle, never the DJ's legal name. Same
+            PII-safe resolution chain as `FlowsheetEntryFields.dj_name`
+            (BS#1371), except when unresolvable this substitutes the station
+            name ("WXYC") rather than `null` — it's the enclosing `on_air`
+            field that goes `null`, not this one.
 
     OnAirDJ:
       type: object
@@ -1206,6 +1244,12 @@ components:
             runtime (BS#1547).
         dj_name:
           type: string
+          description: >-
+            The DJ's public on-air handle, never the DJ's legal name. For a
+            DJ with a Backend-Service account, the DJ's chosen handle
+            (`user.djName`); for a legacy/tubafrenzy-mirrored show with no
+            account, the full PII-safe chain (BS#1371) down to
+            `shows.legacy_dj_name`.
 
     OnAirStatusResponse:
       type: object
@@ -1271,10 +1315,10 @@ components:
           type: string
           nullable: true
           description: >
-            The public DJ handle, resolved through the standard chain
-            (per-show override, then the linked account's handle, then the
-            legacy tubafrenzy handle). Never a real name. NULL when
-            unresolvable.
+            The DJ's public on-air handle, never the DJ's legal name. Same
+            PII-safe resolution chain as `FlowsheetEntryFields.dj_name`
+            (BS#1371): per-show override -> the DJ's chosen handle -> the
+            legacy tubafrenzy handle -> `null` when unresolvable.
         show_name:
           type: string
           nullable: true
@@ -1386,6 +1430,11 @@ components:
               dj_name:
                 type: string
                 nullable: true
+                description: >-
+                  The DJ's raw stored handle (`user.djName`), read directly
+                  via join with no per-show-override or legacy-handle
+                  resolution — may be blank or literally "Anonymous". Still
+                  never the DJ's legal name; this never reads `real_name`.
         specialty_show:
           type: string
         preview:
@@ -2697,6 +2746,12 @@ components:
           type: integer
         dj_name:
           type: string
+          description: >-
+            The DJ's public on-air handle, never the DJ's legal name. Per the
+            declared/actual mismatch noted above (BS#2224), no current
+            handler populates this from a verified `dj_name`-bearing source
+            — this description states the intent for when that gap closes,
+            not today's implemented behavior.
         day:
           type: integer
           description: Day of the week 0 = Monday, 6 = Sunday
@@ -3753,6 +3808,14 @@ components:
         djName:
           type: string
           nullable: true
+          description: >-
+            The DJ's chosen public on-air handle, set on their profile
+            (`auth_user.dj_name`) — the raw, unfiltered source value that the
+            PII-safe resolution chain (BS#1371) consults before falling back
+            to the legacy tubafrenzy handle. May be `null`, blank, or
+            literally "Anonymous"; not itself scrubbed. Distinct from
+            `realName`: `djName` is the public handle and is safe to
+            surface, `realName` is the legal name and never is.
         appSkin:
           type: string
           description: WXYC additionalField; defaults "modern-light" at creation.
