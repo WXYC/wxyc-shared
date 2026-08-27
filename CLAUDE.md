@@ -104,10 +104,11 @@ This package provides:
 ## Authorization Model
 
 The auth system has two dimensions:
-1. **Roles** (hierarchical): member < dj < musicDirector < stationManager
-2. **Capabilities** (cross-cutting): `editor`, `webmaster` - can be granted to any user
 
-Use `Authorization` enum for numeric comparisons, branded types (`RoleAuthorizedUser`, `CapabilityAuthorizedUser`) for compile-time enforcement.
+1. **Roles** — a chain: member < dj < musicDirector < stationManager. **This repo owns role identity and order only**: `ROLES` (the chain's single declaration, highest first), `ROLE_ALIASES` + `canonicalizeRole()` (the one alias table — fail-closed, for servers), and `Authorization`/`roleToAuthorization` (the ascending numeric projection — fail-open to `NO`, for client display gating; pinned against `ROLES` by test). **Permission grants live in Backend-Service's `auth.roles.ts`, not here.** The chain is not enforced by any runtime fallback — Backend-Service's middleware checks each role's flat grant set, and a CI invariant there proves the grants are monotone along this chain. This package deliberately carries no grant table: the JWT transports a role, not a permission set, so a client-side copy could only drift (one did — `ROLE_PERMISSIONS`, removed in 5.0.0 with zero external consumers). A client needs thresholds (`roleToAuthorization(...) >= MD`), never per-resource grants.
+2. **Capabilities** (cross-cutting): `editor`, `webmaster` - can be granted to any user. The escape hatch for anything that can't be expressed monotonically along the role chain.
+
+Use `Authorization` enum for numeric comparisons, branded types (`RoleAuthorizedUser`, `CapabilityAuthorizedUser`) for compile-time enforcement. When adding an alias string, remember `ROLE_ALIASES` is pinned by deep-equal in Backend-Service's `shared-type-compatibility.test.ts` — a widening here deliberately turns BS CI red on its next dependency bump so the admin-flag implications get reviewed there, not discovered.
 
 ## Publishing
 

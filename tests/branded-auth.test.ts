@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   Authorization,
   AUTHORIZATION_LABELS,
+  ROLE_ALIASES,
+  canonicalizeRole,
   roleToAuthorization,
   authorizationToRole,
   checkRole,
@@ -9,7 +11,7 @@ import {
   type RoleAuthorizedUser,
   type CapabilityAuthorizedUser,
 } from "../src/auth-client/authorization.js";
-import type { WXYCRole } from "../src/auth-client/roles.js";
+import { ROLES, type WXYCRole } from "../src/auth-client/roles.js";
 import type { Capability } from "../src/auth-client/capabilities.js";
 
 describe("Authorization enum", () => {
@@ -66,10 +68,89 @@ describe("roleToAuthorization", () => {
     ["  stationManager  ", Authorization.SM, "leading/trailing whitespace stripped"],
     ["  dj  ", Authorization.DJ, "whitespace around dj"],
     ["   ", Authorization.NO, "whitespace-only string defaults to NO"],
+    // Historical asymmetry: music-director resolves (above) but station-manager
+    // never has. Preserved deliberately — see ROLE_ALIASES.
+    ["station-manager", Authorization.NO, "kebab-case stationManager is NOT an alias"],
   ];
 
   it.each(cases)("maps %s to %s (%s)", (role, expected) => {
     expect(roleToAuthorization(role)).toBe(expected);
+  });
+
+  it("ascends exactly as ROLES descends (the enum is a projection of the chain)", () => {
+    const ascending = [...ROLES].reverse();
+    ascending.forEach((role, i) => {
+      expect(roleToAuthorization(role)).toBe(i);
+      expect(authorizationToRole(i as Authorization)).toBe(role);
+    });
+  });
+});
+
+describe("ROLE_ALIASES", () => {
+  it("is exactly the historical accepted-input map, no more, no less", () => {
+    expect(ROLE_ALIASES).toEqual({
+      admin: "stationManager",
+      owner: "stationManager",
+      stationmanager: "stationManager",
+      station_manager: "stationManager",
+      musicdirector: "musicDirector",
+      music_director: "musicDirector",
+      "music-director": "musicDirector",
+      dj: "dj",
+      member: "member",
+    });
+  });
+
+  it("maps every value onto a real station role", () => {
+    for (const target of Object.values(ROLE_ALIASES)) {
+      expect(ROLES).toContain(target);
+    }
+  });
+});
+
+describe("canonicalizeRole", () => {
+  it.each(ROLES)("passes canonical role %s through unchanged", (role) => {
+    expect(canonicalizeRole(role)).toBe(role);
+  });
+
+  const accepted: [string, WXYCRole][] = [
+    ["admin", "stationManager"],
+    ["owner", "stationManager"],
+    ["station_manager", "stationManager"],
+    ["STATION_MANAGER", "stationManager"],
+    [" admin ", "stationManager"],
+    ["music-director", "musicDirector"],
+    ["MusicDirector", "musicDirector"],
+    ["DJ", "dj"],
+    ["Member", "member"],
+  ];
+
+  it.each(accepted)("resolves %s to %s (case-fold + trim over the literal table)", (input, expected) => {
+    expect(canonicalizeRole(input)).toBe(expected);
+  });
+
+  const rejected = [
+    "user",
+    "station-manager",
+    "station manager",
+    "unknown",
+    "administrator",
+    "",
+    "   ",
+    // Prototype keys: a plain-object lookup without Object.hasOwn would leak
+    // Object.prototype members here. Fail-closed is the contract.
+    "toString",
+    "constructor",
+    "__proto__",
+  ];
+
+  it.each(rejected)("fails closed on %s", (input) => {
+    expect(canonicalizeRole(input)).toBeUndefined();
+  });
+
+  it("fails closed on null and undefined", () => {
+    expect(canonicalizeRole(null)).toBeUndefined();
+    expect(canonicalizeRole(undefined)).toBeUndefined();
   });
 });
 
