@@ -327,19 +327,30 @@ describe('OpenAPI Specification', () => {
       const joinProperties = () => requestSchemaAt(JOIN).properties ?? {};
       const joinResponse = (status: string) => operationAt(JOIN).responses?.[status];
 
-      it('declares intent as an optional two-value enum', () => {
-        const intent = joinProperties().intent;
+      it('references intent as a named schema, not an inline enum', () => {
+        // 25 of this file's 35 named string enums are $ref'd exactly once, so
+        // single-use is the convention, not the exception. It matters more
+        // than style here: `./dtos` re-exports `components['schemas']` only
+        // and `openapi-types.d.ts` is not in the package export map, so an
+        // inline enum leaves Backend-Service and dj-site hardcoding the string
+        // literals for the one field whose whole purpose is an explicit,
+        // unambiguous choice.
+        expect(joinProperties().intent?.$ref).toBe('#/components/schemas/FlowsheetJoinIntent');
+      });
+
+      it('declares FlowsheetJoinIntent as a two-value string enum', () => {
+        const intent = spec.components.schemas.FlowsheetJoinIntent as Record<string, unknown>;
         expect(intent).toBeDefined();
-        expect(intent?.type).toBe('string');
-        expect(intent?.enum).toEqual(['join', 'takeover']);
+        expect(intent.type).toBe('string');
+        expect(intent.enum).toEqual(['join', 'takeover']);
       });
 
       it('does not give intent a default — an absent field means "the caller did not choose"', () => {
-        // A `default:` here would let a generator materialize one of the two
+        // A `default:` would let a generator materialize one of the two
         // decisions on a client that never made it, which is the silent
         // co-host bug wearing a different hat. Absence is its own state and
-        // the server answers it with the 409 below.
-        expect(joinProperties().intent).not.toHaveProperty('default');
+        // the server answers it with the 409.
+        expect(spec.components.schemas.FlowsheetJoinIntent).not.toHaveProperty('default');
       });
 
       it('declares expected_show_id as an optional integer', () => {
@@ -354,10 +365,12 @@ describe('OpenAPI Specification', () => {
         expect(schema.required ?? []).not.toContain('expected_show_id');
       });
 
-      it('documents a 409 that $refs the shared ApiErrorResponse', () => {
+      it('documents a 409 that $refs the purpose-built ShowAlreadyOpenError', () => {
         const conflict = joinResponse('409');
         expect(conflict).toBeDefined();
-        expect(conflict?.content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/ApiErrorResponse');
+        expect(conflict?.content?.['application/json']?.schema?.$ref).toBe(
+          '#/components/schemas/ShowAlreadyOpenError',
+        );
       });
 
       // The three assertions below pin prose, following the same convention as
@@ -375,12 +388,27 @@ describe('OpenAPI Specification', () => {
         expect(conflict).toMatch(/`expected_show_id` is ignored outright/);
       });
 
-      it('warns that details.show.dj_name is nullable', () => {
-        // resolveDjNameForShow returns string | null, and null is the COMMON
-        // case for the abandoned shows this handshake exists to unstick.
-        // A prompt that interpolates it unguarded renders "null is on air".
-        const conflict = String(joinResponse('409')?.description ?? '');
-        expect(conflict).toMatch(/`dj_name` is nullable/);
+      it('types details.show so expected_show_id is a compare-and-set, not a key-path dig', () => {
+        // The client is REQUIRED to read details.show.id and echo it back.
+        // Against ApiErrorResponse's `additionalProperties: true` that reaches
+        // consumers as an untyped bag in all four languages.
+        expect(propertyOf('ShowAlreadyOpenError', 'details')?.$ref).toBe(
+          '#/components/schemas/ShowAlreadyOpenErrorDetails',
+        );
+        expect(propertyOf('ShowAlreadyOpenErrorDetails', 'show')?.$ref).toBe(
+          '#/components/schemas/ShowAlreadyOpenShow',
+        );
+        expect(propertyOf('ShowAlreadyOpenShow', 'id')?.type).toBe('integer');
+      });
+
+      it('marks details.show.dj_name nullable — null is the common case, not the edge', () => {
+        // resolveDjNameForShow returns string | null, and null is what the
+        // abandoned-show backlog resolves to. Structural, so --strict-nullable
+        // (Python) and Swift optionals enforce it rather than a paragraph
+        // asking clients to please guard.
+        const djName = propertyOf('ShowAlreadyOpenShow', 'dj_name');
+        expect(djName?.nullable).toBe(true);
+        expect(String(djName?.description)).toMatch(/[Nn]ull is the common case/);
       });
 
       it('does not claim every 400 on this operation is an intent problem', () => {

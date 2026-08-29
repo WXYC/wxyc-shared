@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { paths } from '../src/generated/openapi-types.js';
+import type { components, paths } from '../src/generated/openapi-types.js';
 import {
   type FlowsheetEntryResponse,
   type FlowsheetSongEntry,
@@ -644,6 +644,57 @@ describe('Generated TypeScript Types', () => {
 
       expect(withoutOverride.dj_name_override).toBeUndefined();
       expect(withOverride.dj_name_override).toBe('DJ Guest Host');
+    });
+
+    // BS#2233 — the takeover handshake. Unlike `dj_name_override` above, the
+    // enum is a NAMED component (`FlowsheetJoinIntent`) rather than inline,
+    // which is what gives consumers a symbol instead of a bare string literal:
+    // `./dtos` re-exports `components['schemas']` only, and `openapi-types.d.ts`
+    // is not in the package export map, so an inline enum would leave
+    // Backend-Service and dj-site hardcoding 'join' / 'takeover' for the one
+    // field whose entire purpose is an explicit, unambiguous choice.
+    it('POST /flowsheet/join accepts intent + expected_show_id, and intent is a named enum', () => {
+      type JoinBody =
+        paths['/flowsheet/join']['post']['requestBody']['content']['application/json'];
+      type JoinIntent = components['schemas']['FlowsheetJoinIntent'];
+
+      const takeover: JoinBody = {
+        dj_id: 42,
+        intent: 'takeover',
+        expected_show_id: 1951224,
+      };
+
+      // Absence is a third state, distinct from either value: it is what every
+      // un-updated client sends and what the 409 answers.
+      const undecided: JoinBody = { dj_id: 42 };
+
+      // The named schema is reachable as a type, which is the whole point of
+      // it not being inline.
+      const asIntent: JoinIntent = 'join';
+
+      expect(takeover.intent).toBe('takeover');
+      expect(takeover.expected_show_id).toBe(1951224);
+      expect(undecided.intent).toBeUndefined();
+      expect(asIntent).toBe('join');
+    });
+
+    // The 409 body is purpose-built rather than a $ref to ApiErrorResponse,
+    // so `details.show.id` — the value a client must echo back as
+    // `expected_show_id` — is typed rather than reached through an untyped bag.
+    it('409 details.show.id is typed, making the takeover a compare-and-set', () => {
+      type ShowAlreadyOpen = components['schemas']['ShowAlreadyOpenError'];
+
+      const conflict: ShowAlreadyOpen = {
+        message: 'A show is already on air',
+        code: 'show_already_open',
+        details: { show: { id: 1951224, dj_name: null, start_time: '2026-08-28T02:00:00Z' } },
+      };
+
+      const echoed: number | undefined = conflict.details?.show?.id;
+      expect(echoed).toBe(1951224);
+      // Null is the common case for the abandoned-show backlog, and the schema
+      // says so structurally rather than asking clients to guard by convention.
+      expect(conflict.details?.show?.dj_name).toBeNull();
     });
 
     // BS#1308 — POST /flowsheet/ for a track on a rotation album that isn't in
