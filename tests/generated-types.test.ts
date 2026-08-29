@@ -833,9 +833,9 @@ describe('Generated TypeScript Types', () => {
         release_id: 12345,
         release_url: 'https://www.discogs.com/release/12345',
         discogs_artist_id: 999,
+        confidence: 0.95,
         // DiscogsTrackItem.artists is the same defaultNonNullable trap
         // (`default: []`, not in `required`) — set explicitly.
-        confidence: 0.95,
         tracklist: [{ position: 'A1', title: 'In a Sentimental Mood', artists: [] }],
         genres: ['Jazz'],
         styles: ['Modal'],
@@ -954,26 +954,29 @@ describe('Generated TypeScript Types', () => {
   describe('LookupResponse degraded/cache-only discriminator (BS#943)', () => {
     // search_type/song_not_found/found_on_compilation/timeout all carry the
     // same defaultNonNullable trap as confidence/include_identity above
-    // (each has a schema-level `default` and no `required` entry) — set
-    // explicitly on every LookupResponse literal in this block so they keep
-    // typechecking; none of them is what these tests are pinning.
+    // (each has a schema-level `default` and no `required` entry), so every
+    // LookupResponse literal in this block has to set them to keep
+    // typechecking. None of them is what these tests are pinning — hoisted
+    // here so the literals below show only the fields they actually assert
+    // on, and so #420 has one line to delete rather than three.
+    const trapDefaults = {
+      search_type: 'none',
+      song_not_found: false,
+      found_on_compilation: false,
+      timeout: false,
+    } as const;
+
     it('degraded is a boolean and degraded_reason is an optional closed reason union', () => {
       const full: LookupResponse = {
         results: [],
         degraded: false,
-        search_type: 'none',
-        song_not_found: false,
-        found_on_compilation: false,
-        timeout: false,
+        ...trapDefaults,
       };
       const shed: LookupResponse = {
         results: [],
         degraded: true,
         degraded_reason: 'deadline_exceeded',
-        search_type: 'none',
-        song_not_found: false,
-        found_on_compilation: false,
-        timeout: false,
+        ...trapDefaults,
       };
 
       expect(full.degraded).toBe(false);
@@ -992,10 +995,7 @@ describe('Generated TypeScript Types', () => {
       const ok: LookupResponse = {
         results: [],
         degraded: false,
-        search_type: 'none',
-        song_not_found: false,
-        found_on_compilation: false,
-        timeout: false,
+        ...trapDefaults,
       };
       expect(ok.degraded_reason).toBeUndefined();
     });
