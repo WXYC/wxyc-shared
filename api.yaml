@@ -8563,7 +8563,21 @@ paths:
                     caller holding `flowsheet: write`, deliberately: it is the
                     escape hatch a DJ needs when the previous DJ walked out,
                     and it restores a capability tubafrenzy's `EndShowServlet`
-                    gave every signed-on DJ.
+                    gave every signed-on DJ. That is a deliberate asymmetry
+                    with `POST /flowsheet/shows/{id}/force-end`, which closes
+                    someone else's show only under `flowsheet: manage` plus an
+                    explicit `force=true`; see that endpoint's description for
+                    why the two gates differ.
+
+
+                    An explicit JSON `null` is folded into absence and answered
+                    with the same 409, not a 400. This is not pedantry: the
+                    field is optional with no default, and a Kotlin or Swift
+                    client that serializes unset optionals explicitly (
+                    kotlinx.serialization with `encodeDefaults = true`, say)
+                    emits `"intent": null` for a DJ who simply has not chosen.
+                    Answering that with "your choice is invalid" would be the
+                    one response they cannot act on.
                 expected_show_id:
                   type: integer
                   description: >
@@ -8590,28 +8604,69 @@ paths:
                   - $ref: '#/components/schemas/ShowDJ'
         '400':
           description: >
-            Malformed intent handshake — an unrecognized `intent` value, or
-            `intent: takeover` with no `expected_show_id`.
+            Request validation failed. This operation already returned 400 for
+            a missing or non-matching `dj_id`, a `show_name` absent on the
+            new-show path, and a `dj_name_override` over its `maxLength` — the
+            intent handshake adds two more causes, it does not replace them.
+            Do NOT render every 400 here as an intent problem.
+
+
+            The new causes are an unrecognized `intent` value and
+            `intent: takeover` with no `expected_show_id`. Neither carries a
+            machine-readable `code`, so they are not distinguishable from the
+            pre-existing causes programmatically; only `message` separates
+            them. Giving the intent 400s their own codes is tracked separately
+            rather than promised here, because this document must not describe
+            a `code` the server does not send.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: >
-            A show the caller is not an active member of is still open and no
-            `intent` was sent (or `expected_show_id` no longer names the open
-            show). Nothing was written.
+            A show the caller is not an active member of is still open, and
+            either no `intent` was sent, or `intent: takeover` was sent with an
+            `expected_show_id` that no longer names the open show. Nothing was
+            written.
+
+
+            The second clause is scoped to `takeover` only. Under
+            `intent: join` the request succeeds as a co-host join and
+            `expected_show_id` is ignored outright, exactly as that field's
+            description says — a stale id never turns a `join` into a 409.
 
 
             `code` is `show_already_open` and `details.show` carries
             `{ id, dj_name, start_time }`. `id` is what a follow-up
-            `intent: takeover` must echo as `expected_show_id`. `dj_name`
+            `intent: takeover` must echo as `expected_show_id`.
+
+
+            **`dj_name` is nullable and is usually null in practice.** It
             resolves through the standard chain (per-show override, then the
-            linked account's handle, then the legacy tubafrenzy handle), so it
-            names the show's OWNER — which for an abandoned show is the DJ who
-            left. A client showing "who is on air right now" should prefer
-            `GET /flowsheet/djs-on-air`, whose active-membership answer is the
-            one that disagrees with this field precisely when it matters.
+            linked account's handle, then the legacy tubafrenzy handle), and
+            resolves to null when the chain reaches nothing — which is the
+            shape of essentially the whole open-show backlog this feature
+            exists to unstick (2,813 of production's 2,814 open shows carried a
+            NULL `primary_dj_id` as of 2026-08-21). A prompt that interpolates
+            it unguarded renders "null is on air". Fall back to a generic
+            phrasing rather than showing the raw value.
+
+
+            `dj_name` names the show's OWNER — which for an abandoned show is
+            the DJ who left. A client showing "who is on air right now" should
+            prefer `GET /flowsheet/djs-on-air`, whose active-membership answer
+            is the one that disagrees with this field precisely when it
+            matters.
+
+
+            **Not yet live on the wire.** Backend-Service gates the whole
+            handshake behind `FLOWSHEET_TAKEOVER_ENABLED`, which ships OFF
+            (WXYC/Backend-Service#2233). While the flag is off, an absent
+            `intent` still silently co-hosts and neither this 409 nor the
+            intent half of the 400 above is reachable. This document describes
+            the end state so clients can be written against it first; a client
+            that omits `intent` will start receiving 409s the moment the flag
+            flips, so send an explicit value before then rather than after.
           content:
             application/json:
               schema:
@@ -8728,16 +8783,38 @@ paths:
         `POST /flowsheet/end`.
 
 
-        `end_time` and the `show_end` marker's `add_time` come from the show's
-        last logged entry, NOT from the moment the request is made. A show from
-        the legacy backlog stamped with `now()` would carry an interval
-        overlapping every `GET /flowsheet/range` window since it started, and
-        its marker would sort to the top of the public flowsheet.
+        With no `ended_at`, `end_time` and the `show_end` marker's `add_time`
+        come from the show's last logged entry, NOT from the moment the request
+        is made. A show from the legacy backlog stamped with `now()` would
+        carry an interval overlapping every `GET /flowsheet/range` window since
+        it started, and its marker would sort to the top of the public
+        flowsheet.
+
+
+        With `ended_at`, that supplied instant replaces the derived one
+        EVERYWHERE the derived one would have gone — the `end_time` column, the
+        `show_end` marker's `add_time` and rendered message, and every co-host
+        `dj_leave` marker. It is one instant, not just a column write, so a
+        closed show cannot disagree with its own markers about when it ended.
+        The `now()` hazard above is unchanged by the override: `ended_at` is
+        capped at the present, so it can only ever move the close EARLIER than
+        `now()`, never later.
 
 
         Ending an already-ended show is a 400, decided by a compare-and-set on
         `end_time IS NULL`, so two concurrent operators cannot both write a
         `show_end` marker.
+
+
+        This is NOT the only way to close a show the caller does not own, and
+        it is the stricter of the two. `POST /flowsheet/join` with
+        `intent: takeover` closes the open show under `flowsheet: write` alone,
+        with no `force=true` confirmation. The gates differ because the reached
+        shows differ: this endpoint takes an arbitrary `shows.id` from an
+        operator working off a list, so it demands `flowsheet: manage` and an
+        explicit confirmation against a mistyped id, whereas `takeover` can
+        only ever close the one show the caller was just shown in a 409 and
+        echoed back by id. Neither supersedes the other.
       parameters:
         - name: id
           in: path

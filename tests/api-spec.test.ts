@@ -372,6 +372,38 @@ describe('OpenAPI Specification', () => {
       it('documents a 400 for a malformed intent handshake', () => {
         expect(getJoinPost().responses?.['400']).toBeDefined();
       });
+
+      // The three assertions below pin prose, following the same convention as
+      // the /flowsheet/range block further down: each one is a fact a consumer
+      // gets wrong by default, and each was false in 1.47.1.
+      it('scopes the stale-expected_show_id conflict to takeover only', () => {
+        // `expected_show_id`'s own description says it is "ignored otherwise",
+        // but the 409 originally listed the stale-id case unscoped by intent.
+        // Read literally that made {intent: 'join', expected_show_id: stale} a
+        // 409 by one sentence and a 200 co-host join by the other -- an
+        // ambiguity four codegen targets and the BS implementer would not
+        // resolve identically. The server returns 200 there.
+        const conflict = String(getJoinPost().responses?.['409']?.description ?? '');
+        expect(conflict).toMatch(/scoped to `takeover` only/);
+        expect(conflict).toMatch(/`expected_show_id` is ignored outright/);
+      });
+
+      it('warns that details.show.dj_name is nullable', () => {
+        // resolveDjNameForShow returns string | null, and null is the COMMON
+        // case for the abandoned shows this handshake exists to unstick.
+        // A prompt that interpolates it unguarded renders "null is on air".
+        const conflict = String(getJoinPost().responses?.['409']?.description ?? '');
+        expect(conflict).toMatch(/`dj_name` is nullable/);
+      });
+
+      it('does not claim every 400 on this operation is an intent problem', () => {
+        // POST /flowsheet/join 400s for a missing dj_id, an absent show_name
+        // on the new-show path, and an over-long dj_name_override. The intent
+        // handshake adds causes rather than replacing them.
+        const badRequest = String(getJoinPost().responses?.['400']?.description ?? '');
+        expect(badRequest).toMatch(/it does not replace them/);
+        expect(badRequest).toMatch(/`dj_id`/);
+      });
     });
 
     describe('ended_at on POST /flowsheet/shows/{id}/force-end (BS#2233)', () => {
