@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.48.0
+  version: 1.49.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2070,6 +2070,111 @@ components:
             expires, or null if it has none. Used with rotation_bin to evaluate
             live rotation client-side. Absent from AlbumSearchResult — a client
             that reuses AlbumSearchResult for this endpoint silently loses it.
+        has_digital_audio:
+          type: boolean
+          description: >
+            True when the digital archive (WXYC/Backend-Service#2320) has at
+            least one asset bound to this album — the badge the archive
+            player client uses to decide whether to offer playback before
+            calling GET /digital-archive/albums/{libraryId}/playback. OPTIONAL
+            and OUT of `required`, same leniency as the BS#1965 producer
+            fields above and for the same reason: a Backend that hasn't
+            deployed #2320 yet does not emit this key at all, and a required
+            key it doesn't emit would fail every NDJSON line. Absent means
+            false — a client not yet regenerated against this field, or
+            talking to a Backend that doesn't emit it, correctly treats every
+            row as having no digital audio rather than crashing the decode.
+
+    DigitalArchivePlaybackManifest:
+      type: object
+      description: >
+        Response body for GET /digital-archive/albums/{libraryId}/playback
+        (#417) — the auto-DJ archive player's client contract (epic
+        WXYC/wxyc-dj-ios#135). Deliberately outlives every storage decision:
+        no bucket, key, or store name appears anywhere in this shape, only
+        opaque presigned URLs that die at `expires_at`.
+      required:
+        - library_id
+        - provenance
+        - expires_at
+        - tracks
+      properties:
+        library_id:
+          type: integer
+          description: The album's wxyc_schema.library.id — the same key CatalogExportRow.id ships.
+        provenance:
+          type: string
+          enum: [rotation_upload, cd_rip]
+          description: Where the bound digital asset came from.
+        expires_at:
+          type: string
+          format: date-time
+          description: >
+            Every URL under `tracks` is dead after this instant — refetch this
+            manifest rather than caching URLs past it.
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/DigitalArchivePlaybackTrack'
+
+    DigitalArchivePlaybackTrack:
+      type: object
+      description: >
+        One track of a DigitalArchivePlaybackManifest. The server orders
+        `tracks` for the client; disc_number/track_number are informational
+        and nullable rather than a client-side sort key, because partial
+        albums and tag gaps exist in the archive.
+      required:
+        - file_id
+        - title
+        - renditions
+      properties:
+        file_id:
+          type: integer
+          description: >
+            digital_asset_file.id — stable across manifest refetches, for a
+            future offline-cache key. NOT part of any URL; opaque to storage.
+        disc_number:
+          type: integer
+          nullable: true
+        track_number:
+          type: integer
+          nullable: true
+        title:
+          type: string
+        duration_secs:
+          type: number
+          nullable: true
+        content_hash:
+          type: string
+          nullable: true
+          description: >
+            MD5 from the store's ETag today; sha256 once CD rips land. Not
+            guaranteed to be either algorithm going forward — treat as an
+            opaque change-detection token, not a verified checksum.
+        renditions:
+          type: array
+          description: >
+            Exactly one `mp3` entry in the MVP; AAC/FLAC renditions arrive
+            additively as the archive backfills them.
+          items:
+            type: object
+            required:
+              - codec
+              - url
+            properties:
+              codec:
+                type: string
+                enum: [mp3, aac, flac]
+              bitrate_kbps:
+                type: integer
+                nullable: true
+              url:
+                type: string
+                format: uri
+                description: >
+                  Presigned GET. Opaque; a bearer credential until
+                  `expires_at` on the enclosing manifest.
 
     CatalogCompilationTrackRow:
       type: object
@@ -9625,6 +9730,62 @@ paths:
           description: >
             Not Modified — catalog unchanged since the client's
             If-Modified-Since / since watermark. No body.
+
+  # ===================
+  # Digital Archive Endpoints
+  # ===================
+
+  /digital-archive/albums/{libraryId}/playback:
+    get:
+      x-wxyc-service: backend-service
+      summary: Album-scoped playback manifest for the digital archive (presigned, short-lived)
+      description: >
+        The auto-DJ archive player's client contract (#417, epic
+        WXYC/wxyc-dj-ios#135): album-scoped, wxyc_schema.library.id-keyed,
+        presigned-URL-bearing. Returns a DigitalArchivePlaybackManifest whose
+        `tracks[].renditions[].url` values are dead after the manifest's own
+        `expires_at` — refetch this endpoint rather than caching URLs past it.
+
+        403 and 404 are deliberately distinct: 403 means the feature is off or
+        the caller is below `dj`, while 404 means the feature is on and the
+        caller is permitted, but this album has no bound digital asset. A
+        client's `has_digital_audio` badge (CatalogExportRow) may be stale, so
+        collapsing the two would make a stale badge look like a permissions
+        failure instead of "nothing bound (yet)".
+      # routes enforce requirePermissions({ digital_archive: ['listen'] });
+      # also gated on the DIGITAL_ARCHIVE_STREAMING_ENABLED flag (403 when off).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: libraryId
+          in: path
+          required: true
+          description: wxyc_schema.library.id — the same key CatalogExportRow.id ships.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Playback manifest for the album's bound digital asset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DigitalArchivePlaybackManifest'
+        '403':
+          description: >
+            DIGITAL_ARCHIVE_STREAMING_ENABLED is off, or the caller is below
+            the `dj` role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: >
+            No digital asset is bound to this album. Distinct from 403 on
+            purpose — see the operation description.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /library/rotation:
     get:
