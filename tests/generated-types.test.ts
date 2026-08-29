@@ -210,8 +210,8 @@ describe('Generated TypeScript Types', () => {
       expect(response.discogsArtistId).toBe(67890);
       expect(response.fullReleaseDate).toBe('2024-03-15');
       expect(response.tracklist).toHaveLength(2);
-      expect(response.tracklist![0].duration).toBe('5:23');
-      expect(response.tracklist![1].duration).toBeUndefined();
+      expect(response.tracklist![0]!.duration).toBe('5:23');
+      expect(response.tracklist![1]!.duration).toBeUndefined();
     });
 
     it('should allow omitting all new optional fields', () => {
@@ -269,8 +269,8 @@ describe('Generated TypeScript Types', () => {
       };
 
       expect(response.bioTokens).toHaveLength(2);
-      expect(response.bioTokens?.[0].type).toBe('plainText');
-      expect(response.bioTokens?.[1].type).toBe('artistLink');
+      expect(response.bioTokens?.[0]!.type).toBe('plainText');
+      expect(response.bioTokens?.[1]!.type).toBe('artistLink');
     });
 
     it('should accept null bioTokens (the backend emits an explicit `?? null`)', () => {
@@ -500,7 +500,7 @@ describe('Generated TypeScript Types', () => {
       };
 
       expect(withoutHint.matched_via).toBeUndefined();
-      expect(withHint.matched_via?.[0].title).toBe('VI Scose Poise');
+      expect(withHint.matched_via?.[0]!.title).toBe('VI Scose Poise');
     });
 
     it('LibrarySearchItem.matched_via is optional and typed as TrackMatchHint[]', () => {
@@ -513,7 +513,7 @@ describe('Generated TypeScript Types', () => {
         ],
       };
 
-      expect(item.matched_via?.[0].source).toBe('discogs_master');
+      expect(item.matched_via?.[0]!.source).toBe('discogs_master');
     });
 
     it('LookupResultItem.matched_via is optional and typed as TrackMatchHint[]', () => {
@@ -522,13 +522,15 @@ describe('Generated TypeScript Types', () => {
           id: 60359,
           title: 'Confield',
           artist: 'Autechre',
+          call_number: 'EL CD AU 8/3',
+          library_url: 'https://dj.wxyc.org/dashboard/album/legacy/60359',
         },
         matched_via: [
           { title: 'VI Scose Poise', source: TrackMatchSource.library_identity, confidence: 0.92 },
         ],
       };
 
-      expect(result.matched_via?.[0].source).toBe('library_identity');
+      expect(result.matched_via?.[0]!.source).toBe('library_identity');
     });
 
     it('matched_via supports multiple hints per release (e.g., comps with two matching tracks)', () => {
@@ -769,6 +771,16 @@ describe('Generated TypeScript Types', () => {
       const minimal: LookupRequest = {
         artist: 'Stereolab',
         album: 'Aluminum Tunes',
+        // `include_identity` has exactly the `default: false` trap this
+        // describe block's header comment warns about — it already carries
+        // a schema-level default with no `required` entry, so
+        // openapi-typescript's defaultNonNullable behavior promotes it to
+        // non-optional here despite api.yaml documenting that dj-site and
+        // tubafrenzy omit it entirely. Set explicitly so this fixture keeps
+        // typechecking; the underlying trap is real (same shape as the
+        // BulkResolveLibrariesRequest.include_tracks fix) and tracked
+        // separately rather than fixed in this PR.
+        include_identity: false,
       };
 
       expect(minimal.artist).toBe('Stereolab');
@@ -781,6 +793,7 @@ describe('Generated TypeScript Types', () => {
       const opted: LookupRequest = {
         artist: 'Jessica Pratt',
         album: 'On Your Own Love Again',
+        include_identity: false,
         extended: true,
         warm_cache: true,
       };
@@ -797,6 +810,12 @@ describe('Generated TypeScript Types', () => {
       const baseline: DiscogsMatchResult = {
         release_id: 12345,
         release_url: 'https://www.discogs.com/release/12345',
+        // `confidence` carries the same `default: 0`-without-`required`
+        // defaultNonNullable trap as `LookupRequest.include_identity` above
+        // (openapi-typescript promotes it to non-optional despite api.yaml
+        // not listing it in `required`) — set explicitly throughout this
+        // describe block so these fixtures keep typechecking.
+        confidence: 0,
       };
 
       expect(baseline.discogs_artist_id).toBeUndefined();
@@ -814,7 +833,10 @@ describe('Generated TypeScript Types', () => {
         release_id: 12345,
         release_url: 'https://www.discogs.com/release/12345',
         discogs_artist_id: 999,
-        tracklist: [{ position: 'A1', title: 'In a Sentimental Mood' }],
+        // DiscogsTrackItem.artists is the same defaultNonNullable trap
+        // (`default: []`, not in `required`) — set explicitly.
+        confidence: 0.95,
+        tracklist: [{ position: 'A1', title: 'In a Sentimental Mood', artists: [] }],
         genres: ['Jazz'],
         styles: ['Modal'],
         label: 'Impulse Records',
@@ -825,7 +847,7 @@ describe('Generated TypeScript Types', () => {
 
       expect(full.discogs_artist_id).toBe(999);
       expect(full.label).toBe('Impulse Records');
-      expect(full.profile_tokens?.[0].type).toBe('plainText');
+      expect(full.profile_tokens?.[0]!.type).toBe('plainText');
     });
 
     it('accepts null for every nullable extended field', () => {
@@ -840,6 +862,7 @@ describe('Generated TypeScript Types', () => {
         full_release_date: null,
         artist_image_url: null,
         profile_tokens: null,
+        confidence: 0,
       };
 
       expect(nulled.label).toBeNull();
@@ -855,6 +878,7 @@ describe('Generated TypeScript Types', () => {
       const withMaster: DiscogsMatchResult = {
         release_id: 12345,
         release_url: 'https://www.discogs.com/release/12345',
+        confidence: 0.95,
         master_id: 67890,
       };
 
@@ -865,6 +889,7 @@ describe('Generated TypeScript Types', () => {
       const noMaster: DiscogsMatchResult = {
         release_id: 12345,
         release_url: 'https://www.discogs.com/release/12345',
+        confidence: 0.95,
         master_id: null,
       };
 
@@ -875,6 +900,7 @@ describe('Generated TypeScript Types', () => {
       const baseline: DiscogsMatchResult = {
         release_id: 12345,
         release_url: 'https://www.discogs.com/release/12345',
+        confidence: 0,
       };
 
       expect(baseline.master_id).toBeUndefined();
@@ -889,6 +915,7 @@ describe('Generated TypeScript Types', () => {
       const withWriters: DiscogsMatchResult = {
         release_id: 12345,
         release_url: 'https://www.discogs.com/release/12345',
+        confidence: 0.95,
         writer_credits: {
           names: ['Juana Molina'],
           roles: ['Written-By'],
@@ -917,6 +944,7 @@ describe('Generated TypeScript Types', () => {
       const baseline: DiscogsMatchResult = {
         release_id: 12345,
         release_url: 'https://www.discogs.com/release/12345',
+        confidence: 0,
       };
 
       expect(baseline.writer_credits).toBeUndefined();
@@ -924,12 +952,28 @@ describe('Generated TypeScript Types', () => {
   });
 
   describe('LookupResponse degraded/cache-only discriminator (BS#943)', () => {
+    // search_type/song_not_found/found_on_compilation/timeout all carry the
+    // same defaultNonNullable trap as confidence/include_identity above
+    // (each has a schema-level `default` and no `required` entry) — set
+    // explicitly on every LookupResponse literal in this block so they keep
+    // typechecking; none of them is what these tests are pinning.
     it('degraded is a boolean and degraded_reason is an optional closed reason union', () => {
-      const full: LookupResponse = { results: [], degraded: false };
+      const full: LookupResponse = {
+        results: [],
+        degraded: false,
+        search_type: 'none',
+        song_not_found: false,
+        found_on_compilation: false,
+        timeout: false,
+      };
       const shed: LookupResponse = {
         results: [],
         degraded: true,
         degraded_reason: 'deadline_exceeded',
+        search_type: 'none',
+        song_not_found: false,
+        found_on_compilation: false,
+        timeout: false,
       };
 
       expect(full.degraded).toBe(false);
@@ -945,7 +989,14 @@ describe('Generated TypeScript Types', () => {
     });
 
     it('omits degraded_reason on a non-degraded response', () => {
-      const ok: LookupResponse = { results: [], degraded: false };
+      const ok: LookupResponse = {
+        results: [],
+        degraded: false,
+        search_type: 'none',
+        song_not_found: false,
+        found_on_compilation: false,
+        timeout: false,
+      };
       expect(ok.degraded_reason).toBeUndefined();
     });
   });
@@ -959,6 +1010,7 @@ describe('Generated TypeScript Types', () => {
       const withStatus: DiscogsMatchResult = {
         release_id: 12345,
         release_url: 'https://www.discogs.com/release/12345',
+        confidence: 0.95,
         apple_music_url: null,
         spotify_url: 'https://open.spotify.com/album/abc',
         streaming_status: {
@@ -984,6 +1036,7 @@ describe('Generated TypeScript Types', () => {
       const partial: DiscogsMatchResult = {
         release_id: 12345,
         release_url: 'https://www.discogs.com/release/12345',
+        confidence: 0.95,
         streaming_status: {
           apple_music: 'verified',
           // bandcamp never probed on the /lookup/bulk path -> key omitted, not `absent`
@@ -996,6 +1049,7 @@ describe('Generated TypeScript Types', () => {
       const baseline: DiscogsMatchResult = {
         release_id: 12345,
         release_url: 'https://www.discogs.com/release/12345',
+        confidence: 0,
       };
       expect(baseline.streaming_status).toBeUndefined();
     });
@@ -1157,6 +1211,7 @@ describe('Generated TypeScript Types', () => {
         id: 1,
         show_id: 1,
         play_order: 1,
+        add_time: '2024-06-15T14:30:00.000Z',
         entry_type: 'track',
         request_flag: false,
         metadata_status: MetadataStatus.enriched_no_match,

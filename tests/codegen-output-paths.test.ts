@@ -15,7 +15,7 @@ const pkg = JSON.parse(
 /** Pull the output path out of a generate script's CLI (`-o`/`-output`/`--output`). */
 function outputPath(script: string): string | null {
   const m = script.match(/(?:-o|--?output)\s+(\S+)/);
-  return m ? m[1] : null;
+  return m ? (m[1] ?? null) : null;
 }
 
 const generateScripts = Object.entries(pkg.scripts).filter(([name]) =>
@@ -45,9 +45,9 @@ describe("codegen output paths (#197)", () => {
   );
 
   it("targets the documented in-repo destinations", () => {
-    expect(outputPath(pkg.scripts["generate:swift"])).toBe("generated/swift");
-    expect(outputPath(pkg.scripts["generate:kotlin"])).toBe("generated/kotlin");
-    expect(outputPath(pkg.scripts["generate:python"])).toBe(
+    expect(outputPath(pkg.scripts["generate:swift"]!)).toBe("generated/swift");
+    expect(outputPath(pkg.scripts["generate:kotlin"]!)).toBe("generated/kotlin");
+    expect(outputPath(pkg.scripts["generate:python"]!)).toBe(
       "generated/python/models.py",
     );
   });
@@ -142,7 +142,7 @@ describe("CLAUDE.md's codegen consumer table names the Swift consumer correctly 
     const cells = swiftRow().split("|").map((c) => c.trim());
     const whereFrom = cells[4];
     expect(whereFrom, "unexpected table cell layout").toMatch(/wxyc-ios-64/);
-    const handAuthorSentences = whereFrom
+    const handAuthorSentences = whereFrom!
       .split(/(?<=\.)\s+/)
       .filter((sentence) => /hand-author/.test(sentence));
     for (const sentence of handAuthorSentences) {
