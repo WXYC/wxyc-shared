@@ -88,8 +88,15 @@ describe('Cross-service contracts (E2E)', () => {
           client.setAuthToken(exchanged.token);
 
           // Join a show so we can post flowsheet entries.
+          //
+          // `intent: 'join'` is explicit on purpose -- see the matching
+          // comment in e2e/recent-entries.test.ts. An omitted `intent`
+          // becomes a swallowed 409 once FLOWSHEET_TAKEOVER_ENABLED flips
+          // (BS#2233), and this file backs the bs-lml-gate promotion check,
+          // where that would read as an opaque red gate rather than "could
+          // not join".
           const djId = exchanged.payload.sub || exchanged.payload.id;
-          await client.post('/flowsheet/join', { dj_id: djId });
+          await client.post('/flowsheet/join', { dj_id: djId, intent: 'join' });
         }
       }
     }
