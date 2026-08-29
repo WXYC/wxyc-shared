@@ -301,7 +301,19 @@ describe("Type Safety (compile-time checks)", () => {
     // Function that requires SM authorization
     function requiresSM(_user: RoleAuthorizedUser<Authorization.SM>): void {}
 
-    const plainUser = { authority: Authorization.SM };
+    // Every non-brand member of RoleAuthorizedUser is populated deliberately.
+    // With only `authority` set this call still fails to compile — but for five
+    // missing-property reasons, so the directive below stays "used" even if the
+    // brand is deleted outright and the test silently stops pinning the one
+    // thing it is named for. Structurally complete, the brand is the sole
+    // remaining difference, so removing it turns the directive unused (TS2578).
+    const plainUser = {
+      id: "user-1",
+      username: "testuser",
+      email: "test@example.com",
+      authority: Authorization.SM,
+      capabilities: [] as Capability[],
+    };
     // @ts-expect-error - Plain user should not be assignable to branded type
     requiresSM(plainUser);
   });
