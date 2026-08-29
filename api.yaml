@@ -8642,9 +8642,10 @@ paths:
 
 
             **`dj_name` is nullable and is usually null in practice.** It
-            resolves through the standard chain (per-show override, then the
-            linked account's handle, then the legacy tubafrenzy handle), and
-            resolves to null when the chain reaches nothing — which is the
+            resolves through the same PII-safe chain as `OpenShow.dj_name`
+            (BS#1371) — `GET /flowsheet/open-shows` returns the very rows this
+            409 describes — and resolves to null when that chain reaches
+            nothing, which is the
             shape of essentially the whole open-show backlog this feature
             exists to unstick (2,813 of production's 2,814 open shows carried a
             NULL `primary_dj_id` as of 2026-08-21). A prompt that interpolates
