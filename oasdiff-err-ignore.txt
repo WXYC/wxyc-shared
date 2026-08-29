@@ -53,4 +53,10 @@
 # one that ships it in its correct place.
 #
 # Prune when this lands on main — it stops appearing in any main..PR diff then.
-GET /digital-archive/albums/{id}/playback removed the required property `provenance` from the response with the `200` status
+#
+# Method is lowercase because scripts/__tests__/check-breaking-changes.test.sh
+# requires `^(get|post|put|patch|delete) /`. oasdiff itself matches
+# case-insensitively, so an uppercase entry suppresses correctly and still fails
+# that guard — the failure looks like a whitelist-format problem rather than the
+# working suppression it is.
+get /digital-archive/albums/{id}/playback removed the required property `provenance` from the response with the `200` status
