@@ -9746,6 +9746,16 @@ paths:
         `tracks[].renditions[].url` values are dead after the manifest's own
         `expires_at` — refetch this endpoint rather than caching URLs past it.
 
+        The 200 body is a per-caller credential, not shareable content. Do not
+        write it to request logs, crash reports, or analytics, and do not hold
+        it in a shared cache: the response is Authorization-bearing, so RFC 9111
+        already bars a shared cache from storing it absent an explicit
+        `public`/`s-maxage`, and this operation states that posture rather than
+        leaning on the default. Serve `Cache-Control: private, no-store`;
+        reusing a manifest in memory until its `expires_at` is fine. Compare
+        `/config/secrets`, the document's other credential-bearing response,
+        which spells out its own cache posture for the same reason.
+
         403 and 404 are deliberately distinct: 403 means the feature is off or
         the caller is below `dj`, while 404 means the feature is on and the
         caller is permitted, but this album has no bound digital asset. A
