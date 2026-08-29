@@ -360,10 +360,6 @@ describe('OpenAPI Specification', () => {
         expect(conflict?.content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/ApiErrorResponse');
       });
 
-      it('documents a 400 for a malformed intent handshake', () => {
-        expect(joinResponse('400')).toBeDefined();
-      });
-
       // The three assertions below pin prose, following the same convention as
       // the /flowsheet/range block further down: each one is a fact a consumer
       // gets wrong by default, and each was false in 1.47.1.

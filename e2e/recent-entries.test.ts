@@ -36,6 +36,7 @@ import {
   waitForService,
   getE2EConfig,
   pollUntil,
+  joinShowForTest,
 } from './setup.js';
 import type { FlowsheetEntryResponse } from '../src/dtos/index.js';
 
@@ -80,18 +81,8 @@ describe('Recent Entries E2E (Backend flowsheet source-of-truth)', () => {
           client.setAuthToken(exchanged.token);
 
           // Start or join a show so POST /flowsheet can add entries.
-          //
-          // `intent: 'join'` is explicit on purpose. Once
-          // FLOWSHEET_TAKEOVER_ENABLED flips (BS#2233), an omitted `intent`
-          // is answered with a 409 whenever some other DJ's show is still
-          // open -- and production's open-show backlog makes that the normal
-          // case, not the rare one. `E2EClient.post` returns the response
-          // rather than throwing, so that 409 would be swallowed here and
-          // surface later as unrelated failures on the POST /flowsheet calls
-          // below. This suite wants today's co-host semantics, which is
-          // exactly what `join` names.
           const djId = exchanged.payload.sub || exchanged.payload.id;
-          await client.post('/flowsheet/join', { dj_id: djId, intent: 'join' });
+          await joinShowForTest(client, djId);
         }
       }
     }

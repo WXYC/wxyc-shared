@@ -199,6 +199,33 @@ export function createE2EAuthClient(config?: Partial<E2EConfig>): E2EClient {
 }
 
 /**
+ * Start (or co-host) a show so the caller's subsequent `POST /flowsheet` calls
+ * have somewhere to land.
+ *
+ * `intent: 'join'` is sent explicitly. Once `FLOWSHEET_TAKEOVER_ENABLED` flips
+ * (WXYC/Backend-Service#2233), an omitted `intent` is answered with a 409
+ * whenever a show belonging to a different DJ is still open — and production's
+ * open-show backlog makes that the normal case rather than the rare one. These
+ * suites want today's co-host semantics, which is exactly what `join` names.
+ *
+ * The status check is the other half. `E2EClient.post` resolves on any status
+ * rather than throwing, so an unhandled 409 here is silent: the join no-ops and
+ * the failure resurfaces later as an unrelated error on a `POST /flowsheet`
+ * call, several assertions away from its cause. Both callers previously
+ * discarded this response, so the hazard was documented in comments and caught
+ * by nothing.
+ */
+export async function joinShowForTest(client: E2EClient, djId: unknown): Promise<E2EResponse<unknown>> {
+  const response = await client.post<unknown>('/flowsheet/join', { dj_id: djId, intent: 'join' });
+  if (!response.ok) {
+    throw new Error(
+      `POST /flowsheet/join failed with ${response.status}: ${JSON.stringify(response.body).slice(0, 200)}`,
+    );
+  }
+  return response;
+}
+
+/**
  * Wait for a service to be ready
  */
 export async function waitForService(
