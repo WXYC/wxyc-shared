@@ -1611,8 +1611,8 @@ describe('OpenAPI Specification', () => {
       expect(item!.properties?.bitrate_kbps?.nullable).toBe(true);
     });
 
-    it('declares GET /digital-archive/albums/{libraryId}/playback (BearerAuth; integer path param; 200/403/404)', () => {
-      const path = spec.paths['/digital-archive/albums/{libraryId}/playback'] as {
+    it('declares GET /digital-archive/albums/{id}/playback (BearerAuth; integer path param; 200/403/404)', () => {
+      const path = spec.paths['/digital-archive/albums/{id}/playback'] as {
         get?: {
           'x-wxyc-service'?: string;
           security?: Array<Record<string, unknown[]>>;
@@ -1624,10 +1624,10 @@ describe('OpenAPI Specification', () => {
       expect(path.get!['x-wxyc-service']).toBe('backend-service');
       expect(path.get!.security).toEqual([{ BearerAuth: [] }]);
 
-      const libraryId = path.get!.parameters?.find((p) => p.name === 'libraryId');
-      expect(libraryId?.in).toBe('path');
-      expect(libraryId?.required).toBe(true);
-      expect(libraryId?.schema?.type).toBe('integer');
+      const idParam = path.get!.parameters?.find((p) => p.name === 'id');
+      expect(idParam?.in).toBe('path');
+      expect(idParam?.required).toBe(true);
+      expect(idParam?.schema?.type).toBe('integer');
 
       const ok = path.get!.responses?.['200'];
       expect(ok?.content?.['application/json']?.schema?.$ref).toBe(
