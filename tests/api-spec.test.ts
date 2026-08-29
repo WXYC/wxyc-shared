@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.49.0');
+      expect(spec.info.version).toBe('1.50.0');
     });
 
     it('should have components section', () => {
@@ -1561,15 +1561,19 @@ describe('OpenAPI Specification', () => {
       properties?: Record<string, Record<string, unknown>>;
     };
 
-    it('defines DigitalArchivePlaybackManifest with the four required fields', () => {
+    it('defines DigitalArchivePlaybackManifest with the three required fields and no manifest-level provenance', () => {
       const schema = spec.components.schemas.DigitalArchivePlaybackManifest as Schema;
       expect(schema).toBeDefined();
       expect((schema.required ?? []).sort()).toEqual(
-        ['library_id', 'provenance', 'expires_at', 'tracks'].sort()
+        ['library_id', 'expires_at', 'tracks'].sort()
       );
       expect(schema.properties?.library_id?.type).toBe('integer');
-      expect(schema.properties?.provenance?.type).toBe('string');
-      expect(schema.properties?.provenance?.enum).toEqual(['rotation_upload', 'cd_rip']);
+      // Deliberately absent here and required on the track instead: the
+      // digital_asset unique key is (library_id, provenance, disc_number), so
+      // a manifest merging several bound assets has no single honest value to
+      // report at this level.
+      expect(schema.properties?.provenance).toBeUndefined();
+      expect(schema.required ?? []).not.toContain('provenance');
       expect(schema.properties?.expires_at?.type).toBe('string');
       expect(schema.properties?.expires_at?.format).toBe('date-time');
       expect(schema.properties?.tracks?.type).toBe('array');
@@ -1578,12 +1582,19 @@ describe('OpenAPI Specification', () => {
       );
     });
 
-    it('defines DigitalArchivePlaybackTrack with file_id/title/renditions required and the rest nullable', () => {
+    it('defines DigitalArchivePlaybackTrack with file_id/provenance/title/renditions required and the rest nullable', () => {
       const schema = spec.components.schemas.DigitalArchivePlaybackTrack as Schema;
       expect(schema).toBeDefined();
-      expect((schema.required ?? []).sort()).toEqual(['file_id', 'title', 'renditions'].sort());
+      expect((schema.required ?? []).sort()).toEqual(
+        ['file_id', 'provenance', 'title', 'renditions'].sort()
+      );
       expect(schema.properties?.file_id?.type).toBe('integer');
       expect(schema.properties?.title?.type).toBe('string');
+      // Non-nullable: digital_asset.provenance is NOT NULL, so every track a
+      // manifest can carry has one.
+      expect(schema.properties?.provenance?.type).toBe('string');
+      expect(schema.properties?.provenance?.enum).toEqual(['rotation_upload', 'cd_rip']);
+      expect(schema.properties?.provenance?.nullable).toBeUndefined();
 
       // Partial albums and tag gaps exist; disc/track numbering is nullable
       // and the list is ordered server-side regardless.
@@ -1598,13 +1609,17 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties?.content_hash?.nullable).toBe(true);
     });
 
-    it('defines the renditions item with codec enum [mp3, aac, flac] and a required presigned url', () => {
+    it('defines the renditions item with codec enum [mp3, aac, flac, m4a, wav] and a required presigned url', () => {
       const track = spec.components.schemas.DigitalArchivePlaybackTrack as Schema;
       const renditions = track.properties?.renditions as { items?: Schema } | undefined;
       const item = renditions?.items;
       expect(item).toBeDefined();
       expect((item!.required ?? []).sort()).toEqual(['codec', 'url'].sort());
-      expect(item!.properties?.codec?.enum).toEqual(['mp3', 'aac', 'flac']);
+      // The five formats digital_asset_file.codec can hold. m4a and wav are
+      // load-bearing rather than speculative: library/freeform/ carries 177
+      // and 28 of them, the bind job does not skip them, and an enum without
+      // them would make a bound row unrepresentable in this response.
+      expect(item!.properties?.codec?.enum).toEqual(['mp3', 'aac', 'flac', 'm4a', 'wav']);
       expect(item!.properties?.url?.type).toBe('string');
       expect(item!.properties?.url?.format).toBe('uri');
       expect(item!.properties?.bitrate_kbps?.type).toBe('integer');

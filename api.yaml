@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.49.0
+  version: 1.50.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2093,19 +2093,22 @@ components:
         WXYC/wxyc-dj-ios#135). Deliberately outlives every storage decision:
         no bucket, key, or store name appears anywhere in this shape, only
         opaque presigned URLs that die at `expires_at`.
+
+
+        `provenance` is per-track, not per-manifest: the digital_asset unique
+        key is (library_id, provenance, disc_number), so one album can hold
+        several bound assets — a multi-disc set today, and a cd_rip beside an
+        existing rotation_upload once CD digitization starts. A manifest merges
+        them, so a single manifest-level value would have had to pick a winner
+        and misreport every track sourced from the others.
       required:
         - library_id
-        - provenance
         - expires_at
         - tracks
       properties:
         library_id:
           type: integer
           description: The album's wxyc_schema.library.id — the same key CatalogExportRow.id ships.
-        provenance:
-          type: string
-          enum: [rotation_upload, cd_rip]
-          description: Where the bound digital asset came from.
         expires_at:
           type: string
           format: date-time
@@ -2126,6 +2129,7 @@ components:
         albums and tag gaps exist in the archive.
       required:
         - file_id
+        - provenance
         - title
         - renditions
       properties:
@@ -2134,6 +2138,13 @@ components:
           description: >
             digital_asset_file.id — stable across manifest refetches, for a
             future offline-cache key. NOT part of any URL; opaque to storage.
+        provenance:
+          type: string
+          enum: [rotation_upload, cd_rip]
+          description: >
+            Where this track's owning digital asset came from. Per-track rather
+            than per-manifest because a manifest may merge several bound assets
+            for one album — see DigitalArchivePlaybackManifest.
         disc_number:
           type: integer
           nullable: true
@@ -2155,8 +2166,10 @@ components:
         renditions:
           type: array
           description: >
-            Exactly one `mp3` entry in the MVP; AAC/FLAC renditions arrive
-            additively as the archive backfills them.
+            Every rendition the archive holds for this track, in no guaranteed
+            order. Usually one; a track backfilled to a second format carries
+            both. A client picks whichever codec it can play — do not assume
+            an `mp3` entry is present.
           items:
             type: object
             required:
@@ -2165,7 +2178,13 @@ components:
             properties:
               codec:
                 type: string
-                enum: [mp3, aac, flac]
+                enum: [mp3, aac, flac, m4a, wav]
+                description: >
+                  The five formats the archive actually holds, matching
+                  digital_asset_file.codec in Backend-Service's schema. The
+                  bulk is mp3; `library/freeform/` also carries FLAC, m4a and
+                  wav, and the enum lists them so a bound row can never be
+                  unrepresentable here.
               bitrate_kbps:
                 type: integer
                 nullable: true
