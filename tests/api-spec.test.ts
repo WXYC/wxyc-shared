@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.47.1');
+      expect(spec.info.version).toBe('1.48.0');
     });
 
     it('should have components section', () => {
@@ -313,6 +313,90 @@ describe('OpenAPI Specification', () => {
       it('dj_name_override should not be in the required list', () => {
         const schema = getJoinRequestSchema();
         expect(schema.required ?? []).not.toContain('dj_name_override');
+      });
+    });
+
+    describe('intent + expected_show_id on POST /flowsheet/join (BS#2233)', () => {
+      type JoinPost = {
+        requestBody?: {
+          content?: {
+            'application/json'?: {
+              schema?: { properties?: Record<string, Record<string, unknown>>; required?: string[] };
+            };
+          };
+        };
+        responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+      };
+
+      function getJoinPost(): JoinPost {
+        return (spec.paths['/flowsheet/join'] as { post?: JoinPost }).post ?? {};
+      }
+
+      function getJoinRequestProperties(): Record<string, Record<string, unknown>> {
+        return getJoinPost().requestBody?.content?.['application/json']?.schema?.properties ?? {};
+      }
+
+      it('declares intent as an optional two-value enum', () => {
+        const intent = getJoinRequestProperties().intent;
+        expect(intent).toBeDefined();
+        expect(intent?.type).toBe('string');
+        expect(intent?.enum).toEqual(['join', 'takeover']);
+      });
+
+      it('does not give intent a default — an absent field means "the caller did not choose"', () => {
+        // A `default:` here would let a generator materialize one of the two
+        // decisions on a client that never made it, which is the silent
+        // co-host bug wearing a different hat. Absence is its own state and
+        // the server answers it with the 409 below.
+        expect(getJoinRequestProperties().intent).not.toHaveProperty('default');
+      });
+
+      it('declares expected_show_id as an optional integer', () => {
+        const expected = getJoinRequestProperties().expected_show_id;
+        expect(expected).toBeDefined();
+        expect(expected?.type).toBe('integer');
+      });
+
+      it('leaves both new fields out of the required list', () => {
+        const schema = getJoinPost().requestBody?.content?.['application/json']?.schema ?? {};
+        expect(schema.required ?? []).not.toContain('intent');
+        expect(schema.required ?? []).not.toContain('expected_show_id');
+      });
+
+      it('documents a 409 that $refs the shared ApiErrorResponse', () => {
+        const conflict = getJoinPost().responses?.['409'];
+        expect(conflict).toBeDefined();
+        expect(conflict?.content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/ApiErrorResponse');
+      });
+
+      it('documents a 400 for a malformed intent handshake', () => {
+        expect(getJoinPost().responses?.['400']).toBeDefined();
+      });
+    });
+
+    describe('ended_at on POST /flowsheet/shows/{id}/force-end (BS#2233)', () => {
+      function getForceEndPost(): {
+        requestBody?: {
+          required?: boolean;
+          content?: {
+            'application/json'?: {
+              schema?: { properties?: Record<string, Record<string, unknown>>; required?: string[] };
+            };
+          };
+        };
+      } {
+        return (
+          (spec.paths['/flowsheet/shows/{id}/force-end'] as { post?: Record<string, unknown> }).post ?? {}
+        ) as ReturnType<typeof getForceEndPost>;
+      }
+
+      it('declares an optional date-time ended_at override', () => {
+        const body = getForceEndPost().requestBody;
+        expect(body?.required).not.toBe(true);
+        const endedAt = body?.content?.['application/json']?.schema?.properties?.ended_at;
+        expect(endedAt).toBeDefined();
+        expect(endedAt?.type).toBe('string');
+        expect(endedAt?.format).toBe('date-time');
       });
     });
 

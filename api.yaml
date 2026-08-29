@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.47.1
+  version: 1.48.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -8531,6 +8531,54 @@ paths:
                     new-show (start-show) path; the co-host /join branch
                     intentionally ignores this field. Max length matches
                     `auth_user.dj_name varchar(255)`.
+                intent:
+                  type: string
+                  enum: [join, takeover]
+                  description: >
+                    What the caller means when a show they are not already an
+                    active member of is still open. Consulted ONLY in that
+                    case: with no open show, or with a show the caller already
+                    belongs to, the field is inert and a new show starts (or
+                    the existing membership is returned) exactly as before.
+
+
+                    `join` is the historical behavior — the caller becomes a
+                    co-host of the open show and a `dj_join` marker is written.
+                    `takeover` closes the open show and starts a new one owned
+                    by the caller; it requires `expected_show_id`.
+
+
+                    **Deliberately has no default.** Absence is a third state,
+                    not a synonym for `join`: it means the caller never made
+                    the choice, and the server answers it with the 409 below
+                    rather than picking one. A default here would let a
+                    generated client materialize a decision its user never
+                    made, which is the silent co-host attachment this field
+                    exists to end (WXYC/Backend-Service#2232 — one production
+                    show collected five DJs over ten hours while the public
+                    on-air name named only the first).
+
+
+                    Neither value is role-gated. `takeover` is reachable by any
+                    caller holding `flowsheet: write`, deliberately: it is the
+                    escape hatch a DJ needs when the previous DJ walked out,
+                    and it restores a capability tubafrenzy's `EndShowServlet`
+                    gave every signed-on DJ.
+                expected_show_id:
+                  type: integer
+                  description: >
+                    The `shows.id` the caller intends to close. Required with
+                    `intent: takeover`, ignored otherwise.
+
+
+                    A compare-and-set against the currently-open show, echoed
+                    from the 409's `details.show.id`. Clients poll, so the show
+                    named in the prompt may already have closed by the time the
+                    DJ clicks: if it has, the caller simply starts their own
+                    show (no error — the outcome they asked for is already
+                    true); if a DIFFERENT show is now open, the request is a
+                    fresh 409 and nothing is closed, so a DJ can never end a
+                    show they were not shown.
       responses:
         '200':
           description: Successfully joined/started show
@@ -8540,6 +8588,34 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/Show'
                   - $ref: '#/components/schemas/ShowDJ'
+        '400':
+          description: >
+            Malformed intent handshake — an unrecognized `intent` value, or
+            `intent: takeover` with no `expected_show_id`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            A show the caller is not an active member of is still open and no
+            `intent` was sent (or `expected_show_id` no longer names the open
+            show). Nothing was written.
+
+
+            `code` is `show_already_open` and `details.show` carries
+            `{ id, dj_name, start_time }`. `id` is what a follow-up
+            `intent: takeover` must echo as `expected_show_id`. `dj_name`
+            resolves through the standard chain (per-show override, then the
+            linked account's handle, then the legacy tubafrenzy handle), so it
+            names the show's OWNER — which for an abandoned show is the DJ who
+            left. A client showing "who is on air right now" should prefer
+            `GET /flowsheet/djs-on-air`, whose active-membership answer is the
+            one that disagrees with this field precisely when it matters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /flowsheet/end:
     post:
@@ -8641,9 +8717,9 @@ paths:
 
 
         Requires the `flowsheet: manage` permission, the same gate as
-        `GET /flowsheet/open-shows`. No request body: the show is identified by
-        the path, and the caller's own identity is irrelevant to which show is
-        closed.
+        `GET /flowsheet/open-shows`. The show is identified by the path, and
+        the caller's own identity is irrelevant to which show is closed; the
+        only body field is the optional `ended_at` override below.
 
 
         A show whose `primary_dj_id` is NULL can be closed through this
@@ -8685,6 +8761,32 @@ paths:
           schema:
             type: string
             enum: ['true']
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ended_at:
+                  type: string
+                  format: date-time
+                  description: >
+                    Override the derived end instant. Omit it and the show is
+                    closed at its last logged entry (floored at `start_time`),
+                    which is the right answer for the abandoned shows this
+                    endpoint exists to reach and is what the description above
+                    documents.
+
+
+                    Supply it when an operator knows better than the flowsheet
+                    does — a show whose DJ stopped logging an hour before they
+                    actually went off the air, say. Bounded on both ends: it
+                    must be at or after the show's `start_time` and at or
+                    before now, or the request is a 400. The lower bound keeps
+                    a closed show from carrying an interval that cannot overlap
+                    its own airdate; the upper bound keeps a show from claiming
+                    to have ended in the future.
       responses:
         '200':
           description: The finalized show, with `end_time` set
@@ -8693,7 +8795,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/Show'
         '400':
-          description: The id was not a positive integer, or the show is already ended
+          description: >
+            The id was not a positive integer, the show is already ended, or
+            `ended_at` was unparseable or outside `[start_time, now]`.
         '403':
           description: "Caller lacks the `flowsheet: manage` permission"
         '404':
