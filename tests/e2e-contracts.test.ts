@@ -143,9 +143,9 @@ describe('Cross-service contracts (E2E)', () => {
       // breaks (PR/incident: WXYC/Backend-Service#693, dj-site#478).
       for (let i = 1; i < created.length; i++) {
         expect(
-          created[i].play_order,
-          `entry ${i} play_order ${created[i].play_order} must be > entry ${i - 1} play_order ${created[i - 1].play_order}`
-        ).toBeGreaterThan(created[i - 1].play_order);
+          created[i]!.play_order,
+          `entry ${i} play_order ${created[i]!.play_order} must be > entry ${i - 1} play_order ${created[i - 1]!.play_order}`
+        ).toBeGreaterThan(created[i - 1]!.play_order);
       }
     }
   );

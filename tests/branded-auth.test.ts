@@ -301,8 +301,8 @@ describe("Type Safety (compile-time checks)", () => {
     // Function that requires SM authorization
     function requiresSM(_user: RoleAuthorizedUser<Authorization.SM>): void {}
 
-    // @ts-expect-error - Plain user should not be assignable to branded type
     const plainUser = { authority: Authorization.SM };
+    // @ts-expect-error - Plain user should not be assignable to branded type
     requiresSM(plainUser);
   });
 
@@ -312,16 +312,16 @@ describe("Type Safety (compile-time checks)", () => {
 
     // This would be valid if we used checkRole and got an authorized result
     // but direct casting should fail
-    // @ts-expect-error - DJ branded user should not satisfy SM requirement
     const djUser: RoleAuthorizedUser<Authorization.DJ> = {} as any;
+    // @ts-expect-error - DJ branded user should not satisfy SM requirement
     requiresSM(djUser);
   });
 
   it("different capabilities are not interchangeable", () => {
     function requiresEditor(_user: CapabilityAuthorizedUser<"editor">): void {}
 
-    // @ts-expect-error - webmaster branded user should not satisfy editor requirement
     const webmasterUser: CapabilityAuthorizedUser<"webmaster"> = {} as any;
+    // @ts-expect-error - webmaster branded user should not satisfy editor requirement
     requiresEditor(webmasterUser);
   });
 });

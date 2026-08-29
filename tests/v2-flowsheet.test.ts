@@ -329,10 +329,10 @@ describe('FlowsheetV2PaginatedResponse', () => {
 
     const entries = response.entries as unknown as FlowsheetV2Entry[];
 
-    expect(isV2TrackEntry(entries[0])).toBe(true);
-    expect(isV2ShowStartEntry(entries[1])).toBe(true);
-    expect(isV2BreakpointEntry(entries[2])).toBe(true);
-    expect(isV2MessageEntry(entries[3])).toBe(true);
+    expect(isV2TrackEntry(entries[0]!)).toBe(true);
+    expect(isV2ShowStartEntry(entries[1]!)).toBe(true);
+    expect(isV2BreakpointEntry(entries[2]!)).toBe(true);
+    expect(isV2MessageEntry(entries[3]!)).toBe(true);
   });
 
   it('should handle empty entries array', () => {

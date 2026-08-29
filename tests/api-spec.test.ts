@@ -238,7 +238,7 @@ describe('OpenAPI Specification', () => {
         const schema = spec.components.schemas.OnAirDJ as {
           properties: Record<string, Record<string, unknown>>;
         };
-        return schema.properties.id;
+        return schema.properties.id!;
       }
 
       it('is a string, not an integer', () => {
@@ -991,7 +991,7 @@ describe('OpenAPI Specification', () => {
           properties: Record<string, SchemaProp>;
         };
         expect(albumDetail.properties.legacy_release_id).toBeDefined();
-        expect(albumDetail.properties.legacy_release_id.type).toBe('integer');
+        expect(albumDetail.properties.legacy_release_id!.type).toBe('integer');
         expect(propertyOf('Album', 'legacy_release_id')).toBeUndefined();
       });
     });
@@ -1916,9 +1916,9 @@ describe('OpenAPI Specification', () => {
       expect(schema).toBeDefined();
       expect(schema.type).toBe('object');
       expect(schema.required).toEqual(['position', 'title']);
-      expect(schema.properties.position.type).toBe('string');
-      expect(schema.properties.title.type).toBe('string');
-      expect(schema.properties.duration.type).toBe('string');
+      expect(schema.properties.position!.type).toBe('string');
+      expect(schema.properties.title!.type).toBe('string');
+      expect(schema.properties.duration!.type).toBe('string');
     });
 
     it('should define ReconciledIdentity with bare external IDs', () => {
@@ -1930,18 +1930,18 @@ describe('OpenAPI Specification', () => {
       expect(schema.type).toBe('object');
       // All six identifier fields are bare IDs, all nullable.
       // URL construction is the consumer's job — see WXYC/wxyc-shared#42.
-      expect(schema.properties.discogs_artist_id.type).toBe('integer');
-      expect(schema.properties.discogs_artist_id.nullable).toBe(true);
-      expect(schema.properties.musicbrainz_artist_id.type).toBe('string');
-      expect(schema.properties.musicbrainz_artist_id.nullable).toBe(true);
-      expect(schema.properties.wikidata_qid.type).toBe('string');
-      expect(schema.properties.wikidata_qid.nullable).toBe(true);
-      expect(schema.properties.spotify_artist_id.type).toBe('string');
-      expect(schema.properties.spotify_artist_id.nullable).toBe(true);
-      expect(schema.properties.apple_music_artist_id.type).toBe('string');
-      expect(schema.properties.apple_music_artist_id.nullable).toBe(true);
-      expect(schema.properties.bandcamp_id.type).toBe('string');
-      expect(schema.properties.bandcamp_id.nullable).toBe(true);
+      expect(schema.properties.discogs_artist_id!.type).toBe('integer');
+      expect(schema.properties.discogs_artist_id!.nullable).toBe(true);
+      expect(schema.properties.musicbrainz_artist_id!.type).toBe('string');
+      expect(schema.properties.musicbrainz_artist_id!.nullable).toBe(true);
+      expect(schema.properties.wikidata_qid!.type).toBe('string');
+      expect(schema.properties.wikidata_qid!.nullable).toBe(true);
+      expect(schema.properties.spotify_artist_id!.type).toBe('string');
+      expect(schema.properties.spotify_artist_id!.nullable).toBe(true);
+      expect(schema.properties.apple_music_artist_id!.type).toBe('string');
+      expect(schema.properties.apple_music_artist_id!.nullable).toBe(true);
+      expect(schema.properties.bandcamp_id!.type).toBe('string');
+      expect(schema.properties.bandcamp_id!.nullable).toBe(true);
     });
 
     it('should attach optional reconciled_identity to LookupResultItem', () => {
@@ -1954,7 +1954,7 @@ describe('OpenAPI Specification', () => {
       // reconciled_identity is optional (not in `required`) and refs the shared schema
       expect(schema.required).toEqual(['library_item']);
       expect(schema.properties.reconciled_identity).toBeDefined();
-      expect(schema.properties.reconciled_identity.$ref).toBe(
+      expect(schema.properties.reconciled_identity!.$ref).toBe(
         '#/components/schemas/ReconciledIdentity',
       );
     });
@@ -1967,8 +1967,8 @@ describe('OpenAPI Specification', () => {
         required?: string[];
       };
       expect(schema.properties.include_identity).toBeDefined();
-      expect(schema.properties.include_identity.type).toBe('boolean');
-      expect(schema.properties.include_identity.default).toBe(false);
+      expect(schema.properties.include_identity!.type).toBe('boolean');
+      expect(schema.properties.include_identity!.default).toBe(false);
       // Not required — v1 consumers continue to omit it.
       expect(schema.required ?? []).not.toContain('include_identity');
     });
@@ -1979,8 +1979,8 @@ describe('OpenAPI Specification', () => {
         required?: string[];
       };
       expect(schema.properties.api_version).toBeDefined();
-      expect(schema.properties.api_version.type).toBe('integer');
-      expect(schema.properties.api_version.enum).toEqual([2]);
+      expect(schema.properties.api_version!.type).toBe('integer');
+      expect(schema.properties.api_version!.enum).toEqual([2]);
       // Not required — v1 responses omit the field entirely so existing
       // consumers see byte-identical responses.
       expect(schema.required ?? []).not.toContain('api_version');
@@ -2003,8 +2003,8 @@ describe('OpenAPI Specification', () => {
       };
       const identity = schema.properties.identity;
       expect(identity).toBeDefined();
-      expect(identity.$ref).toBe('#/components/schemas/LookupIdentityBlock');
-      expect(identity.nullable).toBeUndefined();
+      expect(identity!.$ref).toBe('#/components/schemas/LookupIdentityBlock');
+      expect(identity!.nullable).toBeUndefined();
       expect(schema.required ?? []).not.toContain('identity');
     });
 
@@ -2047,14 +2047,14 @@ describe('OpenAPI Specification', () => {
       const schema = spec.components.schemas.LookupResponse as {
         properties: Record<string, { nullable?: boolean }>;
       };
-      expect(schema.properties.api_version.nullable).toBe(true);
+      expect(schema.properties.api_version!.nullable).toBe(true);
     });
 
     it('mandates a value-equality check on api_version and forbids a presence check', () => {
       const schema = spec.components.schemas.LookupResponse as {
         properties: Record<string, { description?: string }>;
       };
-      const description = schema.properties.api_version.description ?? '';
+      const description = schema.properties.api_version!.description ?? '';
       expect(description).toMatch(/MUST test for the value `2`/);
       expect(description).toMatch(/must never test for key presence/);
     });
@@ -2063,7 +2063,7 @@ describe('OpenAPI Specification', () => {
       const schema = spec.components.schemas.LookupResponse as {
         properties: Record<string, { description?: string }>;
       };
-      const description = schema.properties.api_version.description ?? '';
+      const description = schema.properties.api_version!.description ?? '';
       expect(description).toMatch(/not supported/);
       expect(description).toMatch(/only the literal value `2` reads "supported"/);
     });
@@ -2080,7 +2080,7 @@ describe('OpenAPI Specification', () => {
       const schema = spec.components.schemas.LookupRequest as {
         properties: Record<string, { description?: string }>;
       };
-      const description = schema.properties.include_identity.description ?? '';
+      const description = schema.properties.include_identity!.description ?? '';
       expect(description).not.toMatch(/byte-identical to v0\.5\.0/);
       expect(description).toMatch(/`null`/);
     });
@@ -2094,7 +2094,7 @@ describe('OpenAPI Specification', () => {
       const schema = spec.components.schemas.LookupRequest as {
         properties: Record<string, { description?: string }>;
       };
-      const description = schema.properties.include_identity.description ?? '';
+      const description = schema.properties.include_identity!.description ?? '';
       expect(description).not.toMatch(/sets this to true on every call/);
     });
 
@@ -2144,11 +2144,11 @@ describe('OpenAPI Specification', () => {
       };
       expect(schema).toBeDefined();
       expect(schema.required).toEqual(['source', 'attempted']);
-      expect(schema.properties.source.$ref).toBe('#/components/schemas/IdentitySource');
+      expect(schema.properties.source!.$ref).toBe('#/components/schemas/IdentitySource');
       // external_id, method, confidence, reason all nullable so a skipped
       // leg can NULL them.
-      expect(schema.properties.external_id.nullable).toBe(true);
-      expect(schema.properties.confidence.nullable).toBe(true);
+      expect(schema.properties.external_id!.nullable).toBe(true);
+      expect(schema.properties.confidence!.nullable).toBe(true);
     });
 
     it('should define LookupIdentityBlock with required `resolved` array', () => {
@@ -2181,11 +2181,11 @@ describe('OpenAPI Specification', () => {
         required?: string[];
       };
       expect(schema.properties.extended).toBeDefined();
-      expect(schema.properties.extended.type).toBe('boolean');
+      expect(schema.properties.extended!.type).toBe('boolean');
       // Intentionally omit `default:` so openapi-typescript emits the field
       // as optional (`extended?: boolean`) rather than required. Existing
       // consumers (LML/BS/iOS/dj-site) keep compiling without passing it.
-      expect(schema.properties.extended.default).toBeUndefined();
+      expect(schema.properties.extended!.default).toBeUndefined();
       // Not required — non-iOS consumers continue to omit it.
       expect(schema.required ?? []).not.toContain('extended');
     });
@@ -2196,9 +2196,9 @@ describe('OpenAPI Specification', () => {
         required?: string[];
       };
       expect(schema.properties.warm_cache).toBeDefined();
-      expect(schema.properties.warm_cache.type).toBe('boolean');
+      expect(schema.properties.warm_cache!.type).toBe('boolean');
       // Same rationale as `extended` — see comment above.
-      expect(schema.properties.warm_cache.default).toBeUndefined();
+      expect(schema.properties.warm_cache!.default).toBeUndefined();
       // Read-path callers leave this absent to avoid doubling Discogs-API load.
       expect(schema.required ?? []).not.toContain('warm_cache');
     });
@@ -2215,9 +2215,9 @@ describe('OpenAPI Specification', () => {
 
       const prop = schema.properties.artwork_checked_at;
       expect(prop).toBeDefined();
-      expect(prop.type).toBe('string');
-      expect(prop.format).toBe('date-time');
-      expect(prop.nullable).toBe(true);
+      expect(prop!.type).toBe('string');
+      expect(prop!.format).toBe('date-time');
+      expect(prop!.nullable).toBe(true);
       // Must stay optional — required-list addition would break every existing
       // consumer of DiscogsReleaseMetadata (BS, dj-site, iOS, Android).
       expect(schema.required ?? []).not.toContain('artwork_checked_at');
@@ -2234,40 +2234,40 @@ describe('OpenAPI Specification', () => {
       const optional = (name: string) => {
         expect(schema.properties[name]).toBeDefined();
         expect(schema.required ?? []).not.toContain(name);
-        expect(schema.properties[name].nullable).toBe(true);
+        expect(schema.properties[name]!.nullable).toBe(true);
       };
 
       optional('discogs_artist_id');
-      expect(schema.properties.discogs_artist_id.type).toBe('integer');
+      expect(schema.properties.discogs_artist_id!.type).toBe('integer');
 
       optional('tracklist');
-      expect(schema.properties.tracklist.type).toBe('array');
-      expect(schema.properties.tracklist.items?.$ref).toBe(
+      expect(schema.properties.tracklist!.type).toBe('array');
+      expect(schema.properties.tracklist!.items?.$ref).toBe(
         '#/components/schemas/DiscogsTrackItem',
       );
 
       optional('genres');
-      expect(schema.properties.genres.type).toBe('array');
-      expect(schema.properties.genres.items?.type).toBe('string');
+      expect(schema.properties.genres!.type).toBe('array');
+      expect(schema.properties.genres!.items?.type).toBe('string');
 
       optional('styles');
-      expect(schema.properties.styles.type).toBe('array');
-      expect(schema.properties.styles.items?.type).toBe('string');
+      expect(schema.properties.styles!.type).toBe('array');
+      expect(schema.properties.styles!.items?.type).toBe('string');
 
       optional('label');
-      expect(schema.properties.label.type).toBe('string');
+      expect(schema.properties.label!.type).toBe('string');
 
       optional('full_release_date');
-      expect(schema.properties.full_release_date.type).toBe('string');
+      expect(schema.properties.full_release_date!.type).toBe('string');
 
       optional('artist_image_url');
-      expect(schema.properties.artist_image_url.type).toBe('string');
+      expect(schema.properties.artist_image_url!.type).toBe('string');
 
       // Field name matches DiscogsArtistDetails.profile_tokens so iOS / dj-site
       // can share rendering code across the two payloads.
       optional('profile_tokens');
-      expect(schema.properties.profile_tokens.type).toBe('array');
-      expect(schema.properties.profile_tokens.items?.$ref).toBe(
+      expect(schema.properties.profile_tokens!.type).toBe('array');
+      expect(schema.properties.profile_tokens!.items?.$ref).toBe(
         '#/components/schemas/DiscogsResolvedToken',
       );
     });
@@ -2285,8 +2285,8 @@ describe('OpenAPI Specification', () => {
 
       const prop = schema.properties.master_id;
       expect(prop).toBeDefined();
-      expect(prop.type).toBe('integer');
-      expect(prop.nullable).toBe(true);
+      expect(prop!.type).toBe('integer');
+      expect(prop!.nullable).toBe(true);
       expect(schema.required ?? []).not.toContain('master_id');
     });
 
@@ -2301,8 +2301,8 @@ describe('OpenAPI Specification', () => {
 
       const prop = schema.properties.master_id;
       expect(prop).toBeDefined();
-      expect(prop.type).toBe('integer');
-      expect(prop.nullable).toBe(true);
+      expect(prop!.type).toBe('integer');
+      expect(prop!.nullable).toBe(true);
       expect(schema.required ?? []).not.toContain('master_id');
     });
 
@@ -2317,9 +2317,9 @@ describe('OpenAPI Specification', () => {
 
       expect(schema).toBeDefined();
       expect(schema.required).toEqual(['names', 'provenance']);
-      expect(schema.properties.names.type).toBe('array');
-      expect(schema.properties.names.items?.type).toBe('string');
-      expect(schema.properties.provenance.enum).toEqual(['track', 'release']);
+      expect(schema.properties.names!.type).toBe('array');
+      expect(schema.properties.names!.items?.type).toBe('string');
+      expect(schema.properties.provenance!.enum).toEqual(['track', 'release']);
       expect(schema.required ?? []).not.toContain('roles');
       expect(schema.required ?? []).not.toContain('track_position');
     });
@@ -2334,7 +2334,7 @@ describe('OpenAPI Specification', () => {
       };
 
       expect(schema.properties.writer_credits).toBeDefined();
-      expect(schema.properties.writer_credits.$ref).toBe(
+      expect(schema.properties.writer_credits!.$ref).toBe(
         '#/components/schemas/DiscogsWriterCredits',
       );
       expect(schema.required ?? []).not.toContain('writer_credits');
@@ -2348,8 +2348,8 @@ describe('OpenAPI Specification', () => {
         required?: string[];
       };
       expect(schema.properties.timeout).toBeDefined();
-      expect(schema.properties.timeout.type).toBe('boolean');
-      expect(schema.properties.timeout.default).toBe(false);
+      expect(schema.properties.timeout!.type).toBe('boolean');
+      expect(schema.properties.timeout!.default).toBe(false);
       // Not required — existing consumers continue to ignore the field; new
       // consumers that read it can distinguish "no match" from "ran out of
       // time" on the LML hard-cap path.
@@ -2362,8 +2362,8 @@ describe('OpenAPI Specification', () => {
         required?: string[];
       };
       expect(schema.properties.degraded).toBeDefined();
-      expect(schema.properties.degraded.type).toBe('boolean');
-      expect(schema.properties.degraded.default).toBe(false);
+      expect(schema.properties.degraded!.type).toBe('boolean');
+      expect(schema.properties.degraded!.default).toBe(false);
       // Not required — existing consumers ignore it; new consumers distinguish a
       // deliberately shed-the-tail cache-only/partial result from both success
       // and a genuine no-match. Distinct from timeout (hard-cap abandonment).
@@ -2376,8 +2376,8 @@ describe('OpenAPI Specification', () => {
         required?: string[];
       };
       expect(schema.properties.degraded_reason).toBeDefined();
-      expect(schema.properties.degraded_reason.type).toBe('string');
-      expect(schema.properties.degraded_reason.enum).toEqual([
+      expect(schema.properties.degraded_reason!.type).toBe('string');
+      expect(schema.properties.degraded_reason!.enum).toEqual([
         'deadline_exceeded',
         'cache_only',
         'upstream_unavailable',
@@ -2409,7 +2409,7 @@ describe('OpenAPI Specification', () => {
       const schema = spec.components.schemas.LookupResultItem as {
         properties: Record<string, { description?: string }>;
       };
-      const description = schema.properties.matched_via.description ?? '';
+      const description = schema.properties.matched_via!.description ?? '';
       expect(description).toContain('SONG_AS_TRACK');
       expect(description).toContain('multi-location union');
       expect(description).toContain('discogs_release');
@@ -2419,7 +2419,7 @@ describe('OpenAPI Specification', () => {
       const schema = spec.components.schemas.AlbumSearchResult as {
         properties: Record<string, { description?: string }>;
       };
-      const description = schema.properties.matched_via.description ?? '';
+      const description = schema.properties.matched_via!.description ?? '';
       expect(description).toContain("Backend's catalog `/library/` search");
       expect(description).not.toContain('multi-location union');
     });
@@ -2428,7 +2428,7 @@ describe('OpenAPI Specification', () => {
       const schema = spec.components.schemas.LibrarySearchItem as {
         properties: Record<string, { description?: string }>;
       };
-      const description = schema.properties.matched_via.description ?? '';
+      const description = schema.properties.matched_via!.description ?? '';
       expect(description).toContain('catalog-track-search plan §5.1');
       expect(description).not.toContain('multi-location union');
     });
@@ -2596,7 +2596,7 @@ describe('OpenAPI Specification', () => {
   describe('AlbumDetail is the one album-detail shape', () => {
     type Op = { responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }> };
     const okRef = (path: string, method: 'get' | 'patch') =>
-      ((spec.paths[path] as Record<string, Op>)[method].responses ?? {})['200']?.content?.[
+      ((spec.paths[path] as Record<string, Op>)[method]!.responses ?? {})['200']?.content?.[
         'application/json'
       ]?.schema?.$ref;
 
@@ -2693,7 +2693,7 @@ describe('OpenAPI Specification', () => {
           label: 'GenreEntry',
           get: () =>
             (spec.components.schemas.GenreEntry as { properties: Record<string, { type?: string }> })
-              .properties.genre_name,
+              .properties.genre_name!,
         },
         {
           label: 'ArtistWithGenre',
@@ -2702,7 +2702,7 @@ describe('OpenAPI Specification', () => {
               spec.components.schemas.ArtistWithGenre as {
                 allOf: Array<{ properties?: Record<string, { type?: string }> }>;
               }
-            ).allOf.find((m) => m.properties?.genre_name)!.properties!.genre_name,
+            ).allOf.find((m) => m.properties?.genre_name)!.properties!.genre_name!,
         },
         {
           label: 'AlbumSearchResult',
@@ -2711,13 +2711,13 @@ describe('OpenAPI Specification', () => {
               spec.components.schemas.AlbumSearchResult as {
                 properties: Record<string, { type?: string }>;
               }
-            ).properties.genre_name,
+            ).properties.genre_name!,
         },
         {
           label: 'AlbumDetail',
           get: () =>
             (spec.components.schemas.AlbumDetail as { properties: Record<string, { type?: string }> })
-              .properties.genre_name,
+              .properties.genre_name!,
         },
       ];
 
@@ -2742,18 +2742,18 @@ describe('OpenAPI Specification', () => {
         properties: Record<string, { type: string; items?: { $ref?: string } }>;
       };
       expect(schema.properties.genres).toBeDefined();
-      expect(schema.properties.genres.type).toBe('array');
+      expect(schema.properties.genres!.type).toBe('array');
       expect(schema.properties.styles).toBeDefined();
-      expect(schema.properties.styles.type).toBe('array');
+      expect(schema.properties.styles!.type).toBe('array');
       expect(schema.properties.label).toBeDefined();
-      expect(schema.properties.label.type).toBe('string');
+      expect(schema.properties.label!.type).toBe('string');
       expect(schema.properties.discogsArtistId).toBeDefined();
-      expect(schema.properties.discogsArtistId.type).toBe('integer');
+      expect(schema.properties.discogsArtistId!.type).toBe('integer');
       expect(schema.properties.fullReleaseDate).toBeDefined();
-      expect(schema.properties.fullReleaseDate.type).toBe('string');
+      expect(schema.properties.fullReleaseDate!.type).toBe('string');
       expect(schema.properties.tracklist).toBeDefined();
-      expect(schema.properties.tracklist.type).toBe('array');
-      expect(schema.properties.tracklist.items?.$ref).toBe('#/components/schemas/TrackListItem');
+      expect(schema.properties.tracklist!.type).toBe('array');
+      expect(schema.properties.tracklist!.items?.$ref).toBe('#/components/schemas/TrackListItem');
     });
 
     it('should define ArtistMetadataResponse with imageUrl', () => {
@@ -2761,7 +2761,7 @@ describe('OpenAPI Specification', () => {
         properties: Record<string, { type: string }>;
       };
       expect(schema.properties.imageUrl).toBeDefined();
-      expect(schema.properties.imageUrl.type).toBe('string');
+      expect(schema.properties.imageUrl!.type).toBe('string');
     });
 
     it('should define ArtistMetadataResponse.bioTokens as a nullable array of DiscogsResolvedToken (#251)', () => {
@@ -2770,12 +2770,12 @@ describe('OpenAPI Specification', () => {
         required?: string[];
       };
       expect(schema.properties.bioTokens).toBeDefined();
-      expect(schema.properties.bioTokens.type).toBe('array');
+      expect(schema.properties.bioTokens!.type).toBe('array');
       // The backend emits an explicit `?? null` for this field.
-      expect(schema.properties.bioTokens.nullable).toBe(true);
+      expect(schema.properties.bioTokens!.nullable).toBe(true);
       // Reuses the existing token schema (pass-through of
       // DiscogsArtistDetails.profile_tokens) — no parallel token shape.
-      expect(schema.properties.bioTokens.items?.$ref).toBe(
+      expect(schema.properties.bioTokens!.items?.$ref).toBe(
         '#/components/schemas/DiscogsResolvedToken'
       );
       // Not required — additive/optional, existing consumers are unaffected.
@@ -2802,13 +2802,13 @@ describe('OpenAPI Specification', () => {
     it('declares donateUrl as a string', () => {
       const field = appConfig().properties.donateUrl;
       expect(field).toBeDefined();
-      expect(field.type).toBe('string');
+      expect(field!.type).toBe('string');
     });
 
     it('declares donateEnabled as a boolean', () => {
       const field = appConfig().properties.donateEnabled;
       expect(field).toBeDefined();
-      expect(field.type).toBe('boolean');
+      expect(field!.type).toBe('boolean');
     });
 
     // The constraint the whole slice rests on. iOS's AppConfig decoder is
@@ -2840,8 +2840,8 @@ describe('OpenAPI Specification', () => {
     // own fallback.
     it('documents the empty-string-when-unset wire value without declaring nullable or a uri format', () => {
       const field = appConfig().properties.donateUrl;
-      expect(field.description ?? '').toMatch(/empty string/i);
-      expect(field.nullable).toBeUndefined();
+      expect(field!.description ?? '').toMatch(/empty string/i);
+      expect(field!.nullable).toBeUndefined();
       expect(field).not.toHaveProperty('format');
     });
 
@@ -2851,7 +2851,7 @@ describe('OpenAPI Specification', () => {
     // rendering an enabled button with no destination — the contract has to
     // say which field decides what.
     it('resolves the enabled-with-unusable-url state rather than leaving it to each client', () => {
-      const description = appConfig().properties.donateUrl.description ?? '';
+      const description = appConfig().properties.donateUrl!.description ?? '';
       expect(description).toMatch(/MUST NOT render/);
       expect(description).toMatch(/independent variables/i);
     });
@@ -2862,7 +2862,7 @@ describe('OpenAPI Specification', () => {
     // the sole frozen consumer resolves absent to *visible*
     // (`donateEnabled ?? true` in wxyc-ios-64#913).
     it('documents donateEnabled as hide-on-false, client-default-on-absent, and absence as explicitly not a kill switch', () => {
-      const description = appConfig().properties.donateEnabled.description ?? '';
+      const description = appConfig().properties.donateEnabled!.description ?? '';
       expect(description).toMatch(/false/);
       expect(description).toMatch(/absent/i);
       expect(description).toMatch(/default/i);
@@ -2874,7 +2874,7 @@ describe('OpenAPI Specification', () => {
     // this and so does the iOS PR; api.yaml is what the Android and website
     // implementers read instead, so it has to carry it too.
     it('warns that false propagates on a deploy-time, cache-bounded schedule rather than instantly', () => {
-      const description = appConfig().properties.donateEnabled.description ?? '';
+      const description = appConfig().properties.donateEnabled!.description ?? '';
       expect(description).toMatch(/max-age=3600/);
       expect(description).toMatch(/deploy-time/i);
     });
@@ -2887,7 +2887,7 @@ describe('OpenAPI Specification', () => {
     it('declares no schema-level default on either field, and records why', () => {
       expect(appConfig().properties.donateEnabled).not.toHaveProperty('default');
       expect(appConfig().properties.donateUrl).not.toHaveProperty('default');
-      expect(appConfig().properties.donateEnabled.description ?? '').toMatch(
+      expect(appConfig().properties.donateEnabled!.description ?? '').toMatch(
         /no schema-level `default`/
       );
     });
@@ -3055,10 +3055,10 @@ describe('OpenAPI Specification', () => {
       expect(schema).toBeDefined();
       expect(schema.type).toBe('object');
       expect(schema.required).toEqual(['type', 'payload', 'timestamp']);
-      expect(schema.properties.type.enum).toEqual(['update']);
+      expect(schema.properties.type!.enum).toEqual(['update']);
       // Payload is the full flowsheet row — pinned by
       // CONTRACTS.LIVE_FS_UPDATE_INCLUDES_FULL_ROW.
-      expect(schema.properties.payload.$ref).toBe('#/components/schemas/FlowsheetEntryResponse');
+      expect(schema.properties.payload!.$ref).toBe('#/components/schemas/FlowsheetEntryResponse');
     });
 
     it('should define LiveFsRefetchEvent with the {type, payload, timestamp} envelope', () => {
@@ -3069,7 +3069,7 @@ describe('OpenAPI Specification', () => {
       };
       expect(schema).toBeDefined();
       expect(schema.required).toEqual(['type', 'payload', 'timestamp']);
-      expect(schema.properties.type.enum).toEqual(['refetch']);
+      expect(schema.properties.type!.enum).toEqual(['refetch']);
     });
 
     it('should define LiveFsInsertEvent with the {type, payload, timestamp} envelope', () => {
@@ -3081,11 +3081,11 @@ describe('OpenAPI Specification', () => {
       expect(schema).toBeDefined();
       expect(schema.type).toBe('object');
       expect(schema.required).toEqual(['type', 'payload', 'timestamp']);
-      expect(schema.properties.type.enum).toEqual(['insert']);
+      expect(schema.properties.type!.enum).toEqual(['insert']);
       // Carries the full newly-inserted flowsheet row — same payload shape as
       // LiveFsUpdateEvent, valid pre-enrichment (metadata_status 'pending',
       // enrichment fields nullable on FlowsheetEntryResponse).
-      expect(schema.properties.payload.$ref).toBe('#/components/schemas/FlowsheetEntryResponse');
+      expect(schema.properties.payload!.$ref).toBe('#/components/schemas/FlowsheetEntryResponse');
     });
 
     it('should define LiveFsEvent as a discriminated union over `type`', () => {
@@ -3125,11 +3125,11 @@ describe('OpenAPI Specification', () => {
       for (const svc of ['spotify', 'apple_music', 'bandcamp']) {
         const prop = schema.properties[svc];
         expect(prop, `${svc} property`).toBeDefined();
-        expect(prop.$ref).toBe('#/components/schemas/StreamingResolutionStatus');
+        expect(prop!.$ref).toBe('#/components/schemas/StreamingResolutionStatus');
         // Optional but NOT nullable: never-consulted is encoded solely by key
         // omission; a consulted-but-absent service is the `absent` verdict — so
         // `null` would be a redundant second encoding of never-consulted.
-        expect(prop.nullable).toBeUndefined();
+        expect(prop!.nullable).toBeUndefined();
       }
       // Every per-service status is optional: a service key is present only when
       // that service was consulted this lookup. An omitted service was never
@@ -3143,8 +3143,8 @@ describe('OpenAPI Specification', () => {
         required?: string[];
       };
       expect(schema.properties.streaming_status).toBeDefined();
-      expect(schema.properties.streaming_status.nullable).toBe(true);
-      expect(schema.properties.streaming_status.allOf?.[0]?.$ref).toBe(
+      expect(schema.properties.streaming_status!.nullable).toBe(true);
+      expect(schema.properties.streaming_status!.allOf?.[0]?.$ref).toBe(
         '#/components/schemas/StreamingResolution',
       );
       // Additive: not required, so existing LML/BS consumers are unaffected and a
@@ -3162,8 +3162,8 @@ describe('OpenAPI Specification', () => {
         required?: string[];
       };
       expect(schema.properties.errored_sources).toBeDefined();
-      expect(schema.properties.errored_sources.type).toBe('array');
-      expect(schema.properties.errored_sources.items?.type).toBe('string');
+      expect(schema.properties.errored_sources!.type).toBe('array');
+      expect(schema.properties.errored_sources!.items?.type).toBe('string');
       // Not required — preserves backward compat for clients pinned to the
       // pre-1.8.0 schema. LML always emits it (defaulting to []); strict-
       // validating consumers should treat absence as [].
@@ -3198,17 +3198,17 @@ describe('OpenAPI Specification', () => {
       expect(schema).toBeDefined();
       expect(schema.type).toBe('object');
       expect(schema.required).toEqual(['source', 'variant', 'method', 'confidence']);
-      expect(schema.properties.source.$ref).toBe('#/components/schemas/ArtistSearchAliasSource');
-      expect(schema.properties.method.$ref).toBe('#/components/schemas/ArtistSearchAliasMethod');
-      expect(schema.properties.variant.type).toBe('string');
+      expect(schema.properties.source!.$ref).toBe('#/components/schemas/ArtistSearchAliasSource');
+      expect(schema.properties.method!.$ref).toBe('#/components/schemas/ArtistSearchAliasMethod');
+      expect(schema.properties.variant!.type).toBe('string');
       // related_external_id / related_name / active are nullable optionals — only set for some kinds.
-      expect(schema.properties.related_external_id.nullable).toBe(true);
-      expect(schema.properties.related_name.nullable).toBe(true);
-      expect(schema.properties.active.nullable).toBe(true);
+      expect(schema.properties.related_external_id!.nullable).toBe(true);
+      expect(schema.properties.related_name!.nullable).toBe(true);
+      expect(schema.properties.active!.nullable).toBe(true);
       // Confidence in [0, 1].
-      expect(schema.properties.confidence.type).toBe('number');
-      expect(schema.properties.confidence.minimum).toBe(0);
-      expect(schema.properties.confidence.maximum).toBe(1);
+      expect(schema.properties.confidence!.type).toBe('number');
+      expect(schema.properties.confidence!.minimum).toBe(0);
+      expect(schema.properties.confidence!.maximum).toBe(1);
     });
 
     it('should define ArtistSearchAliasesResult requiring name + variants + sources_present', () => {
@@ -3218,14 +3218,14 @@ describe('OpenAPI Specification', () => {
       };
       expect(schema).toBeDefined();
       expect(schema.required).toEqual(['name', 'variants', 'sources_present']);
-      expect(schema.properties.variants.type).toBe('array');
-      expect(schema.properties.variants.items?.$ref).toBe(
+      expect(schema.properties.variants!.type).toBe('array');
+      expect(schema.properties.variants!.items?.$ref).toBe(
         '#/components/schemas/ArtistSearchAliasVariant',
       );
       // sources_present is the reconcile-scope tag list. Empty array means
       // "no leg ran" — BS leaves cached rows alone.
-      expect(schema.properties.sources_present.type).toBe('array');
-      expect(schema.properties.sources_present.items?.$ref).toBe(
+      expect(schema.properties.sources_present!.type).toBe('array');
+      expect(schema.properties.sources_present!.items?.$ref).toBe(
         '#/components/schemas/ArtistSearchAliasSource',
       );
     });
@@ -3237,10 +3237,10 @@ describe('OpenAPI Specification', () => {
       };
       expect(schema).toBeDefined();
       expect(schema.required).toEqual(['names']);
-      expect(schema.properties.names.type).toBe('array');
-      expect(schema.properties.names.minItems).toBe(1);
-      expect(schema.properties.names.maxItems).toBe(1000);
-      expect(schema.properties.names.items?.type).toBe('string');
+      expect(schema.properties.names!.type).toBe('array');
+      expect(schema.properties.names!.minItems).toBe(1);
+      expect(schema.properties.names!.maxItems).toBe(1000);
+      expect(schema.properties.names!.items?.type).toBe('string');
     });
 
     it('should define ArtistSearchAliasesBulkResponse requiring artists + missing', () => {
@@ -3250,14 +3250,14 @@ describe('OpenAPI Specification', () => {
       };
       expect(schema).toBeDefined();
       expect(schema.required).toEqual(['artists', 'missing']);
-      expect(schema.properties.artists.type).toBe('array');
-      expect(schema.properties.artists.items?.$ref).toBe(
+      expect(schema.properties.artists!.type).toBe('array');
+      expect(schema.properties.artists!.items?.$ref).toBe(
         '#/components/schemas/ArtistSearchAliasesResult',
       );
-      expect(schema.properties.missing.type).toBe('array');
-      expect(schema.properties.missing.items?.type).toBe('string');
+      expect(schema.properties.missing!.type).toBe('array');
+      expect(schema.properties.missing!.items?.type).toBe('string');
       // cache_stats is optional — mirrors the LML lookup family convention.
-      expect(schema.properties.cache_stats.$ref).toBe('#/components/schemas/CacheStats');
+      expect(schema.properties.cache_stats!.$ref).toBe('#/components/schemas/CacheStats');
       expect(schema.required).not.toContain('cache_stats');
     });
 
@@ -3270,8 +3270,8 @@ describe('OpenAPI Specification', () => {
       expect(schema).toBeDefined();
       expect(schema.type).toBe('object');
       expect(schema.required).toEqual(['matched_variant', 'source']);
-      expect(schema.properties.matched_variant.type).toBe('string');
-      expect(schema.properties.source.$ref).toBe('#/components/schemas/ArtistSearchAliasSource');
+      expect(schema.properties.matched_variant!.type).toBe('string');
+      expect(schema.properties.source!.$ref).toBe('#/components/schemas/ArtistSearchAliasSource');
     });
 
     it('should attach optional matched_via_alias to AlbumSearchResult, LookupResultItem, and LibrarySearchItem', () => {
@@ -3288,8 +3288,8 @@ describe('OpenAPI Specification', () => {
         };
         expect(schema, `${name} should exist`).toBeDefined();
         expect(schema.properties.matched_via_alias, `${name}.matched_via_alias`).toBeDefined();
-        expect(schema.properties.matched_via_alias.type).toBe('array');
-        expect(schema.properties.matched_via_alias.items?.$ref).toBe(
+        expect(schema.properties.matched_via_alias!.type).toBe('array');
+        expect(schema.properties.matched_via_alias!.items?.$ref).toBe(
           '#/components/schemas/ArtistMatchHint',
         );
         expect(schema.required ?? []).not.toContain('matched_via_alias');
@@ -3367,17 +3367,17 @@ describe('OpenAPI Specification', () => {
       expect(schema).toBeDefined();
       expect(schema.type).toBe('object');
       expect(schema.required).toEqual(['name', 'cache_corroboration']);
-      expect(schema.properties.name.type).toBe('string');
+      expect(schema.properties.name!.type).toBe('string');
       // Verdict fields are optional: exactly one of discogs_artist_id
       // (resolved) or unresolved_reason (unresolved) appears per result.
       // method and unresolved_reason are allOf-wrapped so their presence
       // rules survive codegen ($ref sibling keys are dropped in 3.0).
-      expect(schema.properties.discogs_artist_id.type).toBe('integer');
-      expect(schema.properties.canonical_name.type).toBe('string');
-      expect(schema.properties.method.allOf?.[0]?.$ref).toBe(
+      expect(schema.properties.discogs_artist_id!.type).toBe('integer');
+      expect(schema.properties.canonical_name!.type).toBe('string');
+      expect(schema.properties.method!.allOf?.[0]?.$ref).toBe(
         '#/components/schemas/ArtistResolveMethod',
       );
-      expect(schema.properties.unresolved_reason.allOf?.[0]?.$ref).toBe(
+      expect(schema.properties.unresolved_reason!.allOf?.[0]?.$ref).toBe(
         '#/components/schemas/ArtistResolveUnresolvedReason',
       );
       // cache_corroboration is present on BOTH verdict kinds (per-leg yield
@@ -3385,17 +3385,17 @@ describe('OpenAPI Specification', () => {
       // leg either yielded or didn't, so entries are unique (and adding
       // uniqueItems later would flip swift5 codegen Array→Set, a breaking
       // change that is free to avoid now).
-      expect(schema.properties.cache_corroboration.type).toBe('array');
-      expect(schema.properties.cache_corroboration.uniqueItems).toBe(true);
-      expect(schema.properties.cache_corroboration.items?.$ref).toBe(
+      expect(schema.properties.cache_corroboration!.type).toBe('array');
+      expect(schema.properties.cache_corroboration!.uniqueItems).toBe(true);
+      expect(schema.properties.cache_corroboration!.items?.$ref).toBe(
         '#/components/schemas/ArtistResolveCacheLeg',
       );
       // candidate_count: always serialized per the description's wire pin;
       // null means "API tier did not run," never zero. Optional-in-schema
       // only because datamodel-codegen's default flags (LML's generator)
       // would type required+nullable as non-nullable int, rejecting null.
-      expect(schema.properties.candidate_count.type).toBe('integer');
-      expect(schema.properties.candidate_count.nullable).toBe(true);
+      expect(schema.properties.candidate_count!.type).toBe('integer');
+      expect(schema.properties.candidate_count!.nullable).toBe(true);
     });
 
     it('should define ArtistResolveBulkRequest with the 25-name cap and optional dry_run', () => {
@@ -3414,19 +3414,19 @@ describe('OpenAPI Specification', () => {
       };
       expect(schema).toBeDefined();
       expect(schema.required).toEqual(['names']);
-      expect(schema.properties.names.type).toBe('array');
-      expect(schema.properties.names.minItems).toBe(1);
+      expect(schema.properties.names!.type).toBe('array');
+      expect(schema.properties.names!.minItems).toBe(1);
       // 25, not 1000: a fully-escalating batch costs ~25 live Discogs API
       // calls (~30s at the shared 50/min budget); callers page.
-      expect(schema.properties.names.maxItems).toBe(25);
+      expect(schema.properties.names!.maxItems).toBe(25);
       // Per-item bounds: names feed live Discogs querystrings and verbatim
       // entity.identity mint keys, so empty and unbounded strings are
       // rejected at the contract.
-      expect(schema.properties.names.items?.type).toBe('string');
-      expect(schema.properties.names.items?.minLength).toBe(1);
-      expect(schema.properties.names.items?.maxLength).toBe(255);
-      expect(schema.properties.dry_run.type).toBe('boolean');
-      expect(schema.properties.dry_run.default).toBe(false);
+      expect(schema.properties.names!.items?.type).toBe('string');
+      expect(schema.properties.names!.items?.minLength).toBe(1);
+      expect(schema.properties.names!.items?.maxLength).toBe(255);
+      expect(schema.properties.dry_run!.type).toBe('boolean');
+      expect(schema.properties.dry_run!.default).toBe(false);
     });
 
     it('should define ArtistResolveBulkResponse requiring index-aligned results', () => {
@@ -3436,8 +3436,8 @@ describe('OpenAPI Specification', () => {
       };
       expect(schema).toBeDefined();
       expect(schema.required).toEqual(['results']);
-      expect(schema.properties.results.type).toBe('array');
-      expect(schema.properties.results.items?.$ref).toBe(
+      expect(schema.properties.results!.type).toBe('array');
+      expect(schema.properties.results!.items?.$ref).toBe(
         '#/components/schemas/ArtistResolveResult',
       );
     });
@@ -3483,6 +3483,7 @@ describe('OpenAPI Specification', () => {
       required?: string[];
       description?: string;
       properties?: Record<string, Record<string, unknown>>;
+      example?: Record<string, unknown>;
     };
 
     // --- Option (B): opt-in `include_tracks`, gating BOTH kinds ---
@@ -4090,9 +4091,7 @@ describe('OpenAPI Specification', () => {
       // description above), so it's the producer-understood-the-flag case —
       // the marker belongs on the example precisely because it is response-
       // level, not per-result.
-      const example = (spec.components.schemas.BulkResolveLibrariesResponse as Schema).example as
-        | Record<string, unknown>
-        | undefined;
+      const example = (spec.components.schemas.BulkResolveLibrariesResponse as Schema).example;
       expect(example).toHaveProperty('tracks_contract_version', 1);
     });
   });
@@ -4436,8 +4435,8 @@ describe('OpenAPI Specification', () => {
       expect(schema).toBeDefined();
       expect(schema.type).toBe('object');
       expect(schema.required).toEqual(['status']);
-      expect(schema.properties.status.type).toBe('string');
-      expect(schema.properties.status.enum).toEqual(['healthy', 'degraded', 'unhealthy']);
+      expect(schema.properties.status!.type).toBe('string');
+      expect(schema.properties.status!.enum).toEqual(['healthy', 'degraded', 'unhealthy']);
       // Consumers may extend (e.g., semantic-index includes artist_count)
       expect(schema.additionalProperties).toBe(true);
     });
@@ -4462,11 +4461,11 @@ describe('OpenAPI Specification', () => {
       expect(schema.allOf).toHaveLength(2);
 
       const [base, extension] = schema.allOf;
-      expect(base.$ref).toBe('#/components/schemas/HealthCheckResponse');
+      expect(base!.$ref).toBe('#/components/schemas/HealthCheckResponse');
 
-      expect(extension.type).toBe('object');
-      expect(extension.required).toEqual(['services']);
-      const services = extension.properties?.services;
+      expect(extension!.type).toBe('object');
+      expect(extension!.required).toEqual(['services']);
+      const services = extension!.properties?.services;
       expect(services?.type).toBe('object');
       expect(services?.additionalProperties?.type).toBe('string');
       expect(services?.additionalProperties?.enum).toEqual(['ok', 'unavailable', 'timeout']);
@@ -4660,8 +4659,8 @@ describe('OpenAPI Specification', () => {
     it('models /device/token errors per status (400 + 429 + 500); the two plugin statuses are DeviceAuthTokenError', () => {
       const r = (spec.paths['/auth/device/token'] as { post: Operation }).post.responses!;
       expect(Object.keys(r).sort()).toEqual(['200', '400', '429', '500']);
-      expect(r['400'].content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/DeviceAuthTokenError');
-      expect(r['500'].content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/DeviceAuthTokenError');
+      expect(r['400']!.content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/DeviceAuthTokenError');
+      expect(r['500']!.content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/DeviceAuthTokenError');
     });
 
     it('models approve/deny errors per status (400 + 401 + 403 + 429); the three plugin statuses are DeviceAuthActionError', () => {
@@ -4669,7 +4668,7 @@ describe('OpenAPI Specification', () => {
         const r = (spec.paths[route] as { post: Operation }).post.responses!;
         expect(Object.keys(r).sort(), route).toEqual(['200', '400', '401', '403', '429']);
         for (const code of ['400', '401', '403']) {
-          expect(r[code].content?.['application/json']?.schema?.$ref, `${route} ${code}`).toBe(
+          expect(r[code]!.content?.['application/json']?.schema?.$ref, `${route} ${code}`).toBe(
             '#/components/schemas/DeviceAuthActionError'
           );
         }
@@ -4679,12 +4678,12 @@ describe('OpenAPI Specification', () => {
     it('models /device/code and GET /device errors as 400 + 429, each with its own 400 envelope', () => {
       const codeR = (spec.paths['/auth/device/code'] as { post: Operation }).post.responses!;
       expect(Object.keys(codeR).sort()).toEqual(['200', '400', '429']);
-      expect(codeR['400'].content?.['application/json']?.schema?.$ref).toBe(
+      expect(codeR['400']!.content?.['application/json']?.schema?.$ref).toBe(
         '#/components/schemas/DeviceAuthCodeError'
       );
       const verifyR = (spec.paths['/auth/device'] as { get: Operation }).get.responses!;
       expect(Object.keys(verifyR).sort()).toEqual(['200', '400', '429']);
-      expect(verifyR['400'].content?.['application/json']?.schema?.$ref).toBe(
+      expect(verifyR['400']!.content?.['application/json']?.schema?.$ref).toBe(
         '#/components/schemas/DeviceAuthVerifyError'
       );
     });
@@ -4711,10 +4710,10 @@ describe('OpenAPI Specification', () => {
       const plainLimited = ['/auth/device/code', '/auth/device/approve', '/auth/device/deny'];
       for (const route of plainLimited) {
         const r = (spec.paths[route] as { post: Operation }).post.responses!['429'];
-        expect(r.content?.['application/json']?.schema?.$ref, route).toBe(
+        expect(r!.content?.['application/json']?.schema?.$ref, route).toBe(
           '#/components/schemas/AuthPlainErrorResponse'
         );
-        expect(Object.keys(r.headers ?? {}), route).toEqual(['Retry-After']);
+        expect(Object.keys(r!.headers ?? {}), route).toEqual(['Retry-After']);
       }
 
       const betterAuthLimited: Array<[string, 'get' | 'post']> = [
@@ -4722,16 +4721,16 @@ describe('OpenAPI Specification', () => {
         ['/auth/device', 'get'],
       ];
       for (const [route, method] of betterAuthLimited) {
-        const r = (spec.paths[route] as Record<string, Operation>)[method].responses!['429'];
-        expect(r.content?.['application/json']?.schema?.$ref, route).toBe(
+        const r = (spec.paths[route] as Record<string, Operation>)[method]!.responses!['429'];
+        expect(r!.content?.['application/json']?.schema?.$ref, route).toBe(
           '#/components/schemas/AuthRateLimitedResponse'
         );
-        expect(Object.keys(r.headers ?? {}), route).toEqual(['X-Retry-After']);
+        expect(Object.keys(r!.headers ?? {}), route).toEqual(['X-Retry-After']);
       }
     });
 
     it('wires each endpoint 200 success response to its own response schema', () => {
-      const okRef = (op: Operation) => op.responses!['200'].content?.['application/json']?.schema?.$ref;
+      const okRef = (op: Operation) => op.responses!['200']!.content?.['application/json']?.schema?.$ref;
       expect(okRef((spec.paths['/auth/device/code'] as { post: Operation }).post)).toBe(
         '#/components/schemas/DeviceAuthCodeResponse'
       );

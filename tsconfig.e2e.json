@@ -6,8 +6,9 @@
     "declaration": false,
     "declarationMap": false,
     "sourceMap": false,
-    "types": ["node"]
+    "types": ["node"],
+    "allowJs": true
   },
-  "include": ["e2e/**/*.ts", "src/**/*"],
+  "include": ["e2e/**/*.ts", "tests/**/*.ts", "src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
