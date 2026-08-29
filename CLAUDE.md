@@ -279,11 +279,16 @@ When two contract PRs touch `api.yaml` in parallel worktrees, only the one that 
 
 ```bash
 npm test              # Unit tests
-npm run lint:e2e      # Typecheck the e2e/ suite (no live stack needed)
+npm run lint:e2e      # Typecheck the e2e/ and tests/ suites (no live stack needed)
 npm run test:e2e      # E2E tests (requires running services)
 ```
 
-The `e2e/` directory is excluded from both `lint` (base `tsconfig.json` excludes `e2e`) and `npm test` (vitest excludes `e2e/**`), and the live suite (`npm run test:e2e`) only runs from another repo's deploy gate (`bs-lml-gate.yml`). To keep a broken `e2e/` file from merging green and first surfacing as a `bs-lml-gate` failure that blocks BS/LML prod promotion, PR CI runs `lint:e2e` — `tsc -p tsconfig.e2e.json`, a typecheck-only pass over `e2e/**` with `rootDir: "."` so the e2e files aren't flagged as outside the base `rootDir: "./src"`. It does not run the stack; it's cheap and dependency-free. See #266.
+`lint:e2e` — `tsc -p tsconfig.e2e.json`, a typecheck-only pass with `rootDir: "."` so these files aren't flagged as outside the base `rootDir: "./src"` — is the **only** thing that typechecks either `e2e/**` or `tests/**`. It does not run the stack; it's cheap and dependency-free. The two directories are in it for opposite reasons, and the difference matters when you're deciding where a failure will surface:
+
+- **`e2e/`** is excluded from both `lint` (base `tsconfig.json` excludes `e2e`) and `npm test` (vitest excludes `e2e/**`), and the live suite (`npm run test:e2e`) only runs from another repo's deploy gate (`bs-lml-gate.yml`). Without `lint:e2e`, a broken `e2e/` file merges green here and first surfaces as a `bs-lml-gate` failure that blocks BS/LML prod promotion. See #266.
+- **`tests/`** is the inverse: `npm test` *does* run it, but vitest transpiles via esbuild and never typechecks, so a type error there is invisible to the test suite. `tests/**` sat in no tsconfig at all until #416 — the repo's largest test file had never been compiled by anything, which let three `@ts-expect-error` directives sit on the wrong line, silently asserting nothing.
+
+Both inherit `noUncheckedIndexedAccess` from `tsconfig.json`, which `--strict` alone does **not** imply — a standalone `tsc --strict` on one of these files will under-report. Reproduce what CI sees with `npm run lint:e2e`, not an ad-hoc `tsc` invocation. `allowJs` is on so `tests/calendar-date-codegen.test.ts` can import the plain-JS `scripts/copy-swift-support-files.js`; `checkJs` stays off, so that script's body is not typechecked.
 
 ## Testing Standards
 
