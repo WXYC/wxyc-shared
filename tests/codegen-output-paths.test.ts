@@ -120,6 +120,17 @@ describe("CLAUDE.md's codegen consumer table names the Swift consumer correctly 
     expect(swiftRow()).toMatch(/wxyc-dj-ios/);
   });
 
+  it("names wxyc-swift-auth as the third consumer", () => {
+    // WXYC/wxyc-swift-auth#2 vendors this output too, into
+    // Sources/WXYCAuth/Generated/. It is the one consumer that vendors a
+    // SUBSET (the auth schemas only), which is why it matters here rather
+    // than being a footnote: adding a schema $ref'd from an auth operation
+    // breaks that repo's regen until its allow-list names it, so anyone
+    // editing the auth surface needs the row to tell them there is a third
+    // repo to think about.
+    expect(swiftRow()).toMatch(/wxyc-swift-auth/);
+  });
+
   it("attributes hand-authoring to dj-ios only, never to wxyc-ios-64", () => {
     // The invariant is about ATTRIBUTION, not sentence order, so assert it
     // per sentence rather than by slicing the cell at a `;`. That earlier
