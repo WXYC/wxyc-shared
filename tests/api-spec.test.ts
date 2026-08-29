@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.48.0');
+      expect(spec.info.version).toBe('1.49.0');
     });
 
     it('should have components section', () => {
@@ -1313,9 +1313,10 @@ describe('OpenAPI Specification', () => {
       'artwork_url',
       'rotation_bin',
       'rotation_kill_date',
+      'has_digital_audio',
     ];
 
-    it('defines CatalogExportRow with exactly the 19 shipped fields', () => {
+    it('defines CatalogExportRow with exactly the 20 shipped fields', () => {
       const schema = spec.components.schemas.CatalogExportRow as Schema;
       expect(schema).toBeDefined();
       expect(Object.keys(schema.properties ?? {}).sort()).toEqual([...EXPORT_FIELDS].sort());
@@ -1363,6 +1364,17 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties?.legacy_release_id?.type).toBe('integer');
       expect(schema.properties?.album_artist?.type).toBe('string');
       expect(schema.properties?.alternate_artist_name?.type).toBe('string');
+    });
+
+    it('keeps has_digital_audio optional and boolean — absent means false (#417)', () => {
+      const schema = spec.components.schemas.CatalogExportRow as Schema;
+      const prop = schema.properties?.has_digital_audio;
+      expect(prop).toBeDefined();
+      expect(prop!.type).toBe('boolean');
+      // A Backend not yet running WXYC/Backend-Service#2320 does not emit this
+      // key at all — required would fail every NDJSON line for that Backend,
+      // same reasoning as the BS#1965 producer fields above.
+      expect(schema.required ?? []).not.toContain('has_digital_audio');
     });
 
     it('ships cross_reference_names as an ARRAY of names, never a pipe-joined string', () => {
@@ -1536,6 +1548,96 @@ describe('OpenAPI Specification', () => {
       expect(ok!.headers?.['Last-Modified']).toBeDefined();
       expect(ok!.headers?.['Content-Encoding']).toBeDefined();
       expect(path.get!.responses?.['304']).toBeDefined();
+    });
+  });
+
+  // Digital Archive playback manifest (#417). The auto-DJ archive player's
+  // client contract: album-scoped, library.id-keyed, presigned-URL-bearing,
+  // with no bucket/key/store name on the wire. First consumer is wxyc-dj-ios
+  // (epic WXYC/wxyc-dj-ios#135); Backend-Service is WXYC/Backend-Service#2320.
+  describe('Digital Archive Playback Manifest (#417)', () => {
+    type Schema = {
+      required?: string[];
+      properties?: Record<string, Record<string, unknown>>;
+    };
+
+    it('defines DigitalArchivePlaybackManifest with the four required fields', () => {
+      const schema = spec.components.schemas.DigitalArchivePlaybackManifest as Schema;
+      expect(schema).toBeDefined();
+      expect((schema.required ?? []).sort()).toEqual(
+        ['library_id', 'provenance', 'expires_at', 'tracks'].sort()
+      );
+      expect(schema.properties?.library_id?.type).toBe('integer');
+      expect(schema.properties?.provenance?.type).toBe('string');
+      expect(schema.properties?.provenance?.enum).toEqual(['rotation_upload', 'cd_rip']);
+      expect(schema.properties?.expires_at?.type).toBe('string');
+      expect(schema.properties?.expires_at?.format).toBe('date-time');
+      expect(schema.properties?.tracks?.type).toBe('array');
+      expect((schema.properties?.tracks?.items as { $ref?: string } | undefined)?.$ref).toBe(
+        '#/components/schemas/DigitalArchivePlaybackTrack'
+      );
+    });
+
+    it('defines DigitalArchivePlaybackTrack with file_id/title/renditions required and the rest nullable', () => {
+      const schema = spec.components.schemas.DigitalArchivePlaybackTrack as Schema;
+      expect(schema).toBeDefined();
+      expect((schema.required ?? []).sort()).toEqual(['file_id', 'title', 'renditions'].sort());
+      expect(schema.properties?.file_id?.type).toBe('integer');
+      expect(schema.properties?.title?.type).toBe('string');
+
+      // Partial albums and tag gaps exist; disc/track numbering is nullable
+      // and the list is ordered server-side regardless.
+      for (const key of ['disc_number', 'track_number']) {
+        expect(schema.properties?.[key]?.type, key).toBe('integer');
+        expect(schema.properties?.[key]?.nullable, key).toBe(true);
+        expect(schema.required ?? [], key).not.toContain(key);
+      }
+      expect(schema.properties?.duration_secs?.type).toBe('number');
+      expect(schema.properties?.duration_secs?.nullable).toBe(true);
+      expect(schema.properties?.content_hash?.type).toBe('string');
+      expect(schema.properties?.content_hash?.nullable).toBe(true);
+    });
+
+    it('defines the renditions item with codec enum [mp3, aac, flac] and a required presigned url', () => {
+      const track = spec.components.schemas.DigitalArchivePlaybackTrack as Schema;
+      const renditions = track.properties?.renditions as { items?: Schema } | undefined;
+      const item = renditions?.items;
+      expect(item).toBeDefined();
+      expect((item!.required ?? []).sort()).toEqual(['codec', 'url'].sort());
+      expect(item!.properties?.codec?.enum).toEqual(['mp3', 'aac', 'flac']);
+      expect(item!.properties?.url?.type).toBe('string');
+      expect(item!.properties?.url?.format).toBe('uri');
+      expect(item!.properties?.bitrate_kbps?.type).toBe('integer');
+      expect(item!.properties?.bitrate_kbps?.nullable).toBe(true);
+    });
+
+    it('declares GET /digital-archive/albums/{libraryId}/playback (BearerAuth; integer path param; 200/403/404)', () => {
+      const path = spec.paths['/digital-archive/albums/{libraryId}/playback'] as {
+        get?: {
+          'x-wxyc-service'?: string;
+          security?: Array<Record<string, unknown[]>>;
+          parameters?: Array<{ name: string; in: string; required?: boolean; schema?: { type?: string } }>;
+          responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+        };
+      };
+      expect(path?.get).toBeDefined();
+      expect(path.get!['x-wxyc-service']).toBe('backend-service');
+      expect(path.get!.security).toEqual([{ BearerAuth: [] }]);
+
+      const libraryId = path.get!.parameters?.find((p) => p.name === 'libraryId');
+      expect(libraryId?.in).toBe('path');
+      expect(libraryId?.required).toBe(true);
+      expect(libraryId?.schema?.type).toBe('integer');
+
+      const ok = path.get!.responses?.['200'];
+      expect(ok?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/DigitalArchivePlaybackManifest'
+      );
+      // 404 is distinct from 403 on purpose: a client's "has audio" badge may
+      // be stale, so "no bound asset" must be distinguishable from "not
+      // permitted to listen".
+      expect(path.get!.responses?.['403']).toBeDefined();
+      expect(path.get!.responses?.['404']).toBeDefined();
     });
   });
 
