@@ -92,6 +92,148 @@ components:
           type: object
           additionalProperties: true
 
+    FlowsheetJoinIntent:
+      type: string
+      enum: [join, takeover]
+      description: >
+        What the caller means when a show they are not already an
+        active member of is still open. Consulted ONLY in that
+        case: with no open show, or with a show the caller already
+        belongs to, the field is inert and a new show starts (or
+        the existing membership is returned) exactly as before.
+
+
+        `join` is the historical behavior — the caller becomes a
+        co-host of the open show and a `dj_join` marker is written.
+        `takeover` closes the open show and starts a new one owned
+        by the caller; it requires `expected_show_id`.
+
+
+        **Deliberately has no default.** Absence is a third state,
+        not a synonym for `join`: it means the caller never made
+        the choice, and the server answers it with the
+        `ShowAlreadyOpenError` 409 on `POST /flowsheet/join` rather
+        than picking one. A default here would let a
+        generated client materialize a decision its user never
+        made, which is the silent co-host attachment this field
+        exists to end (WXYC/Backend-Service#2232 — one production
+        show collected five DJs over ten hours while the public
+        on-air name named only the first).
+
+
+        Neither value is role-gated. `takeover` is reachable by any
+        caller holding `flowsheet: write`, deliberately: it is the
+        escape hatch a DJ needs when the previous DJ walked out,
+        and it restores a capability tubafrenzy's `EndShowServlet`
+        gave every signed-on DJ. That is a deliberate asymmetry
+        with `POST /flowsheet/shows/{id}/force-end`, which closes
+        someone else's show only under `flowsheet: manage` plus an
+        explicit `force=true`; see that endpoint's description for
+        why the two gates differ.
+
+
+        Not yet live on the wire: Backend-Service gates the whole
+        handshake behind `FLOWSHEET_TAKEOVER_ENABLED`, shipping OFF
+        (WXYC/Backend-Service#2233). See that 409 for what changes
+        at the flip, and why to start sending this field before it
+        rather than after.
+
+
+        An explicit JSON `null` is folded into absence and answered
+        with the same 409, not a 400. This is not pedantry: the
+        field is optional with no default, and a Kotlin or Swift
+        client that serializes unset optionals explicitly (
+        kotlinx.serialization with `encodeDefaults = true`, say)
+        emits `"intent": null` for a DJ who simply has not chosen.
+        Answering that with "your choice is invalid" would be the
+        one response they cannot act on.
+
+    ShowAlreadyOpenErrorCode:
+      type: string
+      enum: [show_already_open]
+      description: >
+        Discriminator for the `POST /flowsheet/join` 409. Named rather than
+        left inline on `ShowAlreadyOpenError.code`, pairing with it the way
+        `DeviceAuthCodeErrorCode` pairs with `DeviceAuthCodeError` — an inline
+        enum under an anonymous parent generates as a top-level `Code` class in
+        the Python module, which is both meaningless at the call site and a
+        collision waiting to happen in a file that already carries a generic
+        `Status` and `Show` from the same mechanism.
+
+    ShowAlreadyOpenError:
+      type: object
+      description: >
+        The `POST /flowsheet/join` 409 body. Purpose-built rather than a `$ref`
+        to the shared `ApiErrorResponse`, following `AuthErrorResponse` and the
+        `DeviceAuth*Error` family: `ApiErrorResponse.details` is
+        `additionalProperties: true`, which reaches consumers as an untyped bag
+        (`JSONValue` in Swift, `Record<string, unknown>` in TS), and
+        `details.show.id` is not an incidental diagnostic here — a client is
+        REQUIRED to read it and echo it back as `expected_show_id` to complete
+        the takeover handshake. Typing it is what makes that a compare-and-set
+        rather than four hand-written key-path digs.
+      required:
+        - message
+      properties:
+        message:
+          type: string
+        code:
+          $ref: '#/components/schemas/ShowAlreadyOpenErrorCode'
+        details:
+          $ref: '#/components/schemas/ShowAlreadyOpenErrorDetails'
+
+    ShowAlreadyOpenErrorDetails:
+      type: object
+      description: >
+        Wrapper matching `ApiErrorResponse`'s `details` position, so the 409
+        body stays shape-compatible with every other error on the service even
+        though it is typed. Named for the same reason as the code enum above:
+        inline, it generates as a top-level `Details` class.
+      properties:
+        show:
+          $ref: '#/components/schemas/ShowAlreadyOpenShow'
+
+    ShowAlreadyOpenShow:
+      type: object
+      description: >
+        Identity of the open show the caller collided with. A strict subset of
+        `OpenShow`, whose rows `GET /flowsheet/open-shows` returns — same
+        fields, same nullability, same BS#1371 resolution chain for `dj_name`.
+      required:
+        - id
+        - start_time
+      properties:
+        id:
+          type: integer
+          description: >
+            `shows.id` of the open show. This is the value a follow-up
+            `intent: takeover` must send as `expected_show_id`.
+        dj_name:
+          type: string
+          nullable: true
+          description: >
+            The show OWNER's public handle, resolved through the same PII-safe
+            chain as `OpenShow.dj_name` (BS#1371): per-show override -> the
+            DJ's chosen handle -> the legacy tubafrenzy handle -> `null` when
+            unresolvable.
+
+
+            **Null is the common case, not the edge.** Essentially the whole
+            open-show backlog this handshake exists to unstick reaches nothing
+            through that chain (2,813 of production's 2,814 open shows carried
+            a NULL `primary_dj_id` as of 2026-08-21), so a prompt that
+            interpolates it unguarded renders "null is on air". Fall back to
+            generic phrasing.
+
+
+            For an abandoned show this names the DJ who LEFT. A client showing
+            "who is on air right now" should prefer `GET /flowsheet/djs-on-air`,
+            whose active-membership answer is the one that disagrees with this
+            field precisely when it matters.
+        start_time:
+          type: string
+          format: date-time
+
     PaginationParams:
       type: object
       properties:
@@ -8532,52 +8674,7 @@ paths:
                     intentionally ignores this field. Max length matches
                     `auth_user.dj_name varchar(255)`.
                 intent:
-                  type: string
-                  enum: [join, takeover]
-                  description: >
-                    What the caller means when a show they are not already an
-                    active member of is still open. Consulted ONLY in that
-                    case: with no open show, or with a show the caller already
-                    belongs to, the field is inert and a new show starts (or
-                    the existing membership is returned) exactly as before.
-
-
-                    `join` is the historical behavior — the caller becomes a
-                    co-host of the open show and a `dj_join` marker is written.
-                    `takeover` closes the open show and starts a new one owned
-                    by the caller; it requires `expected_show_id`.
-
-
-                    **Deliberately has no default.** Absence is a third state,
-                    not a synonym for `join`: it means the caller never made
-                    the choice, and the server answers it with the 409 below
-                    rather than picking one. A default here would let a
-                    generated client materialize a decision its user never
-                    made, which is the silent co-host attachment this field
-                    exists to end (WXYC/Backend-Service#2232 — one production
-                    show collected five DJs over ten hours while the public
-                    on-air name named only the first).
-
-
-                    Neither value is role-gated. `takeover` is reachable by any
-                    caller holding `flowsheet: write`, deliberately: it is the
-                    escape hatch a DJ needs when the previous DJ walked out,
-                    and it restores a capability tubafrenzy's `EndShowServlet`
-                    gave every signed-on DJ. That is a deliberate asymmetry
-                    with `POST /flowsheet/shows/{id}/force-end`, which closes
-                    someone else's show only under `flowsheet: manage` plus an
-                    explicit `force=true`; see that endpoint's description for
-                    why the two gates differ.
-
-
-                    An explicit JSON `null` is folded into absence and answered
-                    with the same 409, not a 400. This is not pedantry: the
-                    field is optional with no default, and a Kotlin or Swift
-                    client that serializes unset optionals explicitly (
-                    kotlinx.serialization with `encodeDefaults = true`, say)
-                    emits `"intent": null` for a DJ who simply has not chosen.
-                    Answering that with "your choice is invalid" would be the
-                    one response they cannot act on.
+                  $ref: '#/components/schemas/FlowsheetJoinIntent'
                 expected_show_id:
                   type: integer
                   description: >
@@ -8636,28 +8733,13 @@ paths:
             description says — a stale id never turns a `join` into a 409.
 
 
-            `code` is `show_already_open` and `details.show` carries
-            `{ id, dj_name, start_time }`. `id` is what a follow-up
-            `intent: takeover` must echo as `expected_show_id`.
-
-
-            **`dj_name` is nullable and is usually null in practice.** It
-            resolves through the same PII-safe chain as `OpenShow.dj_name`
-            (BS#1371) — `GET /flowsheet/open-shows` returns the very rows this
-            409 describes — and resolves to null when that chain reaches
-            nothing, which is the
-            shape of essentially the whole open-show backlog this feature
-            exists to unstick (2,813 of production's 2,814 open shows carried a
-            NULL `primary_dj_id` as of 2026-08-21). A prompt that interpolates
-            it unguarded renders "null is on air". Fall back to a generic
-            phrasing rather than showing the raw value.
-
-
-            `dj_name` names the show's OWNER — which for an abandoned show is
-            the DJ who left. A client showing "who is on air right now" should
-            prefer `GET /flowsheet/djs-on-air`, whose active-membership answer
-            is the one that disagrees with this field precisely when it
-            matters.
+            Body is `ShowAlreadyOpenError`: `code` is `show_already_open`
+            and `details.show` carries `{ id, dj_name, start_time }`, where
+            `id` is what a follow-up `intent: takeover` must echo as
+            `expected_show_id`. `dj_name`'s nullability — null for essentially
+            the whole open-show backlog — and the reason to prefer
+            `GET /flowsheet/djs-on-air` for "who is on air right now" are
+            documented on that schema rather than restated here.
 
 
             **Not yet live on the wire.** Backend-Service gates the whole
@@ -8671,7 +8753,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiErrorResponse'
+                $ref: '#/components/schemas/ShowAlreadyOpenError'
 
   /flowsheet/end:
     post:
