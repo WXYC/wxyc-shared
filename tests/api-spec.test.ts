@@ -181,6 +181,34 @@ describe('OpenAPI Specification', () => {
   });
 
   describe('Flowsheet Schemas', () => {
+    // Inline request bodies aren't reachable through `propertyOf`, which
+    // resolves `components.schemas` only. Three blocks below assert on the two
+    // flowsheet operations that carry one, so the reach lives here once rather
+    // than as a bespoke deep-optional type per block.
+    type InlineRequestSchema = {
+      properties?: Record<string, Record<string, unknown>>;
+      required?: string[];
+    };
+    type InlineRequestBody = {
+      required?: boolean;
+      content?: { 'application/json'?: { schema?: InlineRequestSchema } };
+    };
+    type Operation = {
+      requestBody?: InlineRequestBody;
+      responses?: Record<string, { description?: string; content?: Record<string, { schema?: { $ref?: string } }> }>;
+    };
+
+    function operationAt(path: string): Operation {
+      return (spec.paths[path] as { post?: Operation } | undefined)?.post ?? {};
+    }
+
+    function requestSchemaAt(path: string): InlineRequestSchema {
+      return operationAt(path).requestBody?.content?.['application/json']?.schema ?? {};
+    }
+
+    const JOIN = '/flowsheet/join';
+    const FORCE_END = '/flowsheet/shows/{id}/force-end';
+
     it('should define FlowsheetEntryBase', () => {
       expect(spec.components.schemas.FlowsheetEntryBase).toBeDefined();
     });
@@ -277,67 +305,30 @@ describe('OpenAPI Specification', () => {
     });
 
     describe('dj_name_override on POST /flowsheet/join (BS#1295)', () => {
-      function getJoinRequestSchema(): {
-        properties?: Record<string, Record<string, unknown>>;
-        required?: string[];
-      } {
-        const join = spec.paths['/flowsheet/join'] as {
-          post?: {
-            requestBody?: {
-              content?: {
-                'application/json'?: {
-                  schema?: {
-                    properties?: Record<string, Record<string, unknown>>;
-                    required?: string[];
-                  };
-                };
-              };
-            };
-          };
-        };
-        return join?.post?.requestBody?.content?.['application/json']?.schema ?? {};
-      }
-
       it('POST /flowsheet/join should accept optional string dj_name_override', () => {
-        const schema = getJoinRequestSchema();
+        const schema = requestSchemaAt(JOIN);
         const override = schema.properties?.dj_name_override;
         expect(override).toBeDefined();
         expect(override?.type).toBe('string');
       });
 
       it('dj_name_override should cap maxLength at 255 to match auth_user.dj_name', () => {
-        const override = getJoinRequestSchema().properties?.dj_name_override;
+        const override = requestSchemaAt(JOIN).properties?.dj_name_override;
         expect(override?.maxLength).toBe(255);
       });
 
       it('dj_name_override should not be in the required list', () => {
-        const schema = getJoinRequestSchema();
+        const schema = requestSchemaAt(JOIN);
         expect(schema.required ?? []).not.toContain('dj_name_override');
       });
     });
 
     describe('intent + expected_show_id on POST /flowsheet/join (BS#2233)', () => {
-      type JoinPost = {
-        requestBody?: {
-          content?: {
-            'application/json'?: {
-              schema?: { properties?: Record<string, Record<string, unknown>>; required?: string[] };
-            };
-          };
-        };
-        responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
-      };
-
-      function getJoinPost(): JoinPost {
-        return (spec.paths['/flowsheet/join'] as { post?: JoinPost }).post ?? {};
-      }
-
-      function getJoinRequestProperties(): Record<string, Record<string, unknown>> {
-        return getJoinPost().requestBody?.content?.['application/json']?.schema?.properties ?? {};
-      }
+      const joinProperties = () => requestSchemaAt(JOIN).properties ?? {};
+      const joinResponse = (status: string) => operationAt(JOIN).responses?.[status];
 
       it('declares intent as an optional two-value enum', () => {
-        const intent = getJoinRequestProperties().intent;
+        const intent = joinProperties().intent;
         expect(intent).toBeDefined();
         expect(intent?.type).toBe('string');
         expect(intent?.enum).toEqual(['join', 'takeover']);
@@ -348,29 +339,29 @@ describe('OpenAPI Specification', () => {
         // decisions on a client that never made it, which is the silent
         // co-host bug wearing a different hat. Absence is its own state and
         // the server answers it with the 409 below.
-        expect(getJoinRequestProperties().intent).not.toHaveProperty('default');
+        expect(joinProperties().intent).not.toHaveProperty('default');
       });
 
       it('declares expected_show_id as an optional integer', () => {
-        const expected = getJoinRequestProperties().expected_show_id;
+        const expected = joinProperties().expected_show_id;
         expect(expected).toBeDefined();
         expect(expected?.type).toBe('integer');
       });
 
       it('leaves both new fields out of the required list', () => {
-        const schema = getJoinPost().requestBody?.content?.['application/json']?.schema ?? {};
+        const schema = requestSchemaAt(JOIN);
         expect(schema.required ?? []).not.toContain('intent');
         expect(schema.required ?? []).not.toContain('expected_show_id');
       });
 
       it('documents a 409 that $refs the shared ApiErrorResponse', () => {
-        const conflict = getJoinPost().responses?.['409'];
+        const conflict = joinResponse('409');
         expect(conflict).toBeDefined();
         expect(conflict?.content?.['application/json']?.schema?.$ref).toBe('#/components/schemas/ApiErrorResponse');
       });
 
       it('documents a 400 for a malformed intent handshake', () => {
-        expect(getJoinPost().responses?.['400']).toBeDefined();
+        expect(joinResponse('400')).toBeDefined();
       });
 
       // The three assertions below pin prose, following the same convention as
@@ -383,7 +374,7 @@ describe('OpenAPI Specification', () => {
         // 409 by one sentence and a 200 co-host join by the other -- an
         // ambiguity four codegen targets and the BS implementer would not
         // resolve identically. The server returns 200 there.
-        const conflict = String(getJoinPost().responses?.['409']?.description ?? '');
+        const conflict = String(joinResponse('409')?.description ?? '');
         expect(conflict).toMatch(/scoped to `takeover` only/);
         expect(conflict).toMatch(/`expected_show_id` is ignored outright/);
       });
@@ -392,7 +383,7 @@ describe('OpenAPI Specification', () => {
         // resolveDjNameForShow returns string | null, and null is the COMMON
         // case for the abandoned shows this handshake exists to unstick.
         // A prompt that interpolates it unguarded renders "null is on air".
-        const conflict = String(getJoinPost().responses?.['409']?.description ?? '');
+        const conflict = String(joinResponse('409')?.description ?? '');
         expect(conflict).toMatch(/`dj_name` is nullable/);
       });
 
@@ -400,32 +391,16 @@ describe('OpenAPI Specification', () => {
         // POST /flowsheet/join 400s for a missing dj_id, an absent show_name
         // on the new-show path, and an over-long dj_name_override. The intent
         // handshake adds causes rather than replacing them.
-        const badRequest = String(getJoinPost().responses?.['400']?.description ?? '');
+        const badRequest = String(joinResponse('400')?.description ?? '');
         expect(badRequest).toMatch(/it does not replace them/);
         expect(badRequest).toMatch(/`dj_id`/);
       });
     });
 
     describe('ended_at on POST /flowsheet/shows/{id}/force-end (BS#2233)', () => {
-      function getForceEndPost(): {
-        requestBody?: {
-          required?: boolean;
-          content?: {
-            'application/json'?: {
-              schema?: { properties?: Record<string, Record<string, unknown>>; required?: string[] };
-            };
-          };
-        };
-      } {
-        return (
-          (spec.paths['/flowsheet/shows/{id}/force-end'] as { post?: Record<string, unknown> }).post ?? {}
-        ) as ReturnType<typeof getForceEndPost>;
-      }
-
       it('declares an optional date-time ended_at override', () => {
-        const body = getForceEndPost().requestBody;
-        expect(body?.required).not.toBe(true);
-        const endedAt = body?.content?.['application/json']?.schema?.properties?.ended_at;
+        expect(operationAt(FORCE_END).requestBody?.required).not.toBe(true);
+        const endedAt = requestSchemaAt(FORCE_END).properties?.ended_at;
         expect(endedAt).toBeDefined();
         expect(endedAt?.type).toBe('string');
         expect(endedAt?.format).toBe('date-time');
