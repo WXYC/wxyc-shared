@@ -2076,7 +2076,7 @@ components:
             True when the digital archive (WXYC/Backend-Service#2320) has at
             least one asset bound to this album — the badge the archive
             player client uses to decide whether to offer playback before
-            calling GET /digital-archive/albums/{libraryId}/playback. OPTIONAL
+            calling GET /digital-archive/albums/{id}/playback. OPTIONAL
             and OUT of `required`, same leniency as the BS#1965 producer
             fields above and for the same reason: a Backend that hasn't
             deployed #2320 yet does not emit this key at all, and a required
@@ -2088,7 +2088,7 @@ components:
     DigitalArchivePlaybackManifest:
       type: object
       description: >
-        Response body for GET /digital-archive/albums/{libraryId}/playback
+        Response body for GET /digital-archive/albums/{id}/playback
         (#417) — the auto-DJ archive player's client contract (epic
         WXYC/wxyc-dj-ios#135). Deliberately outlives every storage decision:
         no bucket, key, or store name appears anywhere in this shape, only
@@ -9735,7 +9735,7 @@ paths:
   # Digital Archive Endpoints
   # ===================
 
-  /digital-archive/albums/{libraryId}/playback:
+  /digital-archive/albums/{id}/playback:
     get:
       x-wxyc-service: backend-service
       summary: Album-scoped playback manifest for the digital archive (presigned, short-lived)
@@ -9767,7 +9767,7 @@ paths:
       security:
         - BearerAuth: []
       parameters:
-        - name: libraryId
+        - name: id
           in: path
           required: true
           description: wxyc_schema.library.id — the same key CatalogExportRow.id ships.
