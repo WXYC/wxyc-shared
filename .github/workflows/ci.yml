@@ -211,11 +211,14 @@ jobs:
       - name: Type check
         run: npm run lint
 
-      # Typecheck the e2e/ suite too. It's excluded from `lint` (base tsconfig
-      # excludes e2e/) and from `npm test` (vitest excludes e2e/**), so without
-      # this step a broken e2e file merges green here and first surfaces as a
-      # bs-lml-gate failure that blocks BS/LML prod promotion. See #266.
-      - name: Type check (e2e)
+      # Typecheck the e2e/ and tests/ suites too — the base tsconfig's `lint`
+      # covers neither. For e2e/ the risk is a broken file merging green here
+      # and first surfacing as a bs-lml-gate failure that blocks BS/LML prod
+      # promotion (#266). tests/ is different: `npm test` does run it, but
+      # vitest transpiles via esbuild without typechecking, so this step is the
+      # ONLY thing that compiles it (#416). Both inherit `noUncheckedIndexedAccess`
+      # from tsconfig.json, which `--strict` alone does not imply.
+      - name: Type check (e2e + tests)
         run: npm run lint:e2e
 
       - name: Test
