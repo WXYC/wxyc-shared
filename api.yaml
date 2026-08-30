@@ -9081,16 +9081,28 @@ paths:
 
 
                     Closing a show BEFORE entries it still owns is therefore
-                    not on offer. That interval is wrong in the mirror image of
-                    the way `now()` is: `GET /flowsheet/range` admits a closed
-                    show on `start_time < windowEnd AND end_time > windowStart`,
-                    so a show truncated back behind its own entries disappears
-                    from windows `GET /flowsheet` is still serving those entries
-                    in, and any derivation of "which show does this entry belong
-                    to" from the interval contradicts the entry's own show. When
-                    the entries are the thing that is wrong — a later DJ's rows
-                    absorbed into an abandoned show — they are re-pointed to the
-                    show that aired them, not truncated around.
+                    not on offer, and it is the mirror image of the `now()`
+                    hazard rather than a different one. The supplied instant is
+                    also the `show_end` marker's `add_time`, and the public
+                    flowsheet sorts globally by `add_time` — so where `now()`
+                    floats the sign-off above every real entry, an instant
+                    behind the show's own entries sinks it below them, and the
+                    flowsheet renders a show that signs off and then keeps
+                    playing.
+
+
+                    `GET /flowsheet/range` is affected less than it might seem:
+                    it admits any show an in-window entry references, so a
+                    truncated show is not lost from a window that contains its
+                    entries and `FlowsheetRangeEntry.show_id` stays resolvable.
+                    What it does lose is a window containing none of them but
+                    lying inside the show's real airtime — the range read then
+                    reports that the show did not air.
+
+
+                    When the entries are the thing that is wrong — a later DJ's
+                    rows absorbed into an abandoned show — they are re-pointed to
+                    the show that aired them, not truncated around.
       responses:
         '200':
           description: The finalized show, with `end_time` set
