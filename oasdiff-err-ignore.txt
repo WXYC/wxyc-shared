@@ -32,31 +32,3 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
-
-# --- wxyc-shared#417 follow-up: provenance moved from the manifest to the track
-#
-# `DigitalArchivePlaybackManifest.provenance` was added to `main` in api.yaml
-# 1.49.0 and is removed again here in 1.50.0, having moved onto
-# `DigitalArchivePlaybackTrack` where it belongs: the digital_asset unique key
-# is (library_id, provenance, disc_number), so one album can hold several bound
-# assets — a multi-disc set today, a cd_rip beside a rotation_upload once CD
-# digitization starts — and a manifest that merges them has no single honest
-# value to report at the top level.
-#
-# This is the rare removal that cannot break a client, and the justification is
-# checkable rather than asserted: 1.49.0 has never been published. The newest
-# tag, v5.1.0, is at 882fd6c, which predates the digital-archive contract
-# entirely (`git show v5.1.0:api.yaml | grep digital-archive` finds nothing), so
-# no released package has ever carried this property and nothing can be pinned
-# to it. wxyc-dj-ios pins by sha and is still on 1.47.0; Backend-Service has no
-# handler for this route yet. The first release to ship the property is the same
-# one that ships it in its correct place.
-#
-# Prune when this lands on main — it stops appearing in any main..PR diff then.
-#
-# Method is lowercase because scripts/__tests__/check-breaking-changes.test.sh
-# requires `^(get|post|put|patch|delete) /`. oasdiff itself matches
-# case-insensitively, so an uppercase entry suppresses correctly and still fails
-# that guard — the failure looks like a whitelist-format problem rather than the
-# working suppression it is.
-get /digital-archive/albums/{id}/playback removed the required property `provenance` from the response with the `200` status
