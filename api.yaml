@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.50.0
+  version: 1.50.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -9005,7 +9005,9 @@ paths:
         closed show cannot disagree with its own markers about when it ended.
         The `now()` hazard above is unchanged by the override: `ended_at` is
         capped at the present, so it can only ever move the close EARLIER than
-        `now()`, never later.
+        `now()`, never later. It is floored at the derived instant for the
+        mirror-image reason, so it can only ever move the close LATER than the
+        flowsheet's own answer, never earlier.
 
 
         Ending an already-ended show is a 400, decided by a compare-and-set on
@@ -9065,12 +9067,30 @@ paths:
 
                     Supply it when an operator knows better than the flowsheet
                     does — a show whose DJ stopped logging an hour before they
-                    actually went off the air, say. Bounded on both ends: it
-                    must be at or after the show's `start_time` and at or
-                    before now, or the request is a 400. The lower bound keeps
-                    a closed show from carrying an interval that cannot overlap
-                    its own airdate; the upper bound keeps a show from claiming
-                    to have ended in the future.
+                    actually went off the air, say. Bounded on both ends, or
+                    the request is a 400 naming the bound it missed.
+
+
+                    The upper bound is now: a show may not claim to have ended
+                    in the future. The lower bound is the derived instant this
+                    field overrides — the show's last logged entry, floored at
+                    `start_time` — so an override may only ever move the close
+                    LATER than the flowsheet's own answer. A show with nothing
+                    logged has no last entry, and there the floor is
+                    `start_time`.
+
+
+                    Closing a show BEFORE entries it still owns is therefore
+                    not on offer. That interval is wrong in the mirror image of
+                    the way `now()` is: `GET /flowsheet/range` admits a closed
+                    show on `start_time < windowEnd AND end_time > windowStart`,
+                    so a show truncated back behind its own entries disappears
+                    from windows `GET /flowsheet` is still serving those entries
+                    in, and any derivation of "which show does this entry belong
+                    to" from the interval contradicts the entry's own show. When
+                    the entries are the thing that is wrong — a later DJ's rows
+                    absorbed into an abandoned show — they are re-pointed to the
+                    show that aired them, not truncated around.
       responses:
         '200':
           description: The finalized show, with `end_time` set
@@ -9081,7 +9101,9 @@ paths:
         '400':
           description: >
             The id was not a positive integer, the show is already ended, or
-            `ended_at` was unparseable or outside `[start_time, now]`.
+            `ended_at` was unparseable, in the future, or earlier than the
+            show's last logged entry. The floor rejection names the instant it
+            required.
         '403':
           description: "Caller lacks the `flowsheet: manage` permission"
         '404':
