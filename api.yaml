@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.50.1
+  version: 1.50.2
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -441,19 +441,57 @@ components:
           description: Optional free-text reason for `discogsUnavailable`.
         spotify_url:
           type: string
+          format: uri
           nullable: true
+          description: >
+            Spotify album URL. Contract-level `format: uri` only; shape is
+            enforced at the BS boundary guard (`sanitizeLookupStreamingUrls`,
+            WXYC/Backend-Service#2350) and the LML writer seam
+            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295),
+            both of which suppress malformed values to null.
         apple_music_url:
           type: string
+          format: uri
           nullable: true
+          description: >
+            Apple Music album URL. Contract-level `format: uri` only; shape
+            is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
         youtube_music_url:
           type: string
+          format: uri
           nullable: true
+          description: >
+            YouTube Music search URL. Contract-level `format: uri` only;
+            shape is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
         bandcamp_url:
           type: string
+          format: uri
           nullable: true
+          description: >
+            Bandcamp album URL. Contract-level `format: uri` only; shape is
+            enforced at the BS boundary guard (`sanitizeLookupStreamingUrls`,
+            WXYC/Backend-Service#2350) and the LML writer seam
+            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295),
+            both of which suppress malformed values to null.
         soundcloud_url:
           type: string
+          format: uri
           nullable: true
+          description: >
+            SoundCloud search URL. Contract-level `format: uri` only; shape
+            is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
         artist_bio:
           type: string
           nullable: true
@@ -1045,19 +1083,59 @@ components:
               nullable: true
             spotify_url:
               type: string
+              format: uri
               nullable: true
+              description: >
+                Spotify album URL. Contract-level `format: uri` only; shape
+                is enforced at the BS boundary guard
+                (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350)
+                and the LML writer seam (`streaming_links` read seam,
+                WXYC/library-metadata-lookup#1295), both of which suppress
+                malformed values to null.
             apple_music_url:
               type: string
+              format: uri
               nullable: true
+              description: >
+                Apple Music album URL. Contract-level `format: uri` only;
+                shape is enforced at the BS boundary guard
+                (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350)
+                and the LML writer seam (`streaming_links` read seam,
+                WXYC/library-metadata-lookup#1295), both of which suppress
+                malformed values to null.
             youtube_music_url:
               type: string
+              format: uri
               nullable: true
+              description: >
+                YouTube Music search URL. Contract-level `format: uri` only;
+                shape is enforced at the BS boundary guard
+                (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350)
+                and the LML writer seam (`streaming_links` read seam,
+                WXYC/library-metadata-lookup#1295), both of which suppress
+                malformed values to null.
             bandcamp_url:
               type: string
+              format: uri
               nullable: true
+              description: >
+                Bandcamp album URL. Contract-level `format: uri` only; shape
+                is enforced at the BS boundary guard
+                (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350)
+                and the LML writer seam (`streaming_links` read seam,
+                WXYC/library-metadata-lookup#1295), both of which suppress
+                malformed values to null.
             soundcloud_url:
               type: string
+              format: uri
               nullable: true
+              description: >
+                SoundCloud search URL. Contract-level `format: uri` only;
+                shape is enforced at the BS boundary guard
+                (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350)
+                and the LML writer seam (`streaming_links` read seam,
+                WXYC/library-metadata-lookup#1295), both of which suppress
+                malformed values to null.
             artist_bio:
               type: string
               nullable: true
@@ -4540,14 +4618,52 @@ components:
           type: integer
         spotify_url:
           type: string
+          format: uri
+          description: >
+            Spotify album URL. Contract-level `format: uri` only; shape is
+            enforced at the BS boundary guard (`sanitizeLookupStreamingUrls`,
+            WXYC/Backend-Service#2350) and the LML writer seam
+            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295),
+            both of which suppress malformed values to null.
         apple_music_url:
           type: string
+          format: uri
+          description: >
+            Apple Music album URL. Contract-level `format: uri` only; shape
+            is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
         youtube_music_url:
           type: string
+          format: uri
+          description: >
+            YouTube Music search URL. Contract-level `format: uri` only;
+            shape is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
         bandcamp_url:
           type: string
+          format: uri
+          description: >
+            Bandcamp album URL. Contract-level `format: uri` only; shape is
+            enforced at the BS boundary guard (`sanitizeLookupStreamingUrls`,
+            WXYC/Backend-Service#2350) and the LML writer seam
+            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295),
+            both of which suppress malformed values to null.
         soundcloud_url:
           type: string
+          format: uri
+          description: >
+            SoundCloud search URL. Contract-level `format: uri` only; shape
+            is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
         last_fetched:
           type: string
           format: date-time
@@ -4732,24 +4848,57 @@ components:
       properties:
         spotify_url:
           type: string
+          format: uri
           nullable: true
-          description: Spotify album URL
+          description: >
+            Spotify album URL. Contract-level `format: uri` only; shape is
+            enforced at the BS boundary guard (`sanitizeLookupStreamingUrls`,
+            WXYC/Backend-Service#2350) and the LML writer seam
+            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295),
+            both of which suppress malformed values to null.
         apple_music_url:
           type: string
+          format: uri
           nullable: true
-          description: Apple Music album URL
+          description: >
+            Apple Music album URL. Contract-level `format: uri` only; shape
+            is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
         youtube_music_url:
           type: string
+          format: uri
           nullable: true
-          description: YouTube Music search URL
+          description: >
+            YouTube Music search URL. Contract-level `format: uri` only;
+            shape is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
         bandcamp_url:
           type: string
+          format: uri
           nullable: true
-          description: Bandcamp album URL
+          description: >
+            Bandcamp album URL. Contract-level `format: uri` only; shape is
+            enforced at the BS boundary guard (`sanitizeLookupStreamingUrls`,
+            WXYC/Backend-Service#2350) and the LML writer seam
+            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295),
+            both of which suppress malformed values to null.
         soundcloud_url:
           type: string
+          format: uri
           nullable: true
-          description: SoundCloud search URL
+          description: >
+            SoundCloud search URL. Contract-level `format: uri` only; shape
+            is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
 
     StreamingResolutionStatus:
       type: string
@@ -5048,24 +5197,57 @@ components:
           description: Wikipedia URL for the artist
         spotify_url:
           type: string
+          format: uri
           nullable: true
-          description: Spotify album URL
+          description: >
+            Spotify album URL. Contract-level `format: uri` only; shape is
+            enforced at the BS boundary guard (`sanitizeLookupStreamingUrls`,
+            WXYC/Backend-Service#2350) and the LML writer seam
+            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295),
+            both of which suppress malformed values to null.
         apple_music_url:
           type: string
+          format: uri
           nullable: true
-          description: Apple Music album URL
+          description: >
+            Apple Music album URL. Contract-level `format: uri` only; shape
+            is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
         youtube_music_url:
           type: string
+          format: uri
           nullable: true
-          description: YouTube Music search URL
+          description: >
+            YouTube Music search URL. Contract-level `format: uri` only;
+            shape is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
         bandcamp_url:
           type: string
+          format: uri
           nullable: true
-          description: Bandcamp album URL
+          description: >
+            Bandcamp album URL. Contract-level `format: uri` only; shape is
+            enforced at the BS boundary guard (`sanitizeLookupStreamingUrls`,
+            WXYC/Backend-Service#2350) and the LML writer seam
+            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295),
+            both of which suppress malformed values to null.
         soundcloud_url:
           type: string
+          format: uri
           nullable: true
-          description: SoundCloud search URL
+          description: >
+            SoundCloud search URL. Contract-level `format: uri` only; shape
+            is enforced at the BS boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
+            the LML writer seam (`streaming_links` read seam,
+            WXYC/library-metadata-lookup#1295), both of which suppress
+            malformed values to null.
         streaming_status:
           nullable: true
           allOf:

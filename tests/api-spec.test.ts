@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.50.1');
+      expect(spec.info.version).toBe('1.50.2');
     });
 
     it('should have components section', () => {
@@ -3153,6 +3153,48 @@ describe('OpenAPI Specification', () => {
       // of the sibling `*_url` fields — it only annotates why a url is null.
       expect(schema.required ?? []).not.toContain('streaming_status');
     });
+  });
+
+  describe('Streaming URL fields carry format: uri (#428)', () => {
+    // The five streaming URL fields, at every schema that carries them.
+    // FlowsheetEntryFields and FlowsheetV2TrackEntry are the two flowsheet
+    // shapes; AlbumMetadata is the cache row; StreamingLinks is the shared
+    // sub-schema; DiscogsMatchResult is the LML lookup result. `propertyOf`
+    // follows `allOf`/`$ref` so the two flowsheet composites resolve the
+    // same way the runtime consumers see them.
+    const STREAMING_URL_FIELDS = [
+      'spotify_url',
+      'apple_music_url',
+      'youtube_music_url',
+      'bandcamp_url',
+      'soundcloud_url',
+    ];
+    const SCHEMAS_WITH_STREAMING_URLS = [
+      'FlowsheetEntryFields',
+      'FlowsheetV2TrackEntry',
+      'AlbumMetadata',
+      'StreamingLinks',
+      'DiscogsMatchResult',
+    ];
+
+    for (const schemaName of SCHEMAS_WITH_STREAMING_URLS) {
+      for (const field of STREAMING_URL_FIELDS) {
+        it(`declares ${schemaName}.${field} as format: uri, naming both enforcement points`, () => {
+          const prop = propertyOf(schemaName, field);
+          expect(prop, `${schemaName}.${field}`).toBeDefined();
+          expect(prop!.format).toBe('uri');
+          const description = String(prop!.description ?? '');
+          // Contract-level only: the annotation documents shape, it does not
+          // itself enforce it. The two layers that actually reject/suppress
+          // malformed values are the BS boundary guard and the LML writer
+          // seam (issue #428's decision comment) — named here so a reader of
+          // the generated type knows where to look, not just that the field
+          // "should" be a URL.
+          expect(description).toMatch(/Backend-Service#2350/);
+          expect(description).toMatch(/library-metadata-lookup#1295/);
+        });
+      }
+    }
   });
 
   describe('Streaming Check (LML#376 partial-error semantics)', () => {
