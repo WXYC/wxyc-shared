@@ -119,6 +119,25 @@ set -euo pipefail
 
 DATAMODEL_CODEGEN_PIN="datamodel-code-generator[http]==0.56.1"
 
+# #428: these five streaming URL fields carry pre-existing malformed/
+# wrong-shaped stored values (WXYC/Backend-Service#1710). api.yaml annotates
+# them with `format: uri` for documentation, but datamodel-code-generator's
+# default mapping for `type: string, format: uri` is pydantic's `AnyUrl`
+# (confirmed against 0.56.1, this script's pin), which validates AT
+# CONSTRUCTION -- a naive Python regen would turn already-persisted
+# malformed rows into hard decode failures the first time LML or
+# request-o-matic loads one, exactly the outcome #428's acceptance criteria
+# rules out. Every other consumer (TypeScript, Swift, Kotlin) treats
+# `format: uri` as documentation-only; this list is what makes Python match
+# them -- see pin_streaming_url_fields_to_str() below for how.
+STREAMING_URL_FIELDS=(
+    spotify_url
+    apple_music_url
+    youtube_music_url
+    bandcamp_url
+    soundcloud_url
+)
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -296,6 +315,47 @@ run_codegen() {
         --custom-file-header "$HEADER"
 }
 
+# #428: force STREAMING_URL_FIELDS to stay `str`, undoing datamodel-codegen's
+# default `format: uri` -> `AnyUrl` mapping for exactly those five fields.
+#
+# This is a post-generation substitution, not a codegen flag, because
+# 0.56.1 has no per-field override for format-derived types. Two flags look
+# like they should do this and don't:
+#
+#   --type-mappings 'string+uri=string'   -- documented as format-scoped,
+#       but format is document-wide: it retargets EVERY `format: uri`
+#       field in the spec, not just the ones this pin cares about.
+#   --type-overrides '{"Model.field": "builtins.str"}' -- documented as
+#       "Scoped: ... replaces specific field only", but verified empirically
+#       (2026-08-31, against 0.56.1) that this is false for format-derived
+#       types: overriding StreamingLinks.spotify_url alone also flipped the
+#       unrelated DeviceCodeResponse.verification_uri to `str`. The "scoped"
+#       claim in --help does not hold for this case.
+#
+# Both flags are file-wide once ANY override targets `format: uri`, which
+# would also repoint the archive presigned-GET `url` and the OAuth
+# device-flow `verification_uri`/`verification_uri_complete` fields --
+# none of which are in scope for #428's decision, and none of which share
+# the malformed-stored-data problem that motivates this pin. A regex
+# substitution scoped to the five known field names is the only mechanism
+# available that matches the decision's actual scope.
+#
+# Safe against the generated file's several shapes (required vs. optional,
+# with vs. without a Field(...) default, nullable or not) because all of
+# them put the type token immediately after "fieldname: " on one line --
+# matching up to "AnyUrl" and rewriting only that token leaves the rest
+# (| None, Field(...), descriptions) untouched. Any of the fields ending up
+# as the ONLY use of AnyUrl in the file leaves an unused `from pydantic
+# import AnyUrl` behind; the ruff check --fix step that already runs after
+# this (below) removes it, so no import bookkeeping is needed here.
+pin_streaming_url_fields_to_str() {
+    local field
+    for field in "${STREAMING_URL_FIELDS[@]}"; do
+        sed -E "s/^([[:space:]]*${field}: )AnyUrl/\1str/" "$OUTPUT" > "$OUTPUT.pin-tmp"
+        mv "$OUTPUT.pin-tmp" "$OUTPUT"
+    done
+}
+
 echo "Generating Python models..."
 if command -v uv &> /dev/null; then
     # Authoritative path: the datamodel-code-generator version and the
@@ -349,6 +409,9 @@ else
     fi
     run_codegen "$CODEGEN"
 fi
+
+echo "Pinning streaming URL fields to str (#428)..."
+pin_streaming_url_fields_to_str
 
 # Unlike datamodel-codegen, ruff version is deliberately NOT pinned here: a
 # consumer's own .venv/PATH ruff wins when present (request-o-matic and LML
