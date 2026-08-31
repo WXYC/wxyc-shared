@@ -710,3 +710,94 @@ STUB
     [[ "$output" == *"downloading"* ]]
     [ -f "$TEST_TEMP_DIR/out/models.py" ]
 }
+
+# --- #428: the five streaming URL fields must generate as `str`, not the ---
+# --- default `AnyUrl` that `format: uri` otherwise produces, WITHOUT ---
+# --- touching any other `format: uri` field in the document (#428's ---
+# --- decided policy is scoped to exactly these five fields; see this ---
+# --- script's STREAMING_URL_FIELDS comment for why a document-wide flag ---
+# --- like --type-mappings or --type-overrides can't be used instead). ---
+
+@test "STREAMING_URL_FIELDS names exactly the five fields #428 decided to pin" {
+    for field in spotify_url apple_music_url youtube_music_url bandcamp_url soundcloud_url; do
+        run grep -F "    $field" "$SCRIPT_PATH"
+        [ "$status" -eq 0 ]
+    done
+}
+
+write_streaming_url_fixture_spec() {
+    # StreamingLinks carries the five pinned fields; DeviceCodeResponse's
+    # verification_uri is a sixth, UNRELATED format: uri field that must be
+    # left alone -- it stands in for the real api.yaml's archive presigned
+    # `url` and OAuth device-flow `verification_uri`/`verification_uri_complete`,
+    # none of which are in #428's scope.
+    cat > "$TEST_TEMP_DIR/streaming.yaml" <<'EOF'
+openapi: 3.0.3
+info:
+  title: Streaming Fixture
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    StreamingLinks:
+      type: object
+      properties:
+        spotify_url:
+          type: string
+          format: uri
+          nullable: true
+        apple_music_url:
+          type: string
+          format: uri
+          nullable: true
+        youtube_music_url:
+          type: string
+          format: uri
+          nullable: true
+        bandcamp_url:
+          type: string
+          format: uri
+          nullable: true
+        soundcloud_url:
+          type: string
+          format: uri
+          nullable: true
+    DeviceCodeResponse:
+      type: object
+      properties:
+        verification_uri:
+          type: string
+          format: uri
+EOF
+}
+
+@test "pins the five streaming URL fields to str, matching the #428 decision" {
+    command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
+    write_streaming_url_fixture_spec
+    run "$SCRIPT_PATH" --input "$TEST_TEMP_DIR/streaming.yaml" --output "$TEST_TEMP_DIR/out/models.py"
+    [ "$status" -eq 0 ]
+    for field in spotify_url apple_music_url youtube_music_url bandcamp_url soundcloud_url; do
+        run grep -qE "^ *${field}: str" "$TEST_TEMP_DIR/out/models.py"
+        [ "$status" -eq 0 ]
+        run grep -qE "^ *${field}: AnyUrl" "$TEST_TEMP_DIR/out/models.py"
+        [ "$status" -ne 0 ]
+    done
+}
+
+@test "leaves an UNRELATED format: uri field (not in STREAMING_URL_FIELDS) as AnyUrl" {
+    command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
+    write_streaming_url_fixture_spec
+    run "$SCRIPT_PATH" --input "$TEST_TEMP_DIR/streaming.yaml" --output "$TEST_TEMP_DIR/out/models.py"
+    [ "$status" -eq 0 ]
+    run grep -qE "^ *verification_uri: AnyUrl" "$TEST_TEMP_DIR/out/models.py"
+    [ "$status" -eq 0 ]
+}
+
+@test "keeps the AnyUrl import when an unrelated format: uri field still needs it" {
+    command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
+    write_streaming_url_fixture_spec
+    run "$SCRIPT_PATH" --input "$TEST_TEMP_DIR/streaming.yaml" --output "$TEST_TEMP_DIR/out/models.py"
+    [ "$status" -eq 0 ]
+    run grep -F "AnyUrl" "$TEST_TEMP_DIR/out/models.py"
+    [ "$status" -eq 0 ]
+}
