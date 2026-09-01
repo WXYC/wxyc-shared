@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.50.2
+  version: 1.50.3
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -443,75 +443,45 @@ components:
           type: string
           format: uri
           nullable: true
-          description: >
-            Spotify album URL. Contract-level `format: uri` only, not enforced
-            by generated types. Contract-first: shape enforcement lands with
-            the LML client boundary guard (`sanitizeLookupStreamingUrls`,
-            WXYC/Backend-Service#2350) and the LML writer seam
-            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295);
-            both are open, and neither has merged. The guard already shipped
-            (BS#1714) covers only `spotify_url`/`apple_music_url`, not the
-            other three fields here, and only at the LML-response boundary --
-            not every path these fields reach the wire through.
+          description: &streaming-url-note >
+            Streaming URL field. Contract-level `format: uri` only, not enforced by
+            generated types on any consumer -- the Python codegen pin
+            (`pin_streaming_url_fields_to_str`) keeps Python matching TypeScript,
+            Swift, and Kotlin, which already treat `format: uri` as
+            documentation-only. Shape enforcement lives at two runtime seams,
+            both shipped:
+            the Backend-Service LML-response boundary guard
+            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2351) -- a host
+            allowlist for spotify/apple_music/youtube_music/soundcloud, and
+            well-formedness only for bandcamp (deliberate: custom-domain deep
+            links, see the guard's own doc comment) -- and the LML writer seam
+            (`streaming_links` copy-out,
+            `lookup/enrichment/streaming_link_validation.py`,
+            WXYC/library-metadata-lookup#1296) -- a host check on all five, plus a
+            well-formedness floor on youtube_music/bandcamp/soundcloud only. The
+            two seams deliberately disagree on bandcamp because they see different
+            URL populations -- this field is not host-checked at every seam it
+            passes through.
         apple_music_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            Apple Music album URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
         youtube_music_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            YouTube Music search URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
         bandcamp_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            Bandcamp album URL. Contract-level `format: uri` only, not enforced
-            by generated types. Contract-first: shape enforcement lands with
-            the LML client boundary guard (`sanitizeLookupStreamingUrls`,
-            WXYC/Backend-Service#2350) and the LML writer seam
-            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295);
-            both are open, and neither has merged. The guard already shipped
-            (BS#1714) covers only `spotify_url`/`apple_music_url`, not the
-            other three fields here, and only at the LML-response boundary --
-            not every path these fields reach the wire through.
+          description: *streaming-url-note
         soundcloud_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            SoundCloud search URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
         artist_bio:
           type: string
           nullable: true
@@ -1105,77 +1075,27 @@ components:
               type: string
               format: uri
               nullable: true
-              description: >
-                Spotify album URL. Contract-level `format: uri` only, not
-                enforced by generated types. Contract-first: shape enforcement
-                lands with the LML client boundary guard
-                (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
-                the LML writer seam (`streaming_links` read seam,
-                WXYC/library-metadata-lookup#1295); both are open, and neither
-                has merged. The guard already shipped (BS#1714) covers only
-                `spotify_url`/`apple_music_url`, not the other three fields
-                here, and only at the LML-response boundary -- not every path
-                these fields reach the wire through.
+              description: *streaming-url-note
             apple_music_url:
               type: string
               format: uri
               nullable: true
-              description: >
-                Apple Music album URL. Contract-level `format: uri` only, not
-                enforced by generated types. Contract-first: shape enforcement
-                lands with the LML client boundary guard
-                (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
-                the LML writer seam (`streaming_links` read seam,
-                WXYC/library-metadata-lookup#1295); both are open, and neither
-                has merged. The guard already shipped (BS#1714) covers only
-                `spotify_url`/`apple_music_url`, not the other three fields
-                here, and only at the LML-response boundary -- not every path
-                these fields reach the wire through.
+              description: *streaming-url-note
             youtube_music_url:
               type: string
               format: uri
               nullable: true
-              description: >
-                YouTube Music search URL. Contract-level `format: uri` only,
-                not enforced by generated types. Contract-first: shape
-                enforcement lands with the LML client boundary guard
-                (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
-                the LML writer seam (`streaming_links` read seam,
-                WXYC/library-metadata-lookup#1295); both are open, and neither
-                has merged. The guard already shipped (BS#1714) covers only
-                `spotify_url`/`apple_music_url`, not the other three fields
-                here, and only at the LML-response boundary -- not every path
-                these fields reach the wire through.
+              description: *streaming-url-note
             bandcamp_url:
               type: string
               format: uri
               nullable: true
-              description: >
-                Bandcamp album URL. Contract-level `format: uri` only, not
-                enforced by generated types. Contract-first: shape enforcement
-                lands with the LML client boundary guard
-                (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
-                the LML writer seam (`streaming_links` read seam,
-                WXYC/library-metadata-lookup#1295); both are open, and neither
-                has merged. The guard already shipped (BS#1714) covers only
-                `spotify_url`/`apple_music_url`, not the other three fields
-                here, and only at the LML-response boundary -- not every path
-                these fields reach the wire through.
+              description: *streaming-url-note
             soundcloud_url:
               type: string
               format: uri
               nullable: true
-              description: >
-                SoundCloud search URL. Contract-level `format: uri` only, not
-                enforced by generated types. Contract-first: shape enforcement
-                lands with the LML client boundary guard
-                (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and
-                the LML writer seam (`streaming_links` read seam,
-                WXYC/library-metadata-lookup#1295); both are open, and neither
-                has merged. The guard already shipped (BS#1714) covers only
-                `spotify_url`/`apple_music_url`, not the other three fields
-                here, and only at the LML-response boundary -- not every path
-                these fields reach the wire through.
+              description: *streaming-url-note
             artist_bio:
               type: string
               nullable: true
@@ -4660,75 +4580,27 @@ components:
           type: string
           format: uri
           nullable: true
-          description: >
-            Spotify album URL. Contract-level `format: uri` only, not enforced
-            by generated types. Contract-first: shape enforcement lands with
-            the LML client boundary guard (`sanitizeLookupStreamingUrls`,
-            WXYC/Backend-Service#2350) and the LML writer seam
-            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295);
-            both are open, and neither has merged. The guard already shipped
-            (BS#1714) covers only `spotify_url`/`apple_music_url`, not the
-            other three fields here, and only at the LML-response boundary --
-            not every path these fields reach the wire through.
+          description: *streaming-url-note
         apple_music_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            Apple Music album URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
         youtube_music_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            YouTube Music search URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
         bandcamp_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            Bandcamp album URL. Contract-level `format: uri` only, not enforced
-            by generated types. Contract-first: shape enforcement lands with
-            the LML client boundary guard (`sanitizeLookupStreamingUrls`,
-            WXYC/Backend-Service#2350) and the LML writer seam
-            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295);
-            both are open, and neither has merged. The guard already shipped
-            (BS#1714) covers only `spotify_url`/`apple_music_url`, not the
-            other three fields here, and only at the LML-response boundary --
-            not every path these fields reach the wire through.
+          description: *streaming-url-note
         soundcloud_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            SoundCloud search URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
         last_fetched:
           type: string
           format: date-time
@@ -4915,75 +4787,27 @@ components:
           type: string
           format: uri
           nullable: true
-          description: >
-            Spotify album URL. Contract-level `format: uri` only, not enforced
-            by generated types. Contract-first: shape enforcement lands with
-            the LML client boundary guard (`sanitizeLookupStreamingUrls`,
-            WXYC/Backend-Service#2350) and the LML writer seam
-            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295);
-            both are open, and neither has merged. The guard already shipped
-            (BS#1714) covers only `spotify_url`/`apple_music_url`, not the
-            other three fields here, and only at the LML-response boundary --
-            not every path these fields reach the wire through.
+          description: *streaming-url-note
         apple_music_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            Apple Music album URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
         youtube_music_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            YouTube Music search URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
         bandcamp_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            Bandcamp album URL. Contract-level `format: uri` only, not enforced
-            by generated types. Contract-first: shape enforcement lands with
-            the LML client boundary guard (`sanitizeLookupStreamingUrls`,
-            WXYC/Backend-Service#2350) and the LML writer seam
-            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295);
-            both are open, and neither has merged. The guard already shipped
-            (BS#1714) covers only `spotify_url`/`apple_music_url`, not the
-            other three fields here, and only at the LML-response boundary --
-            not every path these fields reach the wire through.
+          description: *streaming-url-note
         soundcloud_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            SoundCloud search URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
 
     StreamingResolutionStatus:
       type: string
@@ -5284,75 +5108,27 @@ components:
           type: string
           format: uri
           nullable: true
-          description: >
-            Spotify album URL. Contract-level `format: uri` only, not enforced
-            by generated types. Contract-first: shape enforcement lands with
-            the LML client boundary guard (`sanitizeLookupStreamingUrls`,
-            WXYC/Backend-Service#2350) and the LML writer seam
-            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295);
-            both are open, and neither has merged. The guard already shipped
-            (BS#1714) covers only `spotify_url`/`apple_music_url`, not the
-            other three fields here, and only at the LML-response boundary --
-            not every path these fields reach the wire through.
+          description: *streaming-url-note
         apple_music_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            Apple Music album URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
         youtube_music_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            YouTube Music search URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
         bandcamp_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            Bandcamp album URL. Contract-level `format: uri` only, not enforced
-            by generated types. Contract-first: shape enforcement lands with
-            the LML client boundary guard (`sanitizeLookupStreamingUrls`,
-            WXYC/Backend-Service#2350) and the LML writer seam
-            (`streaming_links` read seam, WXYC/library-metadata-lookup#1295);
-            both are open, and neither has merged. The guard already shipped
-            (BS#1714) covers only `spotify_url`/`apple_music_url`, not the
-            other three fields here, and only at the LML-response boundary --
-            not every path these fields reach the wire through.
+          description: *streaming-url-note
         soundcloud_url:
           type: string
           format: uri
           nullable: true
-          description: >
-            SoundCloud search URL. Contract-level `format: uri` only, not
-            enforced by generated types. Contract-first: shape enforcement
-            lands with the LML client boundary guard
-            (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2350) and the
-            LML writer seam (`streaming_links` read seam,
-            WXYC/library-metadata-lookup#1295); both are open, and neither has
-            merged. The guard already shipped (BS#1714) covers only
-            `spotify_url`/`apple_music_url`, not the other three fields here,
-            and only at the LML-response boundary -- not every path these
-            fields reach the wire through.
+          description: *streaming-url-note
         streaming_status:
           nullable: true
           allOf:
