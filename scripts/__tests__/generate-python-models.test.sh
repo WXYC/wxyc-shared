@@ -719,10 +719,24 @@ STUB
 # --- like --type-mappings or --type-overrides can't be used instead). ---
 
 @test "STREAMING_URL_FIELDS names exactly the five fields #428 decided to pin" {
-    for field in spotify_url apple_music_url youtube_music_url bandcamp_url soundcloud_url; do
-        run grep -F "    $field" "$SCRIPT_PATH"
-        [ "$status" -eq 0 ]
-    done
+    # Source ONLY the array assignment (not the whole script -- sourcing the
+    # full file would run its argument-parsing and codegen logic) and assert
+    # against the real bash array's actual contents and length, not a grep
+    # over the script's text. A grep-based check passes as long as each name
+    # appears SOMEWHERE at 4-space indent; it can't catch a sixth field
+    # slipping into the array, or the array being emptied while a stray
+    # comment still names all five.
+    run bash -c "
+        source <(sed -n '/^STREAMING_URL_FIELDS=(/,/^)/p' '$SCRIPT_PATH')
+        printf '%s\n' \"\${STREAMING_URL_FIELDS[@]}\"
+    "
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 5 ]
+    [ "${lines[0]}" = "spotify_url" ]
+    [ "${lines[1]}" = "apple_music_url" ]
+    [ "${lines[2]}" = "youtube_music_url" ]
+    [ "${lines[3]}" = "bandcamp_url" ]
+    [ "${lines[4]}" = "soundcloud_url" ]
 }
 
 write_streaming_url_fixture_spec() {
@@ -731,6 +745,19 @@ write_streaming_url_fixture_spec() {
     # left alone -- it stands in for the real api.yaml's archive presigned
     # `url` and OAuth device-flow `verification_uri`/`verification_uri_complete`,
     # none of which are in #428's scope.
+    #
+    # Fixture fidelity matters here: every field carries a `description`
+    # (like the real api.yaml fields do post-#428, and unlike a bare
+    # `type: string` stub) because a description is what pushes some
+    # datamodel-codegen configurations onto a Field(...)-wrapped
+    # declaration instead of a bare assignment -- the pin has to survive
+    # that shape too, not just the simplest one. `spotify_url` is
+    # deliberately left WITHOUT `nullable: true` (the other four keep it) so
+    # this fixture exercises both shapes the real contract actually has:
+    # every other schema declares these fields nullable, but AlbumMetadata's
+    # did not before wxyc-shared#428's review pass added it -- see that
+    # schema in api.yaml. Proving the pin against only the nullable shape
+    # would have missed a non-nullable field the real spec once shipped.
     cat > "$TEST_TEMP_DIR/streaming.yaml" <<'EOF'
 openapi: 3.0.3
 info:
@@ -745,23 +772,27 @@ components:
         spotify_url:
           type: string
           format: uri
-          nullable: true
+          description: Spotify album URL fixture -- deliberately non-nullable.
         apple_music_url:
           type: string
           format: uri
           nullable: true
+          description: Apple Music album URL fixture.
         youtube_music_url:
           type: string
           format: uri
           nullable: true
+          description: YouTube Music search URL fixture.
         bandcamp_url:
           type: string
           format: uri
           nullable: true
+          description: Bandcamp album URL fixture.
         soundcloud_url:
           type: string
           format: uri
           nullable: true
+          description: SoundCloud search URL fixture.
     DeviceCodeResponse:
       type: object
       properties:
@@ -800,4 +831,43 @@ EOF
     [ "$status" -eq 0 ]
     run grep -F "AnyUrl" "$TEST_TEMP_DIR/out/models.py"
     [ "$status" -eq 0 ]
+}
+
+# --- Bounced-PR escalation: the sed pin above is line-anchored on
+# --- "fieldname: AnyUrl" appearing on one line, which is only one of the
+# --- shapes datamodel-codegen can emit for a `format: uri` field -- with
+# --- --use-annotated, a described field (all five #428 fields carry a
+# --- description) instead generates a multi-line
+# --- `Annotated[AnyUrl | None, Field(...)]`, which the sed never matches,
+# --- and pin_streaming_url_fields_to_str still returns 0 (verified against
+# --- both the pinned 0.56.1 and 0.76.0). verify_streaming_url_fields_pinned
+# --- exists to fail loudly instead of shipping that silently. This test
+# --- proves the post-condition actually fires when the pin no-ops, by
+# --- forcing exactly that outcome: a PATH-shadowing `sed` stub that passes
+# --- $OUTPUT through unchanged, standing in for "the real sed's pattern
+# --- didn't match this run's generator output" regardless of the reason.
+
+@test "the AST post-condition fails loudly when the sed pin no-ops (#428 escalation)" {
+    command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
+    write_streaming_url_fixture_spec
+
+    mkdir -p "$TEST_TEMP_DIR/fakebin"
+    cat > "$TEST_TEMP_DIR/fakebin/sed" <<'FAKESED'
+#!/usr/bin/env bash
+# Stands in for a pin whose regex no longer matches the generator's output
+# shape: passes the input file (the last argument) through UNCHANGED,
+# exactly like a real sed invocation whose pattern found no match.
+cat "${@: -1}"
+FAKESED
+    chmod +x "$TEST_TEMP_DIR/fakebin/sed"
+
+    run env PATH="$TEST_TEMP_DIR/fakebin:$PATH" "$SCRIPT_PATH" \
+        --input "$TEST_TEMP_DIR/streaming.yaml" --output "$TEST_TEMP_DIR/out/models.py"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"#428 pin did not apply"* ]]
+    # All five field names should be named as offenders -- the no-op hit
+    # every one of them, not just a subset.
+    for field in spotify_url apple_music_url youtube_music_url bandcamp_url soundcloud_url; do
+        [[ "$output" == *"$field"* ]]
+    done
 }
