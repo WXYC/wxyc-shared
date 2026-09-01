@@ -3311,7 +3311,7 @@ describe('OpenAPI Specification', () => {
       const searchBody = searchEntry![0].slice(searchEntry![0].indexOf(shared));
       // The `>` folded scalars each resolve with a trailing newline, so trim
       // before comparing the two stems.
-      const albumStem = albumBody.split(' -- `bandcamp_url` is not host-checked')[0].trim();
+      const albumStem = albumBody.split(' -- `bandcamp_url` is not host-checked')[0]!.trim();
       const searchStem = searchBody.trim().replace(/\.$/, '');
       expect(albumStem).toBe(searchStem);
     });
