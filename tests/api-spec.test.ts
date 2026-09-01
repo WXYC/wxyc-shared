@@ -3179,19 +3179,33 @@ describe('OpenAPI Specification', () => {
 
     for (const schemaName of SCHEMAS_WITH_STREAMING_URLS) {
       for (const field of STREAMING_URL_FIELDS) {
-        it(`declares ${schemaName}.${field} as format: uri, naming both enforcement points`, () => {
+        it(`declares ${schemaName}.${field} as format: uri, nullable, naming the contract-first enforcement issues`, () => {
           const prop = propertyOf(schemaName, field);
           expect(prop, `${schemaName}.${field}`).toBeDefined();
           expect(prop!.format).toBe('uri');
+          // Nullable everywhere these fields appear (bounced-PR fix:
+          // AlbumMetadata originally omitted this, the one schema of the
+          // five that didn't declare it, even though Backend-Service's
+          // album-metadata-projection.ts reads these columns as a genuine
+          // SQL NULL via `coalesce(album_metadata.X, flowsheet.X)`, typed
+          // `string | null` — never an omitted key).
+          expect(prop!.nullable, `${schemaName}.${field}.nullable`).toBe(true);
           const description = String(prop!.description ?? '');
           // Contract-level only: the annotation documents shape, it does not
-          // itself enforce it. The two layers that actually reject/suppress
-          // malformed values are the BS boundary guard and the LML writer
-          // seam (issue #428's decision comment) — named here so a reader of
-          // the generated type knows where to look, not just that the field
-          // "should" be a URL.
+          // itself enforce it. Shape enforcement is CONTRACT-FIRST — it
+          // lands with the BS boundary guard and the LML writer seam
+          // (issue #428's decision comment), neither of which has merged as
+          // of this PR. The description must not claim present-tense
+          // enforcement (a bounced-PR finding: all 25 originally said
+          // "shape is enforced at" as though #2350/#1295 were already
+          // live) — it should read as forward-looking, matching this
+          // repo's contract-first house style (see
+          // FlowsheetEntryFields.discogsUnavailable's "Contract-first: ...
+          // it is not emitted there yet").
           expect(description).toMatch(/Backend-Service#2350/);
           expect(description).toMatch(/library-metadata-lookup#1295/);
+          expect(description).toMatch(/Contract-first/);
+          expect(description).not.toMatch(/shape is enforced/);
         });
       }
     }
