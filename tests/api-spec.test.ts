@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.50.2');
+      expect(spec.info.version).toBe('1.50.3');
     });
 
     it('should have components section', () => {
@@ -3155,7 +3155,7 @@ describe('OpenAPI Specification', () => {
     });
   });
 
-  describe('Streaming URL fields carry format: uri (#428)', () => {
+  describe('Streaming URL fields carry format: uri (#428, #431)', () => {
     // The five streaming URL fields, at every schema that carries them.
     // FlowsheetEntryFields and FlowsheetV2TrackEntry are the two flowsheet
     // shapes; AlbumMetadata is the cache row; StreamingLinks is the shared
@@ -3179,7 +3179,7 @@ describe('OpenAPI Specification', () => {
 
     for (const schemaName of SCHEMAS_WITH_STREAMING_URLS) {
       for (const field of STREAMING_URL_FIELDS) {
-        it(`declares ${schemaName}.${field} as format: uri, nullable, naming the contract-first enforcement issues`, () => {
+        it(`declares ${schemaName}.${field} as format: uri, nullable, sharing the one enforcement note`, () => {
           const prop = propertyOf(schemaName, field);
           expect(prop, `${schemaName}.${field}`).toBeDefined();
           expect(prop!.format).toBe('uri');
@@ -3191,24 +3191,31 @@ describe('OpenAPI Specification', () => {
           // `string | null` — never an omitted key).
           expect(prop!.nullable, `${schemaName}.${field}.nullable`).toBe(true);
           const description = String(prop!.description ?? '');
-          // Contract-level only: the annotation documents shape, it does not
-          // itself enforce it. Shape enforcement is CONTRACT-FIRST — it
-          // lands with the BS boundary guard and the LML writer seam
-          // (issue #428's decision comment), neither of which has merged as
-          // of this PR. The description must not claim present-tense
-          // enforcement (a bounced-PR finding: all 25 originally said
-          // "shape is enforced at" as though #2350/#1295 were already
-          // live) — it should read as forward-looking, matching this
-          // repo's contract-first house style (see
-          // FlowsheetEntryFields.discogsUnavailable's "Contract-first: ...
-          // it is not emitted there yet").
-          expect(description).toMatch(/Backend-Service#2350/);
-          expect(description).toMatch(/library-metadata-lookup#1295/);
-          expect(description).toMatch(/Contract-first/);
-          expect(description).not.toMatch(/shape is enforced/);
+          // #431: post-#2351/#1296, enforcement actually shipped, so the
+          // description says so in present tense — it no longer forbids
+          // that wording the way the pre-#431 pin did. It still names both
+          // seams and the deliberate per-seam bandcamp disagreement (a
+          // description that said "bandcamp is host-checked" flatly would
+          // be wrong at the BS boundary, which only checks well-formedness
+          // there).
+          expect(description).toMatch(/Backend-Service#2351/);
+          expect(description).toMatch(/library-metadata-lookup#1296/);
+          expect(description).toMatch(/sanitizeLookupStreamingUrls/);
+          expect(description).toMatch(/streaming_link_validation\.py/);
+          expect(description).toMatch(/bandcamp/i);
+          expect(description).not.toMatch(/both are open/);
+          expect(description).not.toMatch(/neither has merged/);
         });
       }
     }
+
+    it('is the exact same description string at all 25 field/schema pairs (#431: one YAML-anchored note, not 25 copies)', () => {
+      const descriptions = SCHEMAS_WITH_STREAMING_URLS.flatMap((schemaName) =>
+        STREAMING_URL_FIELDS.map((field) => String(propertyOf(schemaName, field)!.description ?? ''))
+      );
+      expect(descriptions).toHaveLength(25);
+      expect(new Set(descriptions).size).toBe(1);
+    });
   });
 
   describe('Streaming Check (LML#376 partial-error semantics)', () => {
