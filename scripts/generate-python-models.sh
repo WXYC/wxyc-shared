@@ -348,12 +348,113 @@ run_codegen() {
 # as the ONLY use of AnyUrl in the file leaves an unused `from pydantic
 # import AnyUrl` behind; the ruff check --fix step that already runs after
 # this (below) removes it, so no import bookkeeping is needed here.
+#
+# This is NAME-keyed, not schema-scoped: the sed matches "fieldname: AnyUrl"
+# wherever that field name appears in the generated file, with no notion of
+# which class (schema) it belongs to. If a future api.yaml schema unrelated
+# to #428 ever declares its own field literally named e.g. `spotify_url`
+# with `format: uri` and genuinely wants pydantic's AnyUrl validation, this
+# pin silently downgrades that field to `str` too -- there is no per-schema
+# guard to stop it. Accepted rather than fixed: the five names #428 pins
+# are specific enough (`spotify_url`, `apple_music_url`,
+# `youtube_music_url`, `bandcamp_url`, `soundcloud_url`) that a genuine
+# collision is unlikely, and closing this would mean parsing the generated
+# file's class structure instead of a flat text substitution -- real cost
+# for a hypothetical this specific. verify_streaming_url_fields_pinned()
+# below catches the pin failing to apply where it SHOULD; it cannot catch
+# the pin over-applying to a field where it SHOULDN'T, because from the
+# field name alone the two cases look identical.
 pin_streaming_url_fields_to_str() {
     local field
     for field in "${STREAMING_URL_FIELDS[@]}"; do
         sed -E "s/^([[:space:]]*${field}: )AnyUrl/\1str/" "$OUTPUT" > "$OUTPUT.pin-tmp"
         mv "$OUTPUT.pin-tmp" "$OUTPUT"
     done
+}
+
+# #428 (bounced-PR escalation): pin_streaming_url_fields_to_str's sed is
+# line-anchored on "fieldname: AnyUrl" appearing on one line, which is only
+# ONE of the shapes datamodel-codegen can emit for a `format: uri` field. Add
+# --use-annotated to run_codegen (not done today, but verified empirically
+# against both the pinned 0.56.1 and 0.76.0) and a field with a description
+# -- which is exactly what #428 gives all five of these -- generates instead
+# as:
+#
+#   fieldname: Annotated[
+#       AnyUrl | None,
+#       Field(description="..."),
+#   ]
+#
+# The sed above never matches that shape: "fieldname: " is followed by
+# "Annotated[", not "AnyUrl", so all five substitutions silently no-op and
+# pin_streaming_url_fields_to_str returns 0 regardless. That is the pin
+# failing OPEN -- the exact regression this function exists to catch, and
+# the reason it can't itself be another line-anchored regex (a second
+# sed pattern only widens the set of shapes covered today; it does not
+# close the class of "some future shape neither pattern anticipated").
+#
+# The check is therefore AST-level, not textual: parse $OUTPUT as Python,
+# walk every class body's AnnAssign nodes, and for each of
+# STREAMING_URL_FIELDS confirm "AnyUrl" does not appear anywhere in the
+# unparsed annotation source. That catches `AnyUrl`, `AnyUrl | None`, and
+# `Annotated[AnyUrl | None, Field(...)]` alike -- and any future shape,
+# because it asks "is AnyUrl present in this field's annotation at all"
+# rather than "does the annotation look like shape X". The three unrelated
+# `format: uri` fields (the archive presigned-GET `url`, the OAuth
+# device-flow `verification_uri`/`verification_uri_complete`) are not in
+# STREAMING_URL_FIELDS, so they are untouched by this check and free to keep
+# AnyUrl -- exactly the pin's intended scope.
+#
+# Needs a Python interpreter to run the AST walk. If codegen ran at all,
+# one exists somewhere -- via `uv` (the authoritative path above) or via
+# whatever installed datamodel-codegen on PATH in the fallback path -- so
+# this tries python3/python first and falls back to `uv run` only if
+# neither is on PATH.
+verify_streaming_url_fields_pinned() {
+    local python_cmd=()
+    if command -v python3 &> /dev/null; then
+        python_cmd=(python3)
+    elif command -v python &> /dev/null; then
+        python_cmd=(python)
+    elif command -v uv &> /dev/null; then
+        python_cmd=(uv run --no-project --python 3.12 python3)
+    else
+        echo "Error: no Python interpreter found to verify the #428 pin (need python3, python, or uv)." >&2
+        exit 1
+    fi
+
+    STREAMING_URL_FIELDS_CSV="$(IFS=,; echo "${STREAMING_URL_FIELDS[*]}")" OUTPUT="$OUTPUT" \
+        "${python_cmd[@]}" -c '
+import ast
+import os
+import sys
+
+output_path = os.environ["OUTPUT"]
+fields = set(os.environ["STREAMING_URL_FIELDS_CSV"].split(","))
+
+with open(output_path, "r", encoding="utf-8") as f:
+    source = f.read()
+
+tree = ast.parse(source, filename=output_path)
+offenders = []
+for node in ast.walk(tree):
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        if node.target.id in fields:
+            annotation_src = ast.unparse(node.annotation)
+            if "AnyUrl" in annotation_src:
+                offenders.append(f"{node.target.id} (line {node.lineno}): {annotation_src}")
+
+if offenders:
+    sys.stderr.write(
+        "#428 pin did not apply -- the following streaming URL fields still "
+        "carry AnyUrl in their generated annotation (pin_streaming_url_fields_to_str "
+        "silently no-op'\''d, most likely because the generator emitted a shape its "
+        "sed pattern does not match):\n"
+    )
+    for offender in offenders:
+        sys.stderr.write(f"  - {offender}\n")
+    sys.exit(1)
+'
 }
 
 echo "Generating Python models..."
@@ -412,6 +513,7 @@ fi
 
 echo "Pinning streaming URL fields to str (#428)..."
 pin_streaming_url_fields_to_str
+verify_streaming_url_fields_pinned
 
 # Unlike datamodel-codegen, ruff version is deliberately NOT pinned here: a
 # consumer's own .venv/PATH ruff wins when present (request-o-matic and LML
