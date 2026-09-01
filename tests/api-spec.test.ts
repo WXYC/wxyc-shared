@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.50.2');
+      expect(spec.info.version).toBe('1.50.3');
     });
 
     it('should have components section', () => {
@@ -3155,20 +3155,23 @@ describe('OpenAPI Specification', () => {
     });
   });
 
-  describe('Streaming URL fields carry format: uri (#428)', () => {
+  describe('Streaming URL fields carry format: uri (#428, #431)', () => {
     // The five streaming URL fields, at every schema that carries them.
     // FlowsheetEntryFields and FlowsheetV2TrackEntry are the two flowsheet
     // shapes; AlbumMetadata is the cache row; StreamingLinks is the shared
     // sub-schema; DiscogsMatchResult is the LML lookup result. `propertyOf`
     // follows `allOf`/`$ref` so the two flowsheet composites resolve the
     // same way the runtime consumers see them.
-    const STREAMING_URL_FIELDS = [
-      'spotify_url',
-      'apple_music_url',
-      'youtube_music_url',
-      'bandcamp_url',
-      'soundcloud_url',
-    ];
+    //
+    // #431 collapses 25 copy-pasted descriptions into TWO anchored notes, not
+    // one: YAML cannot concatenate scalars, and the album-deep-link vs
+    // search-URL distinction in the lead sentence is load-bearing --
+    // `StreamingResolution` carries a verdict for exactly the three deep-link
+    // services and none for the two search-URL ones, and the BS guard's own
+    // doc comment leans on the same split.
+    const ALBUM_URL_FIELDS = ['spotify_url', 'apple_music_url', 'bandcamp_url'];
+    const SEARCH_URL_FIELDS = ['youtube_music_url', 'soundcloud_url'];
+    const STREAMING_URL_FIELDS = [...ALBUM_URL_FIELDS, ...SEARCH_URL_FIELDS];
     const SCHEMAS_WITH_STREAMING_URLS = [
       'FlowsheetEntryFields',
       'FlowsheetV2TrackEntry',
@@ -3177,9 +3180,13 @@ describe('OpenAPI Specification', () => {
       'DiscogsMatchResult',
     ];
 
+    function countOccurrences(haystack: string, needle: string): number {
+      return haystack.split(needle).length - 1;
+    }
+
     for (const schemaName of SCHEMAS_WITH_STREAMING_URLS) {
       for (const field of STREAMING_URL_FIELDS) {
-        it(`declares ${schemaName}.${field} as format: uri, nullable, naming the contract-first enforcement issues`, () => {
+        it(`declares ${schemaName}.${field} as format: uri, nullable, sharing the one enforcement note`, () => {
           const prop = propertyOf(schemaName, field);
           expect(prop, `${schemaName}.${field}`).toBeDefined();
           expect(prop!.format).toBe('uri');
@@ -3191,24 +3198,123 @@ describe('OpenAPI Specification', () => {
           // `string | null` — never an omitted key).
           expect(prop!.nullable, `${schemaName}.${field}.nullable`).toBe(true);
           const description = String(prop!.description ?? '');
-          // Contract-level only: the annotation documents shape, it does not
-          // itself enforce it. Shape enforcement is CONTRACT-FIRST — it
-          // lands with the BS boundary guard and the LML writer seam
-          // (issue #428's decision comment), neither of which has merged as
-          // of this PR. The description must not claim present-tense
-          // enforcement (a bounced-PR finding: all 25 originally said
-          // "shape is enforced at" as though #2350/#1295 were already
-          // live) — it should read as forward-looking, matching this
-          // repo's contract-first house style (see
-          // FlowsheetEntryFields.discogsUnavailable's "Contract-first: ...
-          // it is not emitted there yet").
-          expect(description).toMatch(/Backend-Service#2350/);
-          expect(description).toMatch(/library-metadata-lookup#1295/);
-          expect(description).toMatch(/Contract-first/);
-          expect(description).not.toMatch(/shape is enforced/);
+          // #431: post-#2351/#1296, enforcement actually shipped, so the
+          // description says so in present tense — it no longer forbids
+          // that wording the way the pre-#431 pin did. It still names both
+          // seams and the deliberate per-seam bandcamp disagreement (a
+          // description that said "bandcamp is host-checked" flatly would
+          // be wrong at the BS boundary, which only checks well-formedness
+          // there).
+          expect(description).toMatch(/Backend-Service#2351/);
+          expect(description).toMatch(/library-metadata-lookup#1296/);
+          expect(description).toMatch(/sanitizeLookupStreamingUrls/);
+          expect(description).toMatch(/streaming_link_validation\.py/);
+          expect(description).toMatch(/bandcamp/i);
+          expect(description).not.toMatch(/both are open/);
+          expect(description).not.toMatch(/neither has merged/);
+          // LML#1296's guard suppresses on the read path; it never rewrites
+          // the persisted `streaming_links` row, so "writer seam" alone
+          // would read as a backfill that never happens.
+          expect(description).toMatch(/the persisted row is never rewritten/);
+          // Kotlin is NOT a documentation-only consumer: openapi-generator's
+          // kotlin generator emits `val spotifyUrl: java.net.URI? = null`, a
+          // construction-time parse of stored values — exactly the decode
+          // hazard #428 exists to avoid. Pinning that claim so a future
+          // "all consumers treat this as documentation" simplification of
+          // the note has to fail here first.
+          expect(description).toMatch(/java\.net\.URI/);
+          expect(description).toMatch(/Kotlin does not treat it as documentation-only/);
+          // The Python `str` is this repo's pin, not an already-universal
+          // fact: LML and request-o-matic still run unmigrated regen
+          // scripts, so their current `str` is stale-derived.
+          expect(description).toMatch(/library-metadata-lookup#1299/);
+          expect(description).toMatch(/request-o-matic#282/);
+
+          if (ALBUM_URL_FIELDS.includes(field)) {
+            expect(description).toMatch(/^Album deep link/);
+            // The split-seam exception is bandcamp-only, so it is named
+            // rather than left as a deictic "this field" that would travel
+            // through the alias onto the other four fields.
+            expect(description).toMatch(/`bandcamp_url` is not host-checked at every seam/);
+            expect(description).not.toMatch(/this field is not host-checked/);
+          } else {
+            expect(description).toMatch(/^Search URL/);
+            // Neither search field has a split-seam exception, so the
+            // clause is absent from the search note entirely.
+            expect(description).not.toMatch(/is not host-checked at every seam/);
+          }
         });
       }
     }
+
+    // The parsed tree cannot see the anchor: js-yaml/`yaml` resolve aliases
+    // during parse, so 25 hand-pasted identical copies satisfy every
+    // description assertion above just as well as the anchors do. These two
+    // assertions read the raw source instead, and are the only thing in the
+    // suite that can tell a shared anchor from a re-pasted copy.
+    it('defines exactly two streaming-URL note anchors in the raw spec source (#431)', () => {
+      expect(countOccurrences(specText, '&streaming-url-note-album')).toBe(1);
+      expect(countOccurrences(specText, '&streaming-url-note-search')).toBe(1);
+      // No stray third anchor, and no leftover single-anchor name from the
+      // pre-split revision of #431.
+      expect(specText.match(/&streaming-url-note[\w-]*/g)).toEqual([
+        '&streaming-url-note-album',
+        '&streaming-url-note-search',
+      ]);
+    });
+
+    it('references those anchors 23 times in the raw spec source, never re-pasting the note (#431)', () => {
+      // 25 field/schema pairs = 2 anchor definitions + 23 aliases.
+      // 3 album fields x 5 schemas = 15 sites, one of which is the definition.
+      expect(countOccurrences(specText, '*streaming-url-note-album')).toBe(14);
+      // 2 search fields x 5 schemas = 10 sites, one of which is the definition.
+      expect(countOccurrences(specText, '*streaming-url-note-search')).toBe(9);
+      expect(specText.match(/\*streaming-url-note[\w-]*/g)).toHaveLength(23);
+    });
+
+    it('resolves to exactly two description strings, partitioned album vs search (#431)', () => {
+      const byDescription = new Map<string, string[]>();
+      for (const schemaName of SCHEMAS_WITH_STREAMING_URLS) {
+        for (const field of STREAMING_URL_FIELDS) {
+          const description = String(propertyOf(schemaName, field)!.description ?? '');
+          const sites = byDescription.get(description) ?? [];
+          sites.push(`${schemaName}.${field}`);
+          byDescription.set(description, sites);
+        }
+      }
+      // Two identity classes, not one (the album/search lead differs) and not
+      // 25 (that would mean the anchors were re-expanded into copies).
+      expect(byDescription.size).toBe(2);
+
+      const expectedAlbumSites = SCHEMAS_WITH_STREAMING_URLS.flatMap((s) =>
+        ALBUM_URL_FIELDS.map((f) => `${s}.${f}`)
+      );
+      const expectedSearchSites = SCHEMAS_WITH_STREAMING_URLS.flatMap((s) =>
+        SEARCH_URL_FIELDS.map((f) => `${s}.${f}`)
+      );
+      expect(expectedAlbumSites).toHaveLength(15);
+      expect(expectedSearchSites).toHaveLength(10);
+
+      const albumEntry = [...byDescription.entries()].find(([d]) => d.startsWith('Album deep link'));
+      const searchEntry = [...byDescription.entries()].find(([d]) => d.startsWith('Search URL'));
+      expect(albumEntry, 'album note class').toBeDefined();
+      expect(searchEntry, 'search note class').toBeDefined();
+      expect(albumEntry![1].sort()).toEqual(expectedAlbumSites.sort());
+      expect(searchEntry![1].sort()).toEqual(expectedSearchSites.sort());
+
+      // The two notes are the same enforcement paragraph with different lead
+      // sentences and only the bandcamp clause differing at the tail — that
+      // is the whole reason a second anchor was cheaper than losing the
+      // album/search distinction.
+      const shared = 'Contract-level `format: uri` only.';
+      const albumBody = albumEntry![0].slice(albumEntry![0].indexOf(shared));
+      const searchBody = searchEntry![0].slice(searchEntry![0].indexOf(shared));
+      // The `>` folded scalars each resolve with a trailing newline, so trim
+      // before comparing the two stems.
+      const albumStem = albumBody.split(' -- `bandcamp_url` is not host-checked')[0]!.trim();
+      const searchStem = searchBody.trim().replace(/\.$/, '');
+      expect(albumStem).toBe(searchStem);
+    });
   });
 
   describe('Streaming Check (LML#376 partial-error semantics)', () => {
