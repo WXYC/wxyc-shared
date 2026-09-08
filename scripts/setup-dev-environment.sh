@@ -72,6 +72,12 @@ AUTH_PASSWORD=testpassword123
 TUBAFRENZY_URL=http://localhost:${backend_port}
 MIRROR_API_KEY=wxyc-local-dev-mirror-key
 
+# The organization the db-init seed creates, and the one every seeded test
+# user belongs to. Station signup provisions new accounts into it, and the
+# admin roles the roster panel checks are organization memberships, so an
+# unset slug fails signup with a 500 and hides the admin surfaces.
+DEFAULT_ORG_SLUG=test-org
+
 ### Station Signup
 # On by default so the walk-in-DJ signup flow is demoable out of the box.
 # The auth service compares with === 'true', so this must stay lowercase --
@@ -552,6 +558,7 @@ NEXT_PUBLIC_DEFAULT_EXPERIENCE=modern
 NEXT_PUBLIC_ENABLED_EXPERIENCES=modern,classic
 NEXT_PUBLIC_ALLOW_EXPERIENCE_SWITCHING=true
 NEXT_PUBLIC_ONBOARDING_TEMP_PASSWORD=temppass123
+NEXT_PUBLIC_APP_ORGANIZATION=test-org
 NEXT_PUBLIC_STATION_SIGNUP_ENABLED=true
 NEXT_PUBLIC_STATION_SIGNUP_ADMIN_ENABLED=true
 EOF
