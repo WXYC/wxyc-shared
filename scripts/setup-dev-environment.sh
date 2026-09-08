@@ -107,6 +107,56 @@ LML_API_KEY=${LML_API_KEY}
 EOF
 }
 
+# Generate .env.local content for dj-site with resolved ports.
+#
+# The variable set is taken from dj-site's own .env.example rather than kept as
+# a list here. That file is the catalogue of every variable the app reads,
+# feature flags included, so a flag added there reaches local dev without this
+# script being touched. A list maintained here drifts silently instead: the
+# missing flag raises no error, it just leaves the feature unreachable locally
+# while it is enabled in production.
+#
+# The values below are resolved at runtime and must win over the example's
+# documented defaults, so their assignments are filtered out of the passthrough
+# before being re-emitted. Commented-out lines are left alone -- they carry each
+# flag's rollout contract, and a dev editing .env.local should still see it.
+generate_frontend_env() {
+    local frontend_dir=$1
+    local backend_port=$2
+    local auth_port=$3
+    local example="$frontend_dir/.env.example"
+
+    if [[ -f "$example" ]]; then
+        grep -vE '^[[:space:]]*(NEXT_PUBLIC_BACKEND_URL|NEXT_PUBLIC_BETTER_AUTH_URL|NEXT_PUBLIC_DASHBOARD_HOME_PAGE|NEXT_PUBLIC_ONBOARDING_TEMP_PASSWORD|NEXT_PUBLIC_APP_ORGANIZATION|NEXT_PUBLIC_STATION_SIGNUP_ENABLED|NEXT_PUBLIC_STATION_SIGNUP_ADMIN_ENABLED)=' "$example"
+        echo
+    else
+        # Warn on stderr: stdout is the generated file.
+        log_warn "No .env.example in $(basename "$frontend_dir") -- writing only the variables this script resolves. Feature flags will be absent." >&2
+        cat << 'EOF'
+NEXT_PUBLIC_DEFAULT_EXPERIENCE=modern
+NEXT_PUBLIC_ENABLED_EXPERIENCES=modern,classic
+NEXT_PUBLIC_ALLOW_EXPERIENCE_SWITCHING=true
+EOF
+    fi
+
+    cat << EOF
+# Resolved by setup-dev-environment.sh -- these override the values above.
+NEXT_PUBLIC_BACKEND_URL=http://localhost:${backend_port}
+NEXT_PUBLIC_BETTER_AUTH_URL=http://localhost:${auth_port}/auth
+# Local dev lands on the flowsheet; .env.example documents the production
+# default instead.
+NEXT_PUBLIC_DASHBOARD_HOME_PAGE=/dashboard/flowsheet
+# Dev-only: the password the seeded accounts complete onboarding with.
+NEXT_PUBLIC_ONBOARDING_TEMP_PASSWORD=temppass123
+# The organization the seeded accounts belong to.
+NEXT_PUBLIC_APP_ORGANIZATION=test-org
+# Both on locally to match the backend .env this script writes, which enables
+# the signup endpoint. .env.example ships them off for production rollout.
+NEXT_PUBLIC_STATION_SIGNUP_ENABLED=true
+NEXT_PUBLIC_STATION_SIGNUP_ADMIN_ENABLED=true
+EOF
+}
+
 log_success() {
     echo -e "${GREEN}[OK]${NC} $1"
 }
@@ -572,18 +622,7 @@ start_frontend() {
         log_info "Backed up existing .env.local to .env.local.bak"
     fi
     log_info "Writing .env.local with resolved ports..."
-    cat > "$frontend_dir/.env.local" << EOF
-NEXT_PUBLIC_BACKEND_URL=http://localhost:${BACKEND_PORT}
-NEXT_PUBLIC_BETTER_AUTH_URL=http://localhost:${AUTH_PORT}/auth
-NEXT_PUBLIC_DASHBOARD_HOME_PAGE=/dashboard/flowsheet
-NEXT_PUBLIC_DEFAULT_EXPERIENCE=modern
-NEXT_PUBLIC_ENABLED_EXPERIENCES=modern,classic
-NEXT_PUBLIC_ALLOW_EXPERIENCE_SWITCHING=true
-NEXT_PUBLIC_ONBOARDING_TEMP_PASSWORD=temppass123
-NEXT_PUBLIC_APP_ORGANIZATION=test-org
-NEXT_PUBLIC_STATION_SIGNUP_ENABLED=true
-NEXT_PUBLIC_STATION_SIGNUP_ADMIN_ENABLED=true
-EOF
+    generate_frontend_env "$frontend_dir" "$BACKEND_PORT" "$AUTH_PORT" > "$frontend_dir/.env.local"
     log_success ".env.local written"
 
     # Remove stale Next.js lock file from a previous crash

@@ -448,3 +448,144 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"HEALTH_CHECK_TIMEOUT"* ]]
 }
+
+# =============================================================================
+# Frontend Env Generation Tests
+# =============================================================================
+
+# dj-site's .env.example is the catalogue of every variable that app reads,
+# feature flags included. A hand-maintained list here silently omits each new
+# flag, which is how the classic librarian nav came to be unreachable in local
+# dev while being enabled in production.
+
+@test "generate_frontend_env resolves the backend and auth ports" {
+    source "$SCRIPT_PATH"
+    mkdir -p "$TEST_TEMP_DIR/dj-site"
+    cat > "$TEST_TEMP_DIR/dj-site/.env.example" <<'EOF'
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8080
+NEXT_PUBLIC_BETTER_AUTH_URL=http://localhost:8082/auth
+EOF
+    run generate_frontend_env "$TEST_TEMP_DIR/dj-site" 8081 8083
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qx "NEXT_PUBLIC_BACKEND_URL=http://localhost:8081"
+    echo "$output" | grep -qx "NEXT_PUBLIC_BETTER_AUTH_URL=http://localhost:8083/auth"
+}
+
+@test "generate_frontend_env does not leave the example's default ports behind" {
+    # Both values in one file would make the effective port depend on dotenv's
+    # duplicate-key precedence rather than on the resolved port.
+    source "$SCRIPT_PATH"
+    mkdir -p "$TEST_TEMP_DIR/dj-site"
+    cat > "$TEST_TEMP_DIR/dj-site/.env.example" <<'EOF'
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8080
+NEXT_PUBLIC_BETTER_AUTH_URL=http://localhost:8082/auth
+EOF
+    run generate_frontend_env "$TEST_TEMP_DIR/dj-site" 8081 8083
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | grep -c '^NEXT_PUBLIC_BACKEND_URL=')" -eq 1 ]
+    [ "$(echo "$output" | grep -c '^NEXT_PUBLIC_BETTER_AUTH_URL=')" -eq 1 ]
+}
+
+@test "generate_frontend_env carries feature flags from .env.example" {
+    source "$SCRIPT_PATH"
+    mkdir -p "$TEST_TEMP_DIR/dj-site"
+    cat > "$TEST_TEMP_DIR/dj-site/.env.example" <<'EOF'
+NEXT_PUBLIC_CLASSIC_LIBRARIAN_NAV_ENABLED=true
+NEXT_PUBLIC_A_FLAG_THIS_SCRIPT_HAS_NEVER_HEARD_OF=false
+EOF
+    run generate_frontend_env "$TEST_TEMP_DIR/dj-site" 8081 8083
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qx "NEXT_PUBLIC_CLASSIC_LIBRARIAN_NAV_ENABLED=true"
+    echo "$output" | grep -qx "NEXT_PUBLIC_A_FLAG_THIS_SCRIPT_HAS_NEVER_HEARD_OF=false"
+}
+
+@test "generate_frontend_env keeps the dev dashboard home over the example's" {
+    # Local dev lands on the flowsheet; .env.example documents the production
+    # default. The resolved value has to win.
+    source "$SCRIPT_PATH"
+    mkdir -p "$TEST_TEMP_DIR/dj-site"
+    cat > "$TEST_TEMP_DIR/dj-site/.env.example" <<'EOF'
+NEXT_PUBLIC_DASHBOARD_HOME_PAGE=/dashboard/catalog
+EOF
+    run generate_frontend_env "$TEST_TEMP_DIR/dj-site" 8081 8083
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qx "NEXT_PUBLIC_DASHBOARD_HOME_PAGE=/dashboard/flowsheet"
+    [ "$(echo "$output" | grep -c '^NEXT_PUBLIC_DASHBOARD_HOME_PAGE=')" -eq 1 ]
+}
+
+@test "generate_frontend_env writes the dev-only onboarding password" {
+    # Not in .env.example -- it exists only so the seeded accounts can complete
+    # onboarding locally.
+    source "$SCRIPT_PATH"
+    mkdir -p "$TEST_TEMP_DIR/dj-site"
+    : > "$TEST_TEMP_DIR/dj-site/.env.example"
+    run generate_frontend_env "$TEST_TEMP_DIR/dj-site" 8081 8083
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qx "NEXT_PUBLIC_ONBOARDING_TEMP_PASSWORD=temppass123"
+}
+
+@test "generate_frontend_env still writes a usable env with no .env.example" {
+    # A frontend checkout predating the file, or --frontend-dir pointed
+    # somewhere unexpected, must not produce an env that cannot reach Backend.
+    source "$SCRIPT_PATH"
+    mkdir -p "$TEST_TEMP_DIR/dj-site"
+    run generate_frontend_env "$TEST_TEMP_DIR/dj-site" 8081 8083
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qx "NEXT_PUBLIC_BACKEND_URL=http://localhost:8081"
+    echo "$output" | grep -qx "NEXT_PUBLIC_BETTER_AUTH_URL=http://localhost:8083/auth"
+    echo "$output" | grep -qx "NEXT_PUBLIC_ENABLED_EXPERIENCES=modern,classic"
+}
+
+@test "generate_frontend_env preserves the example's comments" {
+    # The comments carry each flag's rollout contract; a dev editing .env.local
+    # should see them.
+    source "$SCRIPT_PATH"
+    mkdir -p "$TEST_TEMP_DIR/dj-site"
+    cat > "$TEST_TEMP_DIR/dj-site/.env.example" <<'EOF'
+# Turn this on once Backend-Service serves the endpoint.
+NEXT_PUBLIC_SOME_FLAG=false
+EOF
+    run generate_frontend_env "$TEST_TEMP_DIR/dj-site" 8081 8083
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "Turn this on once Backend-Service serves the endpoint."
+}
+
+@test "generate_frontend_env keeps the dev overrides that differ from .env.example" {
+    # These three are deliberately not the example's production values: the
+    # seeded accounts live in test-org, and the backend .env this same script
+    # writes enables the signup endpoint, so the client halves must match it.
+    source "$SCRIPT_PATH"
+    mkdir -p "$TEST_TEMP_DIR/dj-site"
+    cat > "$TEST_TEMP_DIR/dj-site/.env.example" <<'EOF'
+NEXT_PUBLIC_STATION_SIGNUP_ENABLED=false
+NEXT_PUBLIC_STATION_SIGNUP_ADMIN_ENABLED=false
+NEXT_PUBLIC_APP_ORGANIZATION=wxyc
+EOF
+    run generate_frontend_env "$TEST_TEMP_DIR/dj-site" 8081 8083
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qx "NEXT_PUBLIC_STATION_SIGNUP_ENABLED=true"
+    echo "$output" | grep -qx "NEXT_PUBLIC_STATION_SIGNUP_ADMIN_ENABLED=true"
+    echo "$output" | grep -qx "NEXT_PUBLIC_APP_ORGANIZATION=test-org"
+    [ "$(echo "$output" | grep -c '^NEXT_PUBLIC_STATION_SIGNUP_ENABLED=')" -eq 1 ]
+    [ "$(echo "$output" | grep -c '^NEXT_PUBLIC_APP_ORGANIZATION=')" -eq 1 ]
+}
+
+@test "generated .env.local carries every uncommented var from dj-site's real .env.example" {
+    # Guards the drift directly: run against the checked-in file, not a fixture.
+    source "$SCRIPT_PATH"
+    local real_example="$SCRIPT_DIR/../../dj-site/.env.example"
+    if [[ ! -f "$real_example" ]]; then
+        skip "dj-site checkout not present alongside wxyc-shared"
+    fi
+    mkdir -p "$TEST_TEMP_DIR/dj-site"
+    cp "$real_example" "$TEST_TEMP_DIR/dj-site/.env.example"
+    run generate_frontend_env "$TEST_TEMP_DIR/dj-site" 8081 8083
+    [ "$status" -eq 0 ]
+    local key
+    while read -r key; do
+        echo "$output" | grep -q "^${key}=" || {
+            echo "missing from generated .env.local: $key"
+            return 1
+        }
+    done < <(grep -oE '^[A-Z_]+=' "$real_example" | tr -d '=')
+}
