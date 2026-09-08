@@ -389,3 +389,19 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"station"* || "$output" == *"Station"* ]]
 }
+
+@test "generate_backend_env sets DEFAULT_ORG_SLUG to the seeded organization" {
+    # Station signup provisions into this organization; unset, the handler
+    # throws and every signup attempt returns a 500.
+    source "$SCRIPT_PATH"
+    run generate_backend_env 8080 8082 3000 5432
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qx "DEFAULT_ORG_SLUG=test-org"
+}
+
+@test "frontend .env.local sets NEXT_PUBLIC_APP_ORGANIZATION to the seeded organization" {
+    # Org membership is where the stationManager role comes from, and the
+    # roster admin panel is gated on it. Without a slug the role never
+    # resolves and the passcode cannot be minted.
+    grep -q "^NEXT_PUBLIC_APP_ORGANIZATION=test-org" "$SCRIPT_PATH"
+}
