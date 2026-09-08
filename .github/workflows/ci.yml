@@ -232,6 +232,7 @@ jobs:
         run: |
           npm run test:breaking-guard
           npm run test:setup-script
+          npm run test:teardown-script
           npm run test:drift-guard
           npm run test:python-codegen
           npm run test:spec-drift-guard

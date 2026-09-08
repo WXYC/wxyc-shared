@@ -54,6 +54,7 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:e2e:contracts": "vitest run --config vitest.e2e.config.ts tests/e2e-contracts.test.ts",
     "test:setup-script": "bats scripts/__tests__/setup-dev-environment.test.sh",
+    "test:teardown-script": "bats scripts/__tests__/teardown-dev-environment.test.sh",
     "test:drift-guard": "bats scripts/__tests__/check-corpus-drift.test.sh",
     "test:breaking-guard": "bats scripts/__tests__/check-breaking-changes.test.sh",
     "test:python-codegen": "bats scripts/__tests__/generate-python-models.test.sh",
