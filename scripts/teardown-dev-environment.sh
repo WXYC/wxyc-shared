@@ -4,12 +4,14 @@
 #
 # Kills all WXYC-related node processes and Docker containers left behind by
 # setup-dev-environment.sh. Safe to run at any time — only targets processes in
-# known WXYC directories and Docker containers from the dev_env compose file.
+# known WXYC directories and Docker containers from the dev_env compose file,
+# and leaves their data volumes alone unless asked.
 #
 # Usage: ./teardown-dev-environment.sh [OPTIONS]
 #
 # Options:
 #   --dry-run   Show what would be killed without actually killing anything
+#   --volumes   Also delete the compose volumes, discarding the seeded database
 #   --help      Show this help message
 
 set -euo pipefail
@@ -26,6 +28,7 @@ log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 DRY_RUN=false
+DELETE_VOLUMES=false
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WXYC_DEV_ROOT="${WXYC_DEV_ROOT:-$(dirname "$(dirname "$SCRIPT_DIR")")}"
@@ -43,6 +46,9 @@ Usage: teardown-dev-environment.sh [OPTIONS]
 
 Options:
   --dry-run   Show what would be killed without doing it
+  --volumes   Also delete the compose volumes. The dev database lives in one,
+              and reseeding it is a migration run plus a ~14 MB clone load, so
+              a plain teardown stops the containers and keeps the data.
   --help      Show this help message
 
 Environment Variables:
@@ -54,6 +60,7 @@ EOF
 while [[ $# -gt 0 ]]; do
     case $1 in
         --dry-run) DRY_RUN=true; shift ;;
+        --volumes) DELETE_VOLUMES=true; shift ;;
         --help|-h) show_help; exit 0 ;;
         *) log_error "Unknown option: $1"; show_help; exit 1 ;;
     esac
@@ -109,17 +116,37 @@ done < <(lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | grep '^node' | awk '!seen[$
 # 3. Stop Docker containers from the dev_env compose file
 for backend_dir in "$WXYC_DEV_ROOT"/Backend-Service "$WXYC_DEV_ROOT"/Backend-Service/.claude/worktrees/*/; do
     local_compose="$backend_dir/dev_env/docker-compose.yml"
-    if [[ -f "$local_compose" ]]; then
-        # Check if any containers from this compose project are running
-        if docker compose -f "$local_compose" ps -q 2>/dev/null | grep -q .; then
-            if [[ "$DRY_RUN" == true ]]; then
-                log_warn "Would stop Docker containers from: $local_compose"
-            else
-                log_info "Stopping Docker containers from: $(basename "$backend_dir")"
-                docker compose -f "$local_compose" --profile dev down -v --remove-orphans 2>/dev/null || true
-                killed=$((killed + 1))
-            fi
-        fi
+    if [[ ! -f "$local_compose" ]]; then
+        continue
+    fi
+
+    # Compose resolves a bare `.env` against the compose file's own directory,
+    # not this script's, so a checkout that named its own project there is
+    # reachable only by passing that file explicitly. Without it every tree in
+    # this loop collapses onto the project the compose file declares, and the
+    # one that opted out is both missed here and left running.
+    compose=(docker compose -f "$local_compose")
+    if [[ -f "$backend_dir/.env" ]]; then
+        compose+=(--env-file "$backend_dir/.env")
+    fi
+
+    # Check if any containers from this compose project are running
+    if ! "${compose[@]}" ps -q 2>/dev/null | grep -q .; then
+        continue
+    fi
+
+    down=("${compose[@]}" --profile dev down)
+    if [[ "$DELETE_VOLUMES" == true ]]; then
+        down+=(-v)
+    fi
+    down+=(--remove-orphans)
+
+    if [[ "$DRY_RUN" == true ]]; then
+        log_warn "Would run: ${down[*]}"
+    else
+        log_info "Stopping Docker containers from: $(basename "$backend_dir")"
+        "${down[@]}" 2>/dev/null || true
+        killed=$((killed + 1))
     fi
 done
 
