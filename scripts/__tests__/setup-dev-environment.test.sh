@@ -346,3 +346,46 @@ teardown() {
 @test "frontend .env.local is always regenerated with backup" {
     grep -q '\.env\.local\.bak' "$SCRIPT_PATH"
 }
+
+# =============================================================================
+# Station Signup Tests
+# =============================================================================
+
+@test "generate_backend_env includes the station signup variables" {
+    source "$SCRIPT_PATH"
+    run generate_backend_env 8080 8082 3000 5432
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qx "STATION_SIGNUP_ENABLED=true"
+    echo "$output" | grep -q "^STATION_PASSCODE_KEY="
+}
+
+@test "generate_backend_env station passcode key is 32 bytes of hex" {
+    # The auth service parses this as a 32-byte AES key; a wrong-length or
+    # non-hex value makes every passcode mint and reveal fail at runtime.
+    source "$SCRIPT_PATH"
+    run generate_backend_env 8080 8082 3000 5432
+    [ "$status" -eq 0 ]
+    local key
+    key="$(echo "$output" | grep "^STATION_PASSCODE_KEY=" | cut -d= -f2)"
+    [ "${#key}" -eq 64 ]
+    [[ "$key" =~ ^[0-9a-f]{64}$ ]]
+}
+
+@test "STATION_SIGNUP_ENABLED is lowercase true" {
+    # The auth service compares with === 'true', so 'TRUE' reads as disabled.
+    source "$SCRIPT_PATH"
+    run generate_backend_env 8080 8082 3000 5432
+    [ "$status" -eq 0 ]
+    ! echo "$output" | grep -q "STATION_SIGNUP_ENABLED=TRUE"
+}
+
+@test "frontend .env.local enables station signup and its admin panel" {
+    grep -q "^NEXT_PUBLIC_STATION_SIGNUP_ENABLED=true" "$SCRIPT_PATH"
+    grep -q "^NEXT_PUBLIC_STATION_SIGNUP_ADMIN_ENABLED=true" "$SCRIPT_PATH"
+}
+
+@test "help documents the station signup passcode demo flow" {
+    run "$SCRIPT_PATH" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"station"* || "$output" == *"Station"* ]]
+}

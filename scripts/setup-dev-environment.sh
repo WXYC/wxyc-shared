@@ -72,6 +72,19 @@ AUTH_PASSWORD=testpassword123
 TUBAFRENZY_URL=http://localhost:${backend_port}
 MIRROR_API_KEY=wxyc-local-dev-mirror-key
 
+### Station Signup
+# On by default so the walk-in-DJ signup flow is demoable out of the box.
+# The auth service compares with === 'true', so this must stay lowercase --
+# 'TRUE' silently reads as disabled and the signup route is never mounted.
+STATION_SIGNUP_ENABLED=true
+# A throwaway local key, in the same class as DB_PASSWORD=postgres above: it
+# encrypts passcodes in the local database only. The auth service parses it as
+# 32 bytes of hex, so a wrong-length or non-hex value fails every mint and
+# reveal at runtime. Keep it stable across runs -- regenerating it strands
+# passcodes minted by an earlier run as undecryptable, which reads in the UI as
+# the key being broken rather than merely changed.
+STATION_PASSCODE_KEY=6f4d2a91c7e35b08fa1d64c9820e7b53ad06f8912c4e7ab35d90f16e284cb7d0
+
 ### Library Metadata Lookup (LML) Service
 # Empty is a working default: Backend-Service gates every LML call site on
 # isLmlConfigured(), so an unset URL makes LML features no-op cleanly rather
@@ -266,6 +279,12 @@ Examples:
 
   # Use a dj-site worktree
   ./$(basename "$0") --skip-deps --frontend-dir /path/to/dj-site-worktree
+
+Station signup:
+  Both the signup flow and its admin panel are enabled by default, against a
+  throwaway local passcode key. To demo the walk-in DJ path, sign in as
+  test_station_manager, mint a passcode under Roster -> Station Signup, then
+  sign out and follow Sign Up from the landing page.
 
 EOF
 }
@@ -533,6 +552,8 @@ NEXT_PUBLIC_DEFAULT_EXPERIENCE=modern
 NEXT_PUBLIC_ENABLED_EXPERIENCES=modern,classic
 NEXT_PUBLIC_ALLOW_EXPERIENCE_SWITCHING=true
 NEXT_PUBLIC_ONBOARDING_TEMP_PASSWORD=temppass123
+NEXT_PUBLIC_STATION_SIGNUP_ENABLED=true
+NEXT_PUBLIC_STATION_SIGNUP_ADMIN_ENABLED=true
 EOF
     log_success ".env.local written"
 
@@ -593,6 +614,10 @@ print_success_banner() {
     echo "    test_dj1, test_dj2   - dj role"
     echo "    test_music_director  - musicDirector role"
     echo "    test_station_manager - stationManager role"
+    echo ""
+    echo "  Station signup is enabled. To demo it: sign in as"
+    echo "  test_station_manager, mint a passcode under Roster > Station Signup,"
+    echo "  then sign out and follow Sign Up from the landing page."
     echo ""
     echo -e "  Press ${YELLOW}Ctrl+C${NC} to stop all services"
     echo ""
