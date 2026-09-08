@@ -3213,9 +3213,20 @@ describe('OpenAPI Specification', () => {
           expect(description).not.toMatch(/both are open/);
           expect(description).not.toMatch(/neither has merged/);
           // LML#1296's guard suppresses on the read path; it never rewrites
-          // the persisted `streaming_links` row, so "writer seam" alone
-          // would read as a backfill that never happens.
+          // the persisted `streaming_links` row, so a "writer seam" label
+          // would read as a backfill that never happens. Pin the label too,
+          // not just the parenthetical: the first #431 attempt added the
+          // clarifier while leaving the contradictory label in place, and
+          // an assertion on the parenthetical alone was satisfied by it.
           expect(description).toMatch(/the persisted row is never rewritten/);
+          expect(description).not.toMatch(/writer seam/);
+          // Naming two shipped seams must not imply they are the only paths
+          // to the wire. The pre-#431 text carried this caveat, the dedup
+          // dropped it, and nothing failed — so pin it, along with the
+          // measured instance: flowsheet-projection.ts host-guards only
+          // spotify/apple and emits the other three as stored.
+          expect(description).toMatch(/not every path these fields reach the wire through/);
+          expect(description).toMatch(/Backend-Service#1714/);
           // Kotlin is NOT a documentation-only consumer: openapi-generator's
           // kotlin generator emits `val spotifyUrl: java.net.URI? = null`, a
           // construction-time parse of stored values — exactly the decode

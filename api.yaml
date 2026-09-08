@@ -458,8 +458,8 @@ components:
             (`pin_streaming_url_fields_to_str`, WXYC/wxyc-shared#428) holds Python to
             `str`, and the two downstream Python regen scripts (library-metadata-lookup,
             request-o-matic) must adopt the same pin -- tracked in
-            WXYC/library-metadata-lookup#1299 and WXYC/request-o-matic#282 -- so
-            Python's `str` is not yet a universal fact. Kotlin does not treat it as
+            WXYC/library-metadata-lookup#1299 and WXYC/request-o-matic#282 -- a Python
+            consumer's `str` holds only where that pin is in place. Kotlin does not treat it as
             documentation-only: its generator maps `format: uri` to `java.net.URI`, so
             Kotlin consumers regenerating models must pin these five fields to `String`
             (as Python pins to `str`) or accept construction-time parse failures on rows
@@ -468,12 +468,16 @@ components:
             (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2351) -- a host
             allowlist for spotify/apple_music/youtube_music/soundcloud, and
             well-formedness only for bandcamp (deliberate: custom-domain deep links, see
-            the guard's own doc comment) -- and the LML writer seam (`streaming_links`
+            the guard's own doc comment) -- and the LML read seam (`streaming_links`
             copy-out, `lookup/enrichment/streaming_link_validation.py`,
             WXYC/library-metadata-lookup#1296; read-path suppression -- the persisted
             row is never rewritten) -- a host check on all five, plus a well-formedness
-            floor on youtube_music/bandcamp/soundcloud only. The two seams deliberately
-            disagree on bandcamp because they see different URL populations --
+            floor on youtube_music/bandcamp/soundcloud only. Those are the two seams that
+            enforce shape, not every path these fields reach the wire through: neither is
+            on the Backend-Service flowsheet read path, where `GET /flowsheet` host-guards
+            only `spotify_url`/`apple_music_url` (WXYC/Backend-Service#1714) and emits the
+            other three as stored, so a row persisted before 2026-08-31 can still carry an
+            unchecked value. The two seams deliberately disagree on bandcamp because they see different URL populations --
             `bandcamp_url` is not host-checked at every seam it passes through.
         apple_music_url:
           type: string
@@ -500,8 +504,8 @@ components:
             (`pin_streaming_url_fields_to_str`, WXYC/wxyc-shared#428) holds Python to
             `str`, and the two downstream Python regen scripts (library-metadata-lookup,
             request-o-matic) must adopt the same pin -- tracked in
-            WXYC/library-metadata-lookup#1299 and WXYC/request-o-matic#282 -- so
-            Python's `str` is not yet a universal fact. Kotlin does not treat it as
+            WXYC/library-metadata-lookup#1299 and WXYC/request-o-matic#282 -- a Python
+            consumer's `str` holds only where that pin is in place. Kotlin does not treat it as
             documentation-only: its generator maps `format: uri` to `java.net.URI`, so
             Kotlin consumers regenerating models must pin these five fields to `String`
             (as Python pins to `str`) or accept construction-time parse failures on rows
@@ -510,12 +514,16 @@ components:
             (`sanitizeLookupStreamingUrls`, WXYC/Backend-Service#2351) -- a host
             allowlist for spotify/apple_music/youtube_music/soundcloud, and
             well-formedness only for bandcamp (deliberate: custom-domain deep links, see
-            the guard's own doc comment) -- and the LML writer seam (`streaming_links`
+            the guard's own doc comment) -- and the LML read seam (`streaming_links`
             copy-out, `lookup/enrichment/streaming_link_validation.py`,
             WXYC/library-metadata-lookup#1296; read-path suppression -- the persisted
             row is never rewritten) -- a host check on all five, plus a well-formedness
-            floor on youtube_music/bandcamp/soundcloud only. The two seams deliberately
-            disagree on bandcamp because they see different URL populations.
+            floor on youtube_music/bandcamp/soundcloud only. Those are the two seams that
+            enforce shape, not every path these fields reach the wire through: neither is
+            on the Backend-Service flowsheet read path, where `GET /flowsheet` host-guards
+            only `spotify_url`/`apple_music_url` (WXYC/Backend-Service#1714) and emits the
+            other three as stored, so a row persisted before 2026-08-31 can still carry an
+            unchecked value. The two seams deliberately disagree on bandcamp because they see different URL populations.
         bandcamp_url:
           type: string
           format: uri
