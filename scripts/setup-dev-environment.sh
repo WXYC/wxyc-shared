@@ -245,8 +245,13 @@ DEFAULT_AUTH_PORT=8082
 DEFAULT_FRONTEND_PORT=3000
 
 # Health check timeout (seconds)
-HEALTH_CHECK_TIMEOUT=60
-HEALTH_CHECK_INTERVAL=2
+# Generous because a service can spend most of this window compiling rather
+# than starting: Backend-Service's predev rebuilds every shared workspace
+# before the server binds. Exceeding it is not a benign retry -- the failure
+# path runs the cleanup trap, which stops the database with `down -v` and takes
+# the volume with it, so an under-sized window destroys data over a slow build.
+HEALTH_CHECK_TIMEOUT="${HEALTH_CHECK_TIMEOUT:-300}"
+HEALTH_CHECK_INTERVAL="${HEALTH_CHECK_INTERVAL:-2}"
 
 show_help() {
     cat << EOF
@@ -269,6 +274,8 @@ Environment Variables:
   FRONTEND_BRANCH        dj-site branch to checkout (default: $FRONTEND_BRANCH)
   LIBRARY_METADATA_URL   LML base URL for Backend-Service (default: $LIBRARY_METADATA_URL)
   LML_API_KEY            LML bearer token for Backend-Service (default: $LML_API_KEY)
+  HEALTH_CHECK_TIMEOUT   Seconds to wait for each service to answer (default: $HEALTH_CHECK_TIMEOUT)
+  HEALTH_CHECK_INTERVAL  Seconds between health probes (default: $HEALTH_CHECK_INTERVAL)
 
 Examples:
   # Full setup from scratch
@@ -502,6 +509,19 @@ wait_for_health() {
     return 1
 }
 
+# Compile the workspaces `npm run dev` would otherwise build through predev.
+# Doing it here keeps compilation out of the health-check window and reports a
+# build failure as a build failure rather than as a service that never became
+# healthy. Cheap to repeat: tsup is incremental once the dist trees are warm.
+build_backend() {
+    log_info "Building backend workspaces..."
+    if ! npm run build > /dev/null 2>&1; then
+        log_error "Backend build failed. Re-run 'npm run build' in $BACKEND_DIR to see the errors."
+        exit 1
+    fi
+    log_success "Backend built"
+}
+
 start_backend_services() {
     local backend_dir="$BACKEND_DIR"
 
@@ -518,6 +538,8 @@ start_backend_services() {
     cd "$backend_dir"
     npm run db:start
     log_success "PostgreSQL started"
+
+    build_backend
 
     log_info "Starting backend and auth services..."
     # Run in background and capture PID

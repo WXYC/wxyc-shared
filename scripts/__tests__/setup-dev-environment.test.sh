@@ -405,3 +405,46 @@ teardown() {
     # resolves and the passcode cannot be minted.
     grep -q "^NEXT_PUBLIC_APP_ORGANIZATION=test-org" "$SCRIPT_PATH"
 }
+
+# =============================================================================
+# Health Check Timeout Tests
+# =============================================================================
+
+@test "HEALTH_CHECK_TIMEOUT allows more than a minute by default" {
+    # A cold `npm run dev` builds every shared workspace via predev before the
+    # server binds, which outruns a 60s window; the cleanup trap then tears the
+    # whole stack down, so a slow build presented as a broken backend.
+    source "$SCRIPT_PATH"
+    [ "$HEALTH_CHECK_TIMEOUT" -gt 60 ]
+}
+
+@test "HEALTH_CHECK_TIMEOUT is overridable from the environment" {
+    export HEALTH_CHECK_TIMEOUT=42
+    source "$SCRIPT_PATH"
+    [ "$HEALTH_CHECK_TIMEOUT" -eq 42 ]
+}
+
+@test "HEALTH_CHECK_INTERVAL is overridable from the environment" {
+    export HEALTH_CHECK_INTERVAL=7
+    source "$SCRIPT_PATH"
+    [ "$HEALTH_CHECK_INTERVAL" -eq 7 ]
+}
+
+@test "backend workspaces are built before the dev servers start" {
+    # Building as its own step keeps compilation out of the health window and
+    # reports a build failure as a build failure.
+    grep -q "build_backend()" "$SCRIPT_PATH"
+    # The build must be ordered before the dev server launch
+    local build_line dev_line
+    build_line=$(grep -n "build_backend$" "$SCRIPT_PATH" | head -1 | cut -d: -f1)
+    dev_line=$(grep -n "npm run dev &" "$SCRIPT_PATH" | head -1 | cut -d: -f1)
+    [ -n "$build_line" ]
+    [ -n "$dev_line" ]
+    [ "$build_line" -lt "$dev_line" ]
+}
+
+@test "help documents HEALTH_CHECK_TIMEOUT" {
+    run "$SCRIPT_PATH" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"HEALTH_CHECK_TIMEOUT"* ]]
+}
