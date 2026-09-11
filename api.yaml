@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.50.3
+  version: 1.51.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2329,9 +2329,15 @@ components:
 
     AddAlbumRequest:
       type: object
+      description: >
+        Exactly one of `label` or `label_id` must be provided (BS#2410; the
+        rotation-import plan's D5). With `label_id` alone, Backend resolves
+        `labels.label_name` server-side for the denormalized `library.label`
+        column and skips label creation; a dangling `label_id` is a 400. With
+        `label` alone, today's create-or-reuse-by-exact-name behavior is
+        unchanged.
       required:
         - album_title
-        - label
         - genre_id
         - format_id
       properties:
@@ -2349,6 +2355,23 @@ components:
           type: integer
         format_id:
           type: integer
+        code_number:
+          type: integer
+          minimum: 1
+          maximum: 32767
+          description: >
+            Operator-chosen release call number (BS#2410). `library.code_number`
+            is a Postgres smallint, hence the 32767 ceiling. Omitted, Backend
+            assigns MAX+1 for the artist — the pre-BS#2410 behavior. No
+            application-level collision check by design (single-librarian
+            decision; the eventual DB uniqueness constraint and its 409 mapping
+            are tracked at WXYC/Backend-Service#2033).
+        code_volume_letters:
+          type: string
+          maxLength: 4
+          description: >
+            Optional volume letters for the release call code
+            (`library.code_volume_letters`, varchar(4)).
         disc_quantity:
           type: integer
         alternate_artist_name:
@@ -2900,6 +2923,119 @@ components:
             AlbumSearchResult/BinLibraryDetails/AlbumInfoResponse): a
             library-unlinked rotation row has no library row at all, hence no
             legacy id.
+
+    RotationRowSummary:
+      type: object
+      description: >
+        One `rotation` row projected to its published ten-column surface —
+        the shape `GET /library/rotation/uncatalogued`,
+        `GET /library/rotation/{id}` and `PATCH
+        /library/rotation/{rotation_id}/link` all share (Backend's
+        `toRotationRowSummary`, BS#2109/BS#2410). Referent rule: `format_id`
+        and `label_id` here are the **rotation row's own pre-catalog
+        fields** — captured at rotation-add, written only while `album_id`
+        is NULL, retained after linking. They never describe the linked
+        library release; that is the opposite of `GET /library/rotation`,
+        whose joined rows read library-side fields where a link exists.
+      required:
+        - id
+        - rotation_bin
+      properties:
+        id:
+          type: integer
+          description: The rotation row's own id — the id Kill/Unkill/link act on.
+        album_id:
+          type: integer
+          nullable: true
+          description: >
+            Linked `library.id`, or null while uncatalogued. Rows from
+            `/library/rotation/uncatalogued` are null by construction.
+        rotation_bin:
+          $ref: '#/components/schemas/RotationBin'
+        add_date:
+          type: string
+          format: date
+          nullable: true
+        kill_date:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            May be future-dated: a scheduled kill leaves the row active
+            until the date passes.
+        artist_name:
+          type: string
+          nullable: true
+        album_title:
+          type: string
+          nullable: true
+        record_label:
+          type: string
+          nullable: true
+          description: >
+            Free-text label snapshot. Retained even when `label_id` is set,
+            for rows whose text never resolved to a `labels` row.
+        format_id:
+          type: integer
+          nullable: true
+          description: >
+            Pre-catalog `format(id)` reference (BS#2409). Null on every row
+            created before the dj-site classic add form began sending it;
+            the legacy backfill is WXYC/Backend-Service#2412.
+        label_id:
+          type: integer
+          nullable: true
+          description: >
+            Pre-catalog `labels(id)` reference (BS#2409). Same null
+            population and backfill story as `format_id`.
+
+    LinkRotationRequest:
+      type: object
+      required:
+        - album_id
+      properties:
+        album_id:
+          type: integer
+          minimum: 1
+          description: The `library.id` to link the rotation row to.
+
+    ArtistSearchMatch:
+      type: object
+      required:
+        - id
+        - artist_name
+        - code_letters
+        - code_number
+        - genre_id
+        - genre_name
+      properties:
+        id:
+          type: integer
+        artist_name:
+          type: string
+        code_letters:
+          type: string
+        code_number:
+          type: integer
+          description: >
+            The artist's genre-scoped code number
+            (`genre_artist_crossreference.artist_genre_code`) — one row per
+            (artist, genre) membership, so a multi-genre artist appears once
+            per genre with different numbers.
+        genre_id:
+          type: integer
+        genre_name:
+          type: string
+
+    ArtistSearchResponse:
+      type: object
+      required:
+        - artists
+      properties:
+        artists:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistSearchMatch'
 
     # ===================
     # DJ Types
@@ -9969,6 +10105,13 @@ paths:
     get:
       x-wxyc-service: backend-service
       summary: Get rotation list
+      description: >
+        Joined view: on a catalogued row, library-derived fields
+        (`format_name`, `legacy_release_id`, code fields) describe the linked
+        **library release**. The opposite referent rule applies on
+        `GET /library/rotation/{id}` and `/library/rotation/uncatalogued`,
+        whose `format_id`/`label_id` are the rotation row's own pre-catalog
+        fields — see `RotationRowSummary`.
       # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
       security:
         - BearerAuth: []
@@ -10020,6 +10163,134 @@ paths:
               schema:
                 $ref: '#/components/schemas/RotationEntry'
 
+  /library/rotation/uncatalogued:
+    get:
+      x-wxyc-service: backend-service
+      summary: List uncatalogued rotation rows (the Awaiting Cataloging queue)
+      description: >
+        Every rotation row with `album_id IS NULL`, newest first — the
+        worklist behind dj-site's Awaiting Cataloging facet and the Import
+        to Library flow (WXYC/dj-site#1161, BS#2109). Deliberately not
+        status-filtered: active and killed rows arrive together, and two
+        physically distinct promos sharing an artist and title are two rows
+        a librarian has to catalogue — clients must not dedupe this queue.
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 500
+          description: >
+            Window size; the default is also the ceiling. Ask explicitly so
+            a response this full can be reported as truncated against a
+            number the client chose.
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: Uncatalogued rotation rows, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RotationRowSummary'
+
+  /library/rotation/{id}:
+    get:
+      x-wxyc-service: backend-service
+      summary: Get one rotation row
+      description: >
+        Single-row read (BS#2410): renders the Import to Library screen's
+        summary table and backs its pre-submit staleness check (a linked
+        `album_id` means the row was catalogued meanwhile). Returns the
+        rotation resource itself — `format_id`/`label_id` are the row's own
+        pre-catalog fields, never the linked library release's; see
+        `RotationRowSummary` for the full referent rule and
+        `GET /library/rotation` for the opposite convention.
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: The rotation row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotationRowSummary'
+        '404':
+          description: Rotation entry not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/rotation/{rotation_id}/link:
+    patch:
+      x-wxyc-service: backend-service
+      summary: Link an uncatalogued rotation row to a library release
+      description: >
+        The Import to Library step (BS#2109, semantics extended by BS#2410).
+        Sets `rotation.album_id`, and in the same transaction resolves
+        flowsheet plays logged against the rotation row: `flowsheet` rows
+        with this `rotation_id` and a NULL `album_id` are pointed at the new
+        release, FK-keyed only — free-text plays of the same promo are
+        deliberately untouched. Linking never clears the row's free-text
+        snapshot or its pre-catalog `format_id`/`label_id`.
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: rotation_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkRotationRequest'
+      responses:
+        '200':
+          description: The linked rotation row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotationRowSummary'
+        '404':
+          description: Rotation entry not found, or album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            Rotation entry is already linked to a library release. Clients
+            treat this as "someone got there first" — the row was catalogued
+            between read and submit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
   /library/artists:
     post:
       x-wxyc-service: backend-service
@@ -10039,6 +10310,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Artist'
+
+  /library/artists/search:
+    get:
+      x-wxyc-service: backend-service
+      summary: Prefix-search catalogued artists, library-wide or within a genre
+      description: >
+        Backs the duplicate-artist guard in catalog filing flows. With
+        `genre_id`, matches only that genre's memberships (unknown
+        `genre_id` is a 404, distinguishing a stale id from a genre with no
+        matches). Without it (BS#2410), the search is library-wide.
+        Either way the result is one row per (artist, genre) membership —
+        the LIMIT applies to that join, so a multi-genre artist consumes
+        one slot per genre. Clients wanting the widest window pass
+        `limit=20` explicitly.
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 2
+          description: Name prefix; fewer than 2 characters is a 400.
+        - name: genre_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Optional genre scope. Omit for a library-wide match.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 10
+      responses:
+        '200':
+          description: Matching (artist, genre) memberships, ordered by artist name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistSearchResponse'
+        '404':
+          description: Genre not found (only when `genre_id` is given)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /library/formats:
     get:
