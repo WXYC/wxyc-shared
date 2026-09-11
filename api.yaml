@@ -2336,6 +2336,13 @@ components:
         column and skips label creation; a dangling `label_id` is a 400. With
         `label` alone, today's create-or-reuse-by-exact-name behavior is
         unchanged.
+
+        Not yet served: until BS#2410 lands, Backend still rejects a request
+        without `label` (400, "Missing Parameters"), and an unresolvable
+        `label_id` reaches the insert and surfaces as a foreign-key failure
+        rather than a 400. `label` leaves `required` now so the widened rule
+        is a single contract change rather than one per consumer; senders
+        must keep supplying `label` until the Backend side ships.
       required:
         - album_title
         - genre_id
@@ -2370,8 +2377,13 @@ components:
           type: string
           maxLength: 4
           description: >
-            Optional volume letters for the release call code
-            (`library.code_volume_letters`, varchar(4)).
+            Optional volume letters for the release call code (BS#2410;
+            `library.code_volume_letters`, varchar(4)). Not yet served:
+            `addAlbum` builds its insert without this field, so a value sent
+            before BS#2410 is discarded silently rather than rejected —
+            the same trap `album_artist` already sets (see dj-site's
+            `AddReleasePanel`/`ReleaseCard` warnings). Do not send it until
+            the Backend side ships.
         disc_quantity:
           type: integer
         alternate_artist_name:
@@ -2931,7 +2943,10 @@ components:
         the shape `GET /library/rotation/uncatalogued`,
         `GET /library/rotation/{id}` and `PATCH
         /library/rotation/{rotation_id}/link` all share (Backend's
-        `toRotationRowSummary`, BS#2109/BS#2410). Referent rule: `format_id`
+        `toRotationRowSummary`, BS#2109/BS#2410). Backend's live projection
+        is the first eight columns; `format_id` and `label_id` join it in
+        BS#2410, so both are optional here and absent from today's
+        responses. Referent rule: `format_id`
         and `label_id` here are the **rotation row's own pre-catalog
         fields** — captured at rotation-add, written only while `album_id`
         is NULL, retained after linking. They never describe the linked
@@ -2940,6 +2955,7 @@ components:
       required:
         - id
         - rotation_bin
+        - add_date
       properties:
         id:
           type: integer
@@ -2955,7 +2971,9 @@ components:
         add_date:
           type: string
           format: date
-          nullable: true
+          description: >
+            Always present — `rotation.add_date` is NOT NULL with a
+            `defaultNow()`, and it is the queue's sort key (newest first).
         kill_date:
           type: string
           format: date
@@ -3006,8 +3024,6 @@ components:
         - artist_name
         - code_letters
         - code_number
-        - genre_id
-        - genre_name
       properties:
         id:
           type: integer
@@ -3024,8 +3040,18 @@ components:
             per genre with different numbers.
         genre_id:
           type: integer
+          nullable: true
+          description: >
+            Not yet served: absent from every response until BS#2410 widens
+            the projection, so clients must treat it as optional. Declared
+            here because the library-wide search that BS#2410 adds returns
+            memberships from mixed genres, where the row alone no longer
+            says which genre its `code_number` belongs to.
         genre_name:
           type: string
+          nullable: true
+          description: >
+            Not yet served; arrives with `genre_id` in BS#2410.
 
     ArtistSearchResponse:
       type: object
@@ -10205,6 +10231,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/RotationRowSummary'
+        '400':
+          description: '`limit` outside 1..500, or a negative `offset`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /library/rotation/{id}:
     get:
@@ -10218,6 +10250,13 @@ paths:
         pre-catalog fields, never the linked library release's; see
         `RotationRowSummary` for the full referent rule and
         `GET /library/rotation` for the opposite convention.
+
+        Not yet served: no route and no controller exist until BS#2410, so
+        this path 404s today for reasons unrelated to the row. Whoever
+        implements it must register it *after*
+        `/library/rotation/uncatalogued` or the literal segment is captured
+        as an id — pinned by Backend's
+        `library-rotation-uncatalogued.route.test.ts`.
       # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
       security:
         - BearerAuth: []
@@ -10253,6 +10292,11 @@ paths:
         release, FK-keyed only — free-text plays of the same promo are
         deliberately untouched. Linking never clears the row's free-text
         snapshot or its pre-catalog `format_id`/`label_id`.
+
+        Not yet served: the flowsheet-resolution half arrives with BS#2410.
+        Today `linkRotationToAlbum` writes `rotation` alone, so prior plays
+        keep their NULL `album_id` and stay unresolved. The `200`/`404`/
+        `409` behavior described here is live.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
         - BearerAuth: []
@@ -10275,6 +10319,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RotationRowSummary'
+        '400':
+          description: Non-integer `rotation_id`, or a missing/non-positive `album_id`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '404':
           description: Rotation entry not found, or album not found
           content:
@@ -10324,6 +10374,11 @@ paths:
         the LIMIT applies to that join, so a multi-genre artist consumes
         one slot per genre. Clients wanting the widest window pass
         `limit=20` explicitly.
+
+        Not yet served: the library-wide mode. Backend still requires
+        `genre_id` and 400s without it, and no response carries
+        `genre_id`/`genre_name` yet. The genre-scoped search described here
+        is live.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
         - BearerAuth: []
@@ -10349,6 +10404,11 @@ paths:
             minimum: 1
             maximum: 20
             default: 10
+          description: >
+            20 is the effective ceiling, not a rejection threshold —
+            Backend clamps into 1..20 rather than 400ing, and falls back to
+            the default for a non-integer. A client-side validator built
+            from `maximum` should therefore clamp too, not refuse.
       responses:
         '200':
           description: Matching (artist, genre) memberships, ordered by artist name
@@ -10356,6 +10416,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ArtistSearchResponse'
+        '400':
+          description: '`q` shorter than 2 characters after trimming, or a non-integer `genre_id`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '404':
           description: Genre not found (only when `genre_id` is given)
           content:
