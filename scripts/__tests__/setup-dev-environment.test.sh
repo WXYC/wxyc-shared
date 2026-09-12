@@ -210,6 +210,23 @@ teardown() {
     grep -q "docker info" "$SCRIPT_PATH"
 }
 
+# The consequence of a failed run is documented here as well as enforced, so
+# this guards the prose too: the comment on HEALTH_CHECK_TIMEOUT once told a
+# reader that overshooting the window would take the seeded volume with it.
+# That stopped being true when Backend-Service's `db:stop` dropped `-v`, and
+# nothing in this repo noticed. A reader who believes it sizes the timeout
+# against data loss rather than against build time.
+# `run` rather than a bare `! grep`: bash exempts a `!`-negated command from
+# `set -e`, so in a chain of them only the last one can fail the test. Both
+# assertions here are load-bearing.
+@test "the script neither performs nor claims a volume-deleting teardown" {
+    run grep -n -- "down -v" "$SCRIPT_PATH"
+    [ "$status" -ne 0 ]
+
+    run grep -n -- "run db:reset" "$SCRIPT_PATH"
+    [ "$status" -ne 0 ]
+}
+
 @test "script uses curl for health checks" {
     grep -q "curl" "$SCRIPT_PATH"
 }
