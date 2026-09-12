@@ -1,7 +1,14 @@
 # oasdiff error-level ignore list.
 #
 # Format: one line per suppressed finding, `<method> <path> <message>` exactly as
-# oasdiff renders it (case-insensitive, extra spaces collapsed). A line that
+# oasdiff renders it (extra spaces collapsed), except that the method must be
+# written LOWERCASE. oasdiff prints `GET` and matches either case, so an uppercase
+# entry does suppress correctly — but
+# scripts/__tests__/check-breaking-changes.test.sh requires every live entry to
+# match `^(get|post|put|patch|delete) /` and fails on it, and that failure reads
+# as a broken whitelist when the suppression is in fact fine. This note lives in
+# the header rather than beside an entry because the per-entry version of it was
+# pruned along with its entry, and the mistake immediately recurred. A line that
 # matches nothing — including a `#` comment — is inert.
 #
 # Entries here are scoped to a `main`..PR diff, so an entry stops matching the
@@ -32,3 +39,25 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
+
+# WXYC/Backend-Service#2399 — `ShowPlaylist` corrected to the shape
+# `GET /flowsheet/playlist` has always emitted. All three findings are the spec
+# catching up with the wire, not the wire changing: nothing in
+# `flowsheet.controller.ts:getShowInfo` or `flowsheet.service.ts:getShowMetadata`
+# moved in the same change, and no consumer can observe a value it could not
+# already receive.
+#
+#   - `end_time` — `shows.end_time` is a nullable column and ~2,814 production
+#     rows hold NULL (2,813 of them legacy imports whose `show_end` never
+#     arrived). The handler spreads the row unprojected, so a null has always
+#     reached this response.
+#   - `show_name` — `shows.show_name` is `varchar(128)` with no NOT NULL, spread
+#     the same way.
+#   - `show_djs/items/dj_name` — the route builds this with
+#     `resolveDjDisplayName`, which returns null for a blank handle and for the
+#     literal "Anonymous". The property was declared through `OnAirDJ`, where
+#     non-nullable IS correct; this schema now carries its own `ShowPlaylistDJ`
+#     rather than weakening the live-DJ contract to match.
+get /flowsheet/playlist the response property `end_time` became nullable for the status `200`
+get /flowsheet/playlist the response property `show_name` became nullable for the status `200`
+get /flowsheet/playlist the response property `show_djs/items/dj_name` became nullable for the status `200`

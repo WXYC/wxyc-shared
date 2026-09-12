@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.51.1
+  version: 1.52.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1622,25 +1622,162 @@ components:
 
     ShowPlaylist:
       type: object
+      description: >-
+        The response of `GET /flowsheet/playlist?show_id=` — one archived show,
+        its entries, and the ids of the shows either side of it.
+
+
+        The handler spreads the whole `shows` row, then adds the resolved
+        specialty-show name, the show's DJs, the two neighbour ids and the
+        projected entries. Every property below is therefore always present on
+        the wire; the nullable ones carry `null`, they are not omitted. This
+        schema previously described a shape the route has not emitted for some
+        time: it declared `specialty_show` (emitted as `specialty_show_name`),
+        typed `entries` as the V1 `FlowsheetEntryResponse` (emitted as the V2
+        discriminated union), declared no identifier at all, omitted the six
+        `shows` columns the spread ships, and `$ref`ed `OnAirDJ`, whose
+        `dj_name` is non-nullable where this route's is not.
+      required:
+        - id
+        - specialty_id
+        - show_name
+        - start_time
+        - end_time
+        - primary_dj_id
+        - legacy_show_id
+        - legacy_dj_name
+        - legacy_dj_id
+        - dj_name_override
+        - specialty_show_name
+        - show_djs
+        - previous_show_id
+        - next_show_id
+        - entries
       properties:
+        id:
+          type: integer
+          description: >-
+            `shows.id` — the same value passed as `show_id`, and the value to
+            pass back for a neighbour. The row is spread, so the key is `id`,
+            not `show_id`.
+        specialty_id:
+          type: integer
+          nullable: true
         show_name:
           type: string
-        specialty_show:
-          type: string
+          nullable: true
         start_time:
           type: string
           format: date-time
         end_time:
           type: string
           format: date-time
+          nullable: true
+          description: >-
+            Null does NOT mean "still on the air". It has two causes this
+            column cannot distinguish: the show is genuinely live, or its
+            `show_end` delivery was dropped and the column stayed null
+            permanently. 2,813 of the ~2,814 null-`end_time` shows are legacy
+            imports going back to 2006.
+        primary_dj_id:
+          type: string
+          nullable: true
+        legacy_show_id:
+          type: integer
+          nullable: true
+        legacy_dj_name:
+          type: string
+          nullable: true
+        legacy_dj_id:
+          type: integer
+          nullable: true
+        dj_name_override:
+          type: string
+          nullable: true
+        specialty_show_name:
+          type: string
+          description: >-
+            The resolved specialty-show name, or the empty string when the show
+            is not a specialty show. Empty string, never null.
         show_djs:
           type: array
           items:
-            $ref: '#/components/schemas/OnAirDJ'
+            $ref: '#/components/schemas/ShowPlaylistDJ'
+        previous_show_id:
+          type: integer
+          nullable: true
+          description: >-
+            The show that aired immediately before this one, or null on the
+            oldest show in the archive.
+
+
+            Ordered by `(start_time, id)`, not by `id`: ids were airtime-ordered
+            while tubafrenzy assigned them, but the import left 32 of ~72,900
+            shows carrying a lower id than a show that aired earlier. Null is
+            the end of the archive and nothing else — never `0`, the sentinel
+            the legacy JSP linked to and then failed to resolve.
+        next_show_id:
+          type: integer
+          nullable: true
+          description: >-
+            The show that aired immediately after this one, or null on the
+            newest show.
+
+
+            Points at the live show while one is on the air: nothing filters on
+            `end_time` (see the field's own note), matching the legacy
+            behaviour. A client caching this response should exclude the newest
+            show — the hazard is freezing a null `next_show_id` after a later
+            show has started, not linking to a show still in progress.
         entries:
           type: array
           items:
-            $ref: '#/components/schemas/FlowsheetEntryResponse'
+            oneOf:
+              - $ref: '#/components/schemas/FlowsheetV2TrackEntry'
+              - $ref: '#/components/schemas/FlowsheetV2ShowStartEntry'
+              - $ref: '#/components/schemas/FlowsheetV2ShowEndEntry'
+              - $ref: '#/components/schemas/FlowsheetV2DJJoinEntry'
+              - $ref: '#/components/schemas/FlowsheetV2DJLeaveEntry'
+              - $ref: '#/components/schemas/FlowsheetV2TalksetEntry'
+              - $ref: '#/components/schemas/FlowsheetV2BreakpointEntry'
+              - $ref: '#/components/schemas/FlowsheetV2MessageEntry'
+            discriminator:
+              propertyName: entry_type
+              mapping:
+                track: '#/components/schemas/FlowsheetV2TrackEntry'
+                show_start: '#/components/schemas/FlowsheetV2ShowStartEntry'
+                show_end: '#/components/schemas/FlowsheetV2ShowEndEntry'
+                dj_join: '#/components/schemas/FlowsheetV2DJJoinEntry'
+                dj_leave: '#/components/schemas/FlowsheetV2DJLeaveEntry'
+                talkset: '#/components/schemas/FlowsheetV2TalksetEntry'
+                breakpoint: '#/components/schemas/FlowsheetV2BreakpointEntry'
+                message: '#/components/schemas/FlowsheetV2MessageEntry'
+          description: >-
+            The V2 discriminated union, the same shape `GET /flowsheet` serves.
+            The handler projects through `projectEntriesV2`; there is no V1
+            variant of this response.
+
+    ShowPlaylistDJ:
+      type: object
+      description: >-
+        A DJ on an archived show. Deliberately not `OnAirDJ`: that schema
+        requires a non-null `dj_name`, which holds for the live-DJ endpoints but
+        not here — an archived show can carry a member whose handle resolves to
+        nothing.
+      required:
+        - id
+        - dj_name
+      properties:
+        id:
+          type: string
+          nullable: true
+          description: The DJ's better-auth `auth_user.id`, or null.
+        dj_name:
+          type: string
+          nullable: true
+          description: >-
+            The DJ's public on-air handle, never their legal name. Null when the
+            PII-safe chain resolves to nothing.
 
     ShowPeek:
       type: object
