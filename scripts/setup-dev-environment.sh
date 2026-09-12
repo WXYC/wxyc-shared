@@ -298,8 +298,16 @@ DEFAULT_FRONTEND_PORT=3000
 # Generous because a service can spend most of this window compiling rather
 # than starting: Backend-Service's predev rebuilds every shared workspace
 # before the server binds. Exceeding it is not a benign retry -- the failure
-# path runs the cleanup trap, which stops the database with `down -v` and takes
-# the volume with it, so an under-sized window destroys data over a slow build.
+# path runs the cleanup trap, which tears the environment down, so an
+# under-sized window costs a full restart over a slow build.
+#
+# It does not cost the seeded database: teardown stops the containers and
+# leaves the volume, so the next run reuses the fixture rather than paying for
+# a migration run and a ~14 MB clone load. An earlier version of this comment
+# said the opposite, in terms of the compose flags Backend-Service passed at
+# the time; those flags changed and this went stale in place, leaving a reader
+# sizing the timeout against a data loss that could no longer happen. State the
+# outcome here, not another repo's flags, and let the bats guard hold it.
 HEALTH_CHECK_TIMEOUT="${HEALTH_CHECK_TIMEOUT:-300}"
 HEALTH_CHECK_INTERVAL="${HEALTH_CHECK_INTERVAL:-2}"
 
