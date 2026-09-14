@@ -3309,11 +3309,11 @@ components:
         sibling card with a higher `number` (`card_not_highest_in_bin`) vs.
         an active rotation row still assigned to this card
         (`card_has_active_rotations`). All three values are declared ahead
-        of the Backend-Service implementation (WXYC/Backend-Service#2472 in
-        flight, WXYC/Backend-Service#2473 pending): the deployed backend
-        has no rotation-card code path yet, so no endpoint raises them
-        today — each endpoint's 409 states what the deployed behavior is
-        meanwhile.
+        of the Backend-Service implementation (WXYC/Backend-Service#2472,
+        delivered by its open PR WXYC/Backend-Service#2482): the deployed
+        backend has no rotation-card code path yet, so no endpoint raises
+        them today — each endpoint's 409 states what the deployed behavior
+        is meanwhile.
 
     RotationConflictError:
       type: object
@@ -10730,8 +10730,10 @@ paths:
             raise is `rotation_card_bin_mismatch`. Declared ahead of the
             Backend-Service implementation: the deployed endpoint's field
             allowlist silently drops `card_id` and answers 200 with the
-            rotation filed to no card, so a client must not rely on this
-            409 — nor on card assignment — until #2472 ships.
+            rotation filed to no card. #2472's open PR
+            (WXYC/Backend-Service#2482) delivers both `card_id` acceptance
+            and this 409, so a client must not rely on either until that
+            PR merges.
           content:
             application/json:
               schema:
@@ -10969,7 +10971,8 @@ paths:
             refused with this status, discriminated by `reason`. Bins
             therefore shrink only from the top, which is what keeps
             `RotationCard.number` contiguous 1..N. Declared ahead of the
-            Backend-Service implementation (WXYC/Backend-Service#2473): the
+            Backend-Service implementation (WXYC/Backend-Service#2472,
+            delivered by its open PR WXYC/Backend-Service#2482): the
             deployed backend registers no rotation-card routes yet, so
             today this request 404s before any guard runs.
           content:
