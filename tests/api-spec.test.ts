@@ -1979,69 +1979,143 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties?.genre_id).toBeDefined();
       expect(schema.properties?.format_id).toBeDefined();
       expect(schema.properties?.code_number).toBeDefined();
-      expect(schema.required).toEqual(
-        expect.arrayContaining(['album_title', 'genre_id', 'format_id'])
-      );
+      expect(schema.required).toEqual(['album_title', 'genre_id', 'format_id']);
     });
 
-    it('keeps the "at least one of label or label_id" constraint on AlbumCreateFields, where those fields live', () => {
-      const schema = spec.components.schemas.AlbumCreateFields as { description?: string };
-      expect(schema.description).toMatch(/At least one of `label` or `label_id` must be provided/);
-      const addAlbumRequest = spec.components.schemas.AddAlbumRequest as {
-        allOf?: Array<{ description?: string }>;
+    it('states the "at least one of label or label_id" rule on BOTH AlbumCreateFields and AddAlbumRequest', () => {
+      // Swift and Kotlin flatten `allOf` into a standalone type whose doc
+      // comment comes from the composing schema's own top-level description,
+      // with no link back to AlbumCreateFields' text — so the rule must be
+      // stated on each schema a generator can flatten, not just where the
+      // fields live.
+      const albumCreateFields = spec.components.schemas.AlbumCreateFields as {
+        description?: string;
       };
-      expect(addAlbumRequest.allOf?.[1]?.description).toBeUndefined();
+      expect(albumCreateFields.description).toMatch(
+        /At least one of `label` or `label_id` must be provided/
+      );
+      const addAlbumRequest = spec.components.schemas.AddAlbumRequest as { description?: string };
+      expect(addAlbumRequest.description).toMatch(
+        /at least one of `label` or `label_id` must be provided/i
+      );
     });
 
     it('recomposes AddAlbumRequest via allOf[AlbumCreateFields, artist fields] with an unchanged effective shape', () => {
       const schema = spec.components.schemas.AddAlbumRequest as { allOf?: Array<{ $ref?: string }> };
       expect(schema.allOf?.[0]?.$ref).toBe('#/components/schemas/AlbumCreateFields');
-      for (const field of [
-        'album_title',
-        'artist_name',
-        'artist_id',
-        'label',
-        'label_id',
-        'genre_id',
-        'format_id',
-        'code_number',
-        'code_volume_letters',
-        'disc_quantity',
-        'alternate_artist_name',
-        'album_artist',
-      ]) {
+      // Closed-set equality, not a subset check: an added or dropped
+      // property must fail here, or the "effective shape unchanged" claim
+      // is unguarded.
+      const albumCreateFieldKeys = Object.keys(
+        (spec.components.schemas.AlbumCreateFields as { properties: Record<string, unknown> })
+          .properties
+      );
+      const artistBranchKeys = Object.keys(
+        (
+          (spec.components.schemas.AddAlbumRequest as {
+            allOf: Array<{ properties?: Record<string, unknown> }>;
+          }).allOf[1]?.properties ?? {}
+        )
+      );
+      expect([...albumCreateFieldKeys, ...artistBranchKeys].sort()).toEqual(
+        [
+          'album_title',
+          'artist_name',
+          'artist_id',
+          'label',
+          'label_id',
+          'genre_id',
+          'format_id',
+          'code_number',
+          'code_volume_letters',
+          'disc_quantity',
+          'alternate_artist_name',
+          'album_artist',
+        ].sort()
+      );
+      for (const field of albumCreateFieldKeys) {
         expect(propertyOf('AddAlbumRequest', field)).toBeDefined();
       }
-      expect(requiredKeysOf('AddAlbumRequest')).toEqual(
-        expect.arrayContaining(['album_title', 'genre_id', 'format_id'])
-      );
+      expect(requiredKeysOf('AddAlbumRequest')).toEqual(['album_title', 'genre_id', 'format_id']);
     });
 
-    it('AddArtistRequest gains optional code_number with server-assignment semantics documented', () => {
+    it('AddArtistRequest gains optional code_number: bounded, hedged on the deployed 400, citing the real peek route', () => {
       const prop = propertyOf('AddArtistRequest', 'code_number');
       expect(prop).toBeDefined();
       expect(prop?.type).toBe('integer');
-      expect(prop?.description).toMatch(/server assigns the next number/i);
+      expect(prop?.minimum).toBe(1);
+      // int4 ceiling of genre_artist_crossreference.artist_genre_code —
+      // request-side bounds can never be added after publish (oasdiff
+      // treats that as breaking), so absence here is not fixable later.
+      expect(prop?.maximum).toBe(2147483647);
+      const description = prop?.description as string;
+      expect(description).toMatch(/server assigns the next number/i);
+      // The description must be honest about the deployed behavior (the
+      // controller 400s on omission until WXYC/Backend-Service#2475) and
+      // cite the real generator route. `/library/artists/search` performs
+      // no code-number generation — the false citation this replaces.
+      expect(description).toMatch(/WXYC\/Backend-Service#2475/);
+      expect(description).toMatch(/peek-code/);
+      expect(description).not.toMatch(/artists\/search/);
       expect(requiredKeysOf('AddArtistRequest')).not.toContain('code_number');
     });
 
-    it('defines LibraryFilingRequest with artist oneOf[AddArtistRequest, ExistingArtistRef], release, and optional rotation', () => {
+    it('defines LibraryFilingRequest with a discriminated FilingArtist, release, and optional rotation', () => {
       const schema = spec.components.schemas.LibraryFilingRequest as {
         required?: string[];
         properties?: {
-          artist?: { oneOf?: Array<{ $ref?: string }> };
+          artist?: { $ref?: string };
           release?: { $ref?: string };
           rotation?: { $ref?: string };
         };
       };
       expect(schema).toBeDefined();
       expect(schema.required).toEqual(expect.arrayContaining(['artist', 'release']));
-      const artistRefs = schema.properties?.artist?.oneOf?.map((b) => b.$ref) ?? [];
-      expect(artistRefs).toContain('#/components/schemas/AddArtistRequest');
-      expect(artistRefs).toContain('#/components/schemas/ExistingArtistRef');
+      expect(schema.properties?.artist?.$ref).toBe('#/components/schemas/FilingArtist');
       expect(schema.properties?.release?.$ref).toBe('#/components/schemas/AlbumCreateFields');
       expect(schema.properties?.rotation?.$ref).toBe('#/components/schemas/FilingRotationRequest');
       expect(schema.required).not.toContain('rotation');
+    });
+
+    it('discriminates FilingArtist on a required kind, like LiveFsEvent and AutoDJWebSocketMessage', () => {
+      // An undiscriminated oneOf here mis-resolves a both-fields payload:
+      // try-order decoders (generated Swift and Python) take the create arm
+      // and silently drop artist_id, filing a duplicate artist — and the
+      // Kotlin generator collapses the union into one degenerate
+      // intersection class. The discriminator is what separates the repo's
+      // working unions from that failure mode.
+      const union = spec.components.schemas.FilingArtist as {
+        oneOf?: Array<{ $ref?: string }>;
+        discriminator?: { propertyName?: string; mapping?: Record<string, string> };
+      };
+      expect(union.oneOf?.map((b) => b.$ref)).toEqual([
+        '#/components/schemas/FilingArtistCreate',
+        '#/components/schemas/FilingArtistExisting',
+      ]);
+      expect(union.discriminator?.propertyName).toBe('kind');
+      expect(union.discriminator?.mapping).toEqual({
+        create: '#/components/schemas/FilingArtistCreate',
+        existing: '#/components/schemas/FilingArtistExisting',
+      });
+
+      const create = spec.components.schemas.FilingArtistCreate as {
+        allOf?: Array<{
+          $ref?: string;
+          required?: string[];
+          properties?: { kind?: { enum?: string[] } };
+        }>;
+      };
+      expect(create.allOf?.[0]?.$ref).toBe('#/components/schemas/AddArtistRequest');
+      expect(create.allOf?.[1]?.required).toContain('kind');
+      expect(create.allOf?.[1]?.properties?.kind?.enum).toEqual(['create']);
+
+      const existing = spec.components.schemas.FilingArtistExisting as {
+        required?: string[];
+        properties?: { kind?: { enum?: string[] }; artist_id?: { type?: string } };
+      };
+      expect(existing.required).toEqual(expect.arrayContaining(['kind', 'artist_id']));
+      expect(existing.properties?.kind?.enum).toEqual(['existing']);
+      expect(existing.properties?.artist_id?.type).toBe('integer');
     });
 
     it('defines LibraryFilingResponse as all-$ref: artist, release, and optional rotation', () => {
@@ -2087,6 +2161,38 @@ describe('OpenAPI Specification', () => {
       expect(post.responses?.['400']?.content?.['application/json']?.schema?.$ref).toBe(
         '#/components/schemas/ApiErrorResponse'
       );
+      expect(post.responses?.['409']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/LibraryFilingConflictError'
+      );
+    });
+
+    it('declares the filings 409 with the reason discriminant the composed writes emit', () => {
+      // The two artist reasons are the exact strings Backend's deployed
+      // addArtist answers with; rotation_card_bin_mismatch is defined here
+      // contract-first for the rotation arm's card-bin invariant. A closed
+      // enum: a new conflict reason is a contract change, not a free string.
+      const reason = spec.components.schemas.LibraryFilingConflictReason as { enum?: string[] };
+      expect(reason.enum).toEqual([
+        'artist_code_conflict',
+        'artist_name_conflict',
+        'rotation_card_bin_mismatch',
+      ]);
+      const error = spec.components.schemas.LibraryFilingConflictError as {
+        required?: string[];
+        properties?: {
+          reason?: { $ref?: string };
+          artist?: { allOf?: Array<{ $ref?: string }> };
+        };
+      };
+      expect(error.required).toEqual(['message', 'reason']);
+      expect(error.properties?.reason?.$ref).toBe(
+        '#/components/schemas/LibraryFilingConflictReason'
+      );
+      // The conflicting artist row is the payload a client acts on ("use
+      // the existing artist instead") — typed, and optional because the
+      // card-bin arm has no artist to name.
+      expect(error.properties?.artist?.allOf?.[0]?.$ref).toBe('#/components/schemas/Artist');
+      expect(error.required).not.toContain('artist');
     });
   });
 
