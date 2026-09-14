@@ -98,6 +98,23 @@ describe('OpenAPI Specification', () => {
     return [...new Set(walk(spec.components.schemas[schemaName]))];
   }
 
+  // The effective property keys of a composed schema — every key reachable
+  // through the flattened allOf lattice, deduplicated for the same
+  // shared-branch reason as `requiredKeysOf`. Closed-set shape assertions
+  // must use this rather than indexing individual allOf branches: a branch
+  // index silently misses a property added via a new or reordered branch.
+  function propertyKeysOf(schemaName: string): string[] {
+    function walk(node: unknown): string[] {
+      const schema = deref(node);
+      if (!schema) return [];
+      return [
+        ...Object.keys((schema.properties as Record<string, unknown> | undefined) ?? {}),
+        ...((schema.allOf as unknown[] | undefined) ?? []).flatMap(walk),
+      ];
+    }
+    return [...new Set(walk(spec.components.schemas[schemaName]))];
+  }
+
   describe('Structure', () => {
     it('should be valid OpenAPI 3.0', () => {
       expect(spec.openapi).toMatch(/^3\.0/);
@@ -1844,16 +1861,23 @@ describe('OpenAPI Specification', () => {
     }
 
     for (const schemaName of ['Rotation', 'RotationEntry'] as const) {
-      it(`${schemaName}.urls resolves through RotationUrlList to an unbounded array of plain strings`, () => {
-        const ref = propertyOf(schemaName, 'urls') as { $ref?: string } | undefined;
-        expect(ref?.$ref).toBe('#/components/schemas/RotationUrlList');
-        const resolved = deref(ref) as { type?: string; items?: { type?: string }; maxItems?: number };
-        expect(resolved?.type).toBe('array');
-        expect(resolved?.items?.type).toBe('string');
-        expect(resolved?.maxItems).toBeUndefined();
+      it(`${schemaName} gains optional urls as an unbounded inline array of plain strings`, () => {
+        const prop = propertyOf(schemaName, 'urls');
+        expect(prop?.type).toBe('array');
+        expect((prop?.items as Record<string, unknown>)?.type).toBe('string');
+        expect(prop?.maxItems).toBeUndefined();
         expect(requiredKeysOf(schemaName)).not.toContain('urls');
       });
     }
+
+    it('Rotation.urls and RotationEntry.urls are the identical inline declaration — one source of truth, pinned here', () => {
+      // Deliberately inline twins rather than one named array schema:
+      // naming a top-level array makes the Python generator wrap the field
+      // in a RootModel (`.root` to reach the list), diverging from the
+      // plain string list every other target reads. This equality is the
+      // single source of truth the inline form would otherwise lack.
+      expect(propertyOf('Rotation', 'urls')).toEqual(propertyOf('RotationEntry', 'urls'));
+    });
 
     // Request-side bounds must ship with the field: oasdiff treats a later
     // maxItems/maxLength on a request property as a breaking change, so once
@@ -1897,35 +1921,25 @@ describe('OpenAPI Specification', () => {
     it('recomposes AddRotationRequest via allOf[RotationCreateFields, album_id] with an unchanged effective shape', () => {
       const schema = spec.components.schemas.AddRotationRequest as { allOf?: Array<{ $ref?: string }> };
       expect(schema.allOf?.[0]?.$ref).toBe('#/components/schemas/RotationCreateFields');
-      // Closed-set equality, not a subset check: an added or dropped
-      // property must fail here, or the "effective shape unchanged" claim
-      // is unguarded.
-      const createFieldKeys = Object.keys(
-        (spec.components.schemas.RotationCreateFields as { properties: Record<string, unknown> })
-          .properties
+      // Closed-set equality over the FLATTENED composition, not a subset
+      // check or an index into one branch: a property or requirement added
+      // to ANY allOf branch — including a future third branch — must fail
+      // here, or the "effective shape unchanged" claim is unguarded.
+      expect(propertyKeysOf('AddRotationRequest').sort()).toEqual(
+        ['album_id', 'card_id', 'rotation_bin', 'urls'].sort()
       );
-      const albumBranchKeys = Object.keys(
-        (
-          (spec.components.schemas.AddRotationRequest as {
-            allOf: Array<{ properties?: Record<string, unknown> }>;
-          }).allOf[1]?.properties ?? {}
-        )
-      );
-      expect([...createFieldKeys, ...albumBranchKeys].sort()).toEqual(
-        ['rotation_bin', 'card_id', 'urls', 'album_id'].sort()
-      );
-      for (const field of createFieldKeys) {
-        expect(propertyOf('AddRotationRequest', field)).toBeDefined();
-      }
-      expect(requiredKeysOf('AddRotationRequest')).toEqual(
-        expect.arrayContaining(['rotation_bin', 'album_id'])
+      expect(requiredKeysOf('AddRotationRequest').sort()).toEqual(
+        ['album_id', 'rotation_bin'].sort()
       );
     });
 
     it('FilingRotationRequest resolves to RotationCreateFields\' shape with no album_id', () => {
       const schema = spec.components.schemas.FilingRotationRequest as { allOf?: Array<{ $ref?: string }> };
       expect(schema.allOf?.[0]?.$ref).toBe('#/components/schemas/RotationCreateFields');
-      expect(propertyOf('FilingRotationRequest', 'album_id')).toBeUndefined();
+      // Same closed-set rigor as AddRotationRequest above.
+      expect(propertyKeysOf('FilingRotationRequest').sort()).toEqual(
+        ['card_id', 'rotation_bin', 'urls'].sort()
+      );
       expect(requiredKeysOf('FilingRotationRequest')).toEqual(['rotation_bin']);
     });
 
