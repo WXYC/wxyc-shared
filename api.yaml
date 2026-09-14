@@ -2539,6 +2539,16 @@ components:
           type: string
 
     AddAlbumRequest:
+      description: >
+        `AlbumCreateFields` plus the artist reference pair. The label rule
+        travels with it: at least one of `label` or `label_id` must be
+        provided, or the request is a 400 (BS#2410) — restated here, not
+        only on `AlbumCreateFields`, because the Swift and Kotlin
+        generators flatten `allOf` into a standalone type whose doc comment
+        is this description, leaving no link to the composed schema's own
+        text. See `AlbumCreateFields` for the full `label`/`label_id`
+        resolution semantics (which value wins for the denormalized
+        `library.label` column, dangling-`label_id` handling).
       allOf:
         - $ref: '#/components/schemas/AlbumCreateFields'
         - type: object
@@ -2587,12 +2597,23 @@ components:
         code_number:
           type: integer
           minimum: 1
+          maximum: 2147483647
           description: >
             Operator-chosen artist call number within the `(genre_id,
-            code_letters)` bucket. Omitted, the server assigns the next
-            number in that bucket (the same generator `GET
-            /library/artists/search`'s peek path uses) — this field makes
-            that assignment overridable, it does not replace it.
+            code_letters)` bucket. The backing column
+            (`genre_artist_crossreference.artist_genre_code`) is a Postgres
+            integer, hence the 2147483647 ceiling — bounded here, at
+            publish time, because oasdiff treats adding request-side bounds
+            later as a breaking change (see `AddRotationRequest.urls`).
+            Declared optional ahead of the Backend-Service relaxation that
+            honors omission (WXYC/Backend-Service#2475): the deployed
+            `POST /library/artists` still 400s on a body without it, so a
+            client must keep sending it until #2475 ships. Once omission is
+            honored, the server assigns the next number in the bucket — the
+            same generator behind Backend's artist-code peek route (`GET
+            /library/artists/peek-code`, a Backend route this contract does
+            not declare) — and this field makes that assignment
+            overridable, it does not replace it.
 
     CatalogSearchParams:
       type: object
@@ -3126,13 +3147,55 @@ components:
             code_number:
               type: integer
 
-    ExistingArtistRef:
+    FilingArtistCreate:
+      description: >
+        The create arm of `FilingArtist`: a full `AddArtistRequest` plus
+        the `kind` discriminant. Inherits `AddArtistRequest`'s field
+        semantics unchanged, including `code_number`'s
+        deployed-requirement-vs-#2475-assignment note.
+      allOf:
+        - $ref: '#/components/schemas/AddArtistRequest'
+        - type: object
+          required:
+            - kind
+          properties:
+            kind:
+              type: string
+              enum: [create]
+
+    FilingArtistExisting:
       type: object
       required:
+        - kind
         - artist_id
       properties:
+        kind:
+          type: string
+          enum: [existing]
         artist_id:
           type: integer
+
+    FilingArtist:
+      description: >
+        Either a full new-artist payload (`kind: create`) or a reference to
+        an already-catalogued artist (`kind: existing`). Discriminated
+        rather than left a bare `oneOf` deliberately — the same idiom as
+        `LiveFsEvent` and `AutoDJWebSocketMessage`: without `kind`, a
+        payload carrying both an `artist_id` and the new-artist trio
+        validates against both arms, and try-order decoders (the generated
+        Swift and Python clients) silently take the create arm — filing a
+        duplicate artist while reporting success instead of attaching the
+        release to the referenced one. The required `kind` makes the
+        caller's intent explicit on the wire and that ambiguous payload
+        rejectable.
+      oneOf:
+        - $ref: '#/components/schemas/FilingArtistCreate'
+        - $ref: '#/components/schemas/FilingArtistExisting'
+      discriminator:
+        propertyName: kind
+        mapping:
+          create: '#/components/schemas/FilingArtistCreate'
+          existing: '#/components/schemas/FilingArtistExisting'
 
     FilingRotationRequest:
       type: object
@@ -3167,12 +3230,7 @@ components:
         - release
       properties:
         artist:
-          oneOf:
-            - $ref: '#/components/schemas/AddArtistRequest'
-            - $ref: '#/components/schemas/ExistingArtistRef'
-          description: >
-            Either a full new-artist payload or a reference to an existing
-            one by `artist_id`.
+          $ref: '#/components/schemas/FilingArtist'
         release:
           $ref: '#/components/schemas/AlbumCreateFields'
         rotation:
@@ -3190,6 +3248,51 @@ components:
           $ref: '#/components/schemas/Album'
         rotation:
           $ref: '#/components/schemas/RotationEntry'
+
+    LibraryFilingConflictReason:
+      type: string
+      enum: [artist_code_conflict, artist_name_conflict, rotation_card_bin_mismatch]
+      description: >
+        Discriminator for the `POST /library/filings` 409, telling the
+        caller which composed write collided so it can offer the right
+        remedy. Named rather than left inline, pairing with
+        `LibraryFilingConflictError` the way `ShowAlreadyOpenErrorCode`
+        pairs with `ShowAlreadyOpenError`. `artist_code_conflict` and
+        `artist_name_conflict` are the exact strings the deployed
+        `POST /library/artists` controller already answers with — the
+        composite reuses that create path; `rotation_card_bin_mismatch` is
+        defined here, ahead of the Backend-Service implementation, for the
+        rotation arm's card-bin invariant (WXYC/Backend-Service#2472,
+        inherited by the composite per WXYC/Backend-Service#2474).
+
+    LibraryFilingConflictError:
+      type: object
+      description: >
+        The `POST /library/filings` 409 body. Purpose-built rather than a
+        `$ref` to the shared `ApiErrorResponse`, following
+        `ShowAlreadyOpenError`: on the artist-conflict reasons a client is
+        expected to ACT on the conflicting `artist` row (offer "use the
+        existing artist instead" and resubmit with `kind: existing`), not
+        merely display a message — and the deployed artist-create 409 shape
+        `{message, reason, artist}` does not match `ApiErrorResponse`
+        anyway.
+      required:
+        - message
+        - reason
+      properties:
+        message:
+          type: string
+        reason:
+          $ref: '#/components/schemas/LibraryFilingConflictReason'
+        artist:
+          allOf:
+            - $ref: '#/components/schemas/Artist'
+          description: >
+            The already-catalogued artist that collided. Present on
+            `artist_code_conflict` (the holder of the taken `(code_letters,
+            genre_id, code_number)` triple) and `artist_name_conflict` (the
+            genre-scoped fold-matched name); absent on
+            `rotation_card_bin_mismatch`, which has no artist to name.
 
     # Legacy rotation schema (for backward compatibility with existing endpoints)
     Rotation:
@@ -10105,6 +10208,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            A conflict from one of the composed writes, discriminated by
+            `reason`. The artist create arm answers exactly as the deployed
+            `POST /library/artists` does: `artist_code_conflict` when the
+            `(code_letters, genre_id, code_number)` triple is already taken
+            (pick another code), `artist_name_conflict` when a genre-scoped
+            fold-matched name already exists (switch to `kind: existing`
+            with the returned `artist`). The rotation arm answers
+            `rotation_card_bin_mismatch` when `rotation.card_id` names a
+            card belonging to a different bin than `rotation.rotation_bin`
+            (WXYC/Backend-Service#2472's card-bin invariant, inherited by
+            the composite per WXYC/Backend-Service#2474). All-or-nothing
+            holds here too: a 409 from any arm persists nothing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryFilingConflictError'
 
   /library/query:
     get:
