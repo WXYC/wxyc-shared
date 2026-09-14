@@ -2479,6 +2479,22 @@ components:
         `artist_id`) — extracted so `POST /library/filings` (#454) can
         compose it with a top-level `artist` block without also accepting a
         second, conflicting artist reference nested inside `release`.
+
+        At least one of `label` or `label_id` must be provided (BS#2410; the
+        rotation-import plan's D5). With `label_id` alone, Backend resolves
+        `labels.label_name` server-side for the denormalized `library.label`
+        column and skips label creation; a dangling `label_id` is a 400. With
+        `label` alone, the create-or-reuse-by-exact-name behavior is
+        unchanged.
+
+        Both may be sent together — the rule is at-least-one, not
+        exactly-one. `label_id` is validated and written to the FK either
+        way, and an explicitly sent non-empty `label` wins over the name
+        resolved from `label_id` for the denormalized `library.label` column
+        (Backend's `resolveNewAlbumLabel`, pinned by "keeps an explicitly
+        sent label over the resolved name when both are present"). An empty
+        `label` does not win: it falls back to the resolved name rather than
+        storing `''`.
       required:
         - album_title
         - genre_id
@@ -2526,22 +2542,6 @@ components:
       allOf:
         - $ref: '#/components/schemas/AlbumCreateFields'
         - type: object
-          description: >
-            At least one of `label` or `label_id` must be provided (BS#2410;
-            the rotation-import plan's D5). With `label_id` alone, Backend
-            resolves `labels.label_name` server-side for the denormalized
-            `library.label` column and skips label creation; a dangling
-            `label_id` is a 400. With `label` alone, the
-            create-or-reuse-by-exact-name behavior is unchanged.
-
-            Both may be sent together — the rule is at-least-one, not
-            exactly-one. `label_id` is validated and written to the FK
-            either way, and an explicitly sent non-empty `label` wins over
-            the name resolved from `label_id` for the denormalized
-            `library.label` column (Backend's `resolveNewAlbumLabel`, pinned
-            by "keeps an explicitly sent label over the resolved name when
-            both are present"). An empty `label` does not win: it falls back
-            to the resolved name rather than storing `''`.
           properties:
             artist_name:
               type: string
