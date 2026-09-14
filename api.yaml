@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.54.0
+  version: 1.55.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3028,7 +3028,19 @@ components:
           $ref: '#/components/schemas/RotationBin'
         number:
           type: integer
-          description: Card number within its bin, 1..N.
+          description: >
+            Contiguous 1..N within a bin. `POST /library/rotation/cards`
+            assigns `max(number) + 1` for the bin; `DELETE
+            /library/rotation/cards/{id}` is refused unless the card is the
+            highest-numbered in its bin AND has zero active rotation rows
+            (see that endpoint's 409 for the two ways it can fail). There is
+            no renumber endpoint, so gaps do not arise through the API, even
+            though the underlying storage does not itself forbid them.
+            "The bin's newest card" — referenced by the server-side
+            `card_id` default still being specified (WXYC/Backend-Service#2472,
+            WXYC/Backend-Service#2473) — means the highest `number` in the
+            bin, `id` descending as the tie-break; stated once here rather
+            than re-derived at each call site.
         name:
           type: string
           nullable: true
@@ -3078,22 +3090,19 @@ components:
             - $ref: '#/components/schemas/RotationCard'
           nullable: true
         urls:
-          type: array
-          items:
-            type: string
-          description: >
-            Storage order. Plain strings, not `format: uri` — MDs paste bare
-            domains, so a value carries no scheme guarantee and a renderer
-            must not bind one into an href without checking it.
+          $ref: '#/components/schemas/RotationUrlList'
 
-    AddRotationRequest:
+    RotationCreateFields:
       type: object
+      description: >
+        The rotation-create fields shared by `AddRotationRequest` and
+        `FilingRotationRequest` (the rotation arm of `POST
+        /library/filings`) — extracted so the bin, card, and URL bounds are
+        declared once instead of hand-copied across the two envelopes. See
+        `urls` below for the bounds rationale.
       required:
-        - album_id
         - rotation_bin
       properties:
-        album_id:
-          type: integer
         rotation_bin:
           $ref: '#/components/schemas/RotationBin'
         card_id:
@@ -3115,6 +3124,29 @@ components:
             neither fits a hand-curated link list, so this takes a small cap
             of 20, with 2048 characters per item covering any pasted URL. An
             empty array is equivalent to omitting the field.
+
+    RotationUrlList:
+      type: array
+      items:
+        type: string
+      description: >
+        Storage order. Plain strings, not `format: uri` — MDs paste bare
+        domains, so a value carries no scheme guarantee and a renderer must
+        not bind one into an href without checking it.
+
+    AddRotationRequest:
+      description: >
+        `RotationCreateFields` plus the album reference required only on the
+        direct-add path — `POST /library/filings` supplies its own release
+        in the same request, so `FilingRotationRequest` omits it.
+      allOf:
+        - $ref: '#/components/schemas/RotationCreateFields'
+        - type: object
+          required:
+            - album_id
+          properties:
+            album_id:
+              type: integer
 
     KillRotationRequest:
       type: object
@@ -3198,24 +3230,15 @@ components:
           existing: '#/components/schemas/FilingArtistExisting'
 
     FilingRotationRequest:
-      type: object
-      required:
-        - rotation_bin
-      properties:
-        rotation_bin:
-          $ref: '#/components/schemas/RotationBin'
-        card_id:
-          type: integer
-        urls:
-          type: array
-          maxItems: 20
-          items:
-            type: string
-            maxLength: 2048
-          description: >
-            Same shape and bounds as `AddRotationRequest.urls` — see that
-            field for the rationale. No `album_id` here: the release this
-            rotation entry attaches to is the one this same request creates.
+      description: >
+        `RotationCreateFields` with no album reference: the release this
+        rotation entry attaches to is the one `LibraryFilingRequest.release`
+        creates in the same request. Kept as its own name — rather than a
+        bare `$ref` to `RotationCreateFields` — because
+        `LibraryFilingRequest.rotation` reads clearer naming the
+        filing-specific envelope than the shared fields schema.
+      allOf:
+        - $ref: '#/components/schemas/RotationCreateFields'
 
     LibraryFilingRequest:
       type: object
@@ -3261,9 +3284,41 @@ components:
         `artist_name_conflict` are the exact strings the deployed
         `POST /library/artists` controller already answers with — the
         composite reuses that create path; `rotation_card_bin_mismatch` is
-        defined here, ahead of the Backend-Service implementation, for the
-        rotation arm's card-bin invariant (WXYC/Backend-Service#2472,
-        inherited by the composite per WXYC/Backend-Service#2474).
+        the same string `RotationConflictReason` declares for the direct
+        `POST /library/rotation` and `DELETE /library/rotation/cards/{id}`
+        409s (WXYC/Backend-Service#2472, inherited by the composite per
+        WXYC/Backend-Service#2474) — pinned equal by a spec test rather than
+        composed, since OpenAPI enums do not merge cleanly across two
+        purpose-built discriminators.
+
+    RotationConflictReason:
+      type: string
+      enum: [rotation_card_bin_mismatch, card_not_highest_in_bin, card_has_active_rotations]
+      description: >
+        Discriminator for the 409s on `POST /library/rotation` and `DELETE
+        /library/rotation/cards/{id}`, pairing with `RotationConflictError`
+        the way `ShowAlreadyOpenErrorCode` pairs with `ShowAlreadyOpenError`.
+        `rotation_card_bin_mismatch` is the single source of truth for the
+        identically-named value `LibraryFilingConflictReason` carries for
+        the composite's rotation arm — see that schema's description. The
+        other two distinguish the card-delete guard's conjunctive halves: a
+        sibling card with a higher `number` (`card_not_highest_in_bin`) vs.
+        an active rotation row still assigned to this card
+        (`card_has_active_rotations`).
+
+    RotationConflictError:
+      type: object
+      description: >
+        The 409 body on `POST /library/rotation` and `DELETE
+        /library/rotation/cards/{id}`, following `ShowAlreadyOpenError`.
+      required:
+        - message
+        - reason
+      properties:
+        message:
+          type: string
+        reason:
+          $ref: '#/components/schemas/RotationConflictReason'
 
     LibraryFilingConflictError:
       type: object
@@ -3342,13 +3397,7 @@ components:
             - $ref: '#/components/schemas/RotationCard'
           nullable: true
         urls:
-          type: array
-          items:
-            type: string
-          description: >
-            Storage order. Plain strings, not `format: uri` — MDs paste bare
-            domains, so a value carries no scheme guarantee and a renderer
-            must not bind one into an href without checking it.
+          $ref: '#/components/schemas/RotationUrlList'
 
     RotationRowSummary:
       type: object
@@ -10654,6 +10703,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RotationEntry'
+        '409':
+          description: >
+            `card_id` names a card in a bin other than `rotation_bin`
+            (WXYC/Backend-Service#2472). The only reason this endpoint can
+            raise is `rotation_card_bin_mismatch`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotationConflictError'
 
     patch:
       x-wxyc-service: backend-service
@@ -10882,13 +10940,15 @@ paths:
             Deletion requires both conditions at once: the card is the
             highest-numbered card in its bin AND it has zero active rotation
             rows assigned to it. A card failing either — a sibling card with
-            a higher `number`, or any active rotation still on this card —
-            is refused with this status. Bins therefore shrink only from the
-            top, which is what keeps `RotationCard.number` contiguous 1..N.
+            a higher `number` (`card_not_highest_in_bin`), or any active
+            rotation still on this card (`card_has_active_rotations`) — is
+            refused with this status, discriminated by `reason`. Bins
+            therefore shrink only from the top, which is what keeps
+            `RotationCard.number` contiguous 1..N.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiErrorResponse'
+                $ref: '#/components/schemas/RotationConflictError'
 
   /library/rotation/{rotation_id}/link:
     patch:

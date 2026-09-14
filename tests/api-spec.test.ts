@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.54.0');
+      expect(spec.info.version).toBe('1.55.0');
     });
 
     it('should have components section', () => {
@@ -1832,7 +1832,7 @@ describe('OpenAPI Specification', () => {
       expect(schema.required ?? []).toEqual(expect.arrayContaining(['id', 'bin', 'number']));
     });
 
-    for (const schemaName of ['AddRotationRequest', 'Rotation', 'RotationEntry'] as const) {
+    for (const schemaName of ['AddRotationRequest', 'FilingRotationRequest'] as const) {
       it(`${schemaName} gains optional urls as an array of plain strings`, () => {
         const prop = propertyOf(schemaName, 'urls');
         expect(prop).toBeDefined();
@@ -1843,13 +1843,35 @@ describe('OpenAPI Specification', () => {
       });
     }
 
+    for (const schemaName of ['Rotation', 'RotationEntry'] as const) {
+      it(`${schemaName}.urls resolves through RotationUrlList to an unbounded array of plain strings`, () => {
+        const ref = propertyOf(schemaName, 'urls') as { $ref?: string } | undefined;
+        expect(ref?.$ref).toBe('#/components/schemas/RotationUrlList');
+        const resolved = deref(ref) as { type?: string; items?: { type?: string }; maxItems?: number };
+        expect(resolved?.type).toBe('array');
+        expect(resolved?.items?.type).toBe('string');
+        expect(resolved?.maxItems).toBeUndefined();
+        expect(requiredKeysOf(schemaName)).not.toContain('urls');
+      });
+    }
+
     // Request-side bounds must ship with the field: oasdiff treats a later
     // maxItems/maxLength on a request property as a breaking change, so once
     // this contract merges unbounded it can never be bounded cleanly.
-    it('bounds AddRotationRequest.urls at filing time (maxItems + per-item maxLength)', () => {
-      const prop = propertyOf('AddRotationRequest', 'urls');
-      expect(prop?.maxItems).toBe(20);
-      expect((prop?.items as Record<string, unknown>)?.maxLength).toBe(2048);
+    for (const schemaName of ['AddRotationRequest', 'FilingRotationRequest'] as const) {
+      it(`bounds ${schemaName}.urls at filing time (maxItems + per-item maxLength)`, () => {
+        const prop = propertyOf(schemaName, 'urls');
+        expect(prop?.maxItems).toBe(20);
+        expect((prop?.items as Record<string, unknown>)?.maxLength).toBe(2048);
+      });
+    }
+
+    it('AddRotationRequest and FilingRotationRequest resolve urls to the identical bounds — one schema, not two hand-copies', () => {
+      // Both derive from RotationCreateFields now, so this can only fail if
+      // a future edit reintroduces a second, drifting copy of the bounds.
+      expect(propertyOf('AddRotationRequest', 'urls')).toEqual(
+        propertyOf('FilingRotationRequest', 'urls')
+      );
     });
 
     it('AddRotationRequest gains optional card_id as an integer', () => {
@@ -1857,6 +1879,54 @@ describe('OpenAPI Specification', () => {
       expect(prop).toBeDefined();
       expect(prop?.type).toBe('integer');
       expect(requiredKeysOf('AddRotationRequest')).not.toContain('card_id');
+    });
+
+    it('extracts RotationCreateFields with rotation_bin required, card_id and urls optional', () => {
+      const schema = spec.components.schemas.RotationCreateFields as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+      expect(schema).toBeDefined();
+      expect(schema.properties?.rotation_bin).toBeDefined();
+      expect(schema.properties?.card_id).toBeDefined();
+      expect(schema.properties?.urls).toBeDefined();
+      expect(schema.properties?.album_id).toBeUndefined();
+      expect(schema.required).toEqual(['rotation_bin']);
+    });
+
+    it('recomposes AddRotationRequest via allOf[RotationCreateFields, album_id] with an unchanged effective shape', () => {
+      const schema = spec.components.schemas.AddRotationRequest as { allOf?: Array<{ $ref?: string }> };
+      expect(schema.allOf?.[0]?.$ref).toBe('#/components/schemas/RotationCreateFields');
+      // Closed-set equality, not a subset check: an added or dropped
+      // property must fail here, or the "effective shape unchanged" claim
+      // is unguarded.
+      const createFieldKeys = Object.keys(
+        (spec.components.schemas.RotationCreateFields as { properties: Record<string, unknown> })
+          .properties
+      );
+      const albumBranchKeys = Object.keys(
+        (
+          (spec.components.schemas.AddRotationRequest as {
+            allOf: Array<{ properties?: Record<string, unknown> }>;
+          }).allOf[1]?.properties ?? {}
+        )
+      );
+      expect([...createFieldKeys, ...albumBranchKeys].sort()).toEqual(
+        ['rotation_bin', 'card_id', 'urls', 'album_id'].sort()
+      );
+      for (const field of createFieldKeys) {
+        expect(propertyOf('AddRotationRequest', field)).toBeDefined();
+      }
+      expect(requiredKeysOf('AddRotationRequest')).toEqual(
+        expect.arrayContaining(['rotation_bin', 'album_id'])
+      );
+    });
+
+    it('FilingRotationRequest resolves to RotationCreateFields\' shape with no album_id', () => {
+      const schema = spec.components.schemas.FilingRotationRequest as { allOf?: Array<{ $ref?: string }> };
+      expect(schema.allOf?.[0]?.$ref).toBe('#/components/schemas/RotationCreateFields');
+      expect(propertyOf('FilingRotationRequest', 'album_id')).toBeUndefined();
+      expect(requiredKeysOf('FilingRotationRequest')).toEqual(['rotation_bin']);
     });
 
     for (const schemaName of ['Rotation', 'RotationEntry', 'AlbumSearchResult'] as const) {
@@ -1936,10 +2006,12 @@ describe('OpenAPI Specification', () => {
       );
     });
 
-    it('defines DELETE /library/rotation/cards/{id} documenting the conjunctive 409 invariant', () => {
+    it('defines DELETE /library/rotation/cards/{id} documenting the conjunctive 409 invariant, discriminated by reason', () => {
       const del = (
         spec.paths['/library/rotation/cards/{id}'] as Record<string, Record<string, unknown>>
-      ).delete as { responses: Record<string, { description?: string }> };
+      ).delete as {
+        responses: Record<string, { description?: string; content?: { 'application/json': { schema?: { $ref?: string } } } }>;
+      };
       expect(del.responses['409']).toBeDefined();
       // Both conditions, stated once: highest-numbered card in its bin AND
       // zero active rotation rows. An earlier draft said "last card in its
@@ -1948,6 +2020,58 @@ describe('OpenAPI Specification', () => {
       expect(del.responses['409']?.description).toMatch(/highest-numbered/);
       expect(del.responses['409']?.description).toMatch(/zero active rotation rows/);
       expect(del.responses['409']?.description).not.toMatch(/last remaining/);
+      expect(del.responses['409']?.description).toMatch(/card_not_highest_in_bin/);
+      expect(del.responses['409']?.description).toMatch(/card_has_active_rotations/);
+      expect(del.responses['409']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/RotationConflictError'
+      );
+    });
+
+    it('defines POST /library/rotation raising a typed 409 on the card-bin mismatch', () => {
+      const post = (
+        spec.paths['/library/rotation'] as Record<string, Record<string, unknown>>
+      ).post as {
+        responses: Record<string, { description?: string; content?: { 'application/json': { schema?: { $ref?: string } } } }>;
+      };
+      expect(post.responses['409']).toBeDefined();
+      expect(post.responses['409']?.description).toMatch(/rotation_card_bin_mismatch/);
+      expect(post.responses['409']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/RotationConflictError'
+      );
+    });
+
+    it('declares RotationConflictReason and RotationConflictError, sharing rotation_card_bin_mismatch with the filings 409', () => {
+      const reason = spec.components.schemas.RotationConflictReason as { enum?: string[] };
+      expect(reason.enum).toEqual([
+        'rotation_card_bin_mismatch',
+        'card_not_highest_in_bin',
+        'card_has_active_rotations',
+      ]);
+      // One source of truth for the string, pinned by equality rather than
+      // composed — OpenAPI enums do not merge cleanly across two
+      // purpose-built discriminators (LibraryFilingConflictReason and this
+      // one), so a spec test is what keeps them from silently forking.
+      const filingReason = spec.components.schemas.LibraryFilingConflictReason as { enum?: string[] };
+      expect(filingReason.enum).toContain('rotation_card_bin_mismatch');
+      expect(reason.enum).toContain('rotation_card_bin_mismatch');
+
+      const error = spec.components.schemas.RotationConflictError as {
+        required?: string[];
+        properties?: { message?: { type?: string }; reason?: { $ref?: string } };
+      };
+      expect(error.required).toEqual(['message', 'reason']);
+      expect(error.properties?.message?.type).toBe('string');
+      expect(error.properties?.reason?.$ref).toBe('#/components/schemas/RotationConflictReason');
+    });
+
+    it("pins what RotationCard.number means: contiguity, the create rule, and 'newest'", () => {
+      const description = propertyOf('RotationCard', 'number')?.description as string;
+      expect(description).toMatch(/[Cc]ontiguous 1\.\.N/);
+      expect(description).toMatch(/max\(number\)\s*\+\s*1/);
+      expect(description).toMatch(/highest-numbered/);
+      expect(description).toMatch(/zero active rotation rows/);
+      expect(description).toMatch(/no renumber endpoint/i);
+      expect(description).toMatch(/highest `number`.*id.*descending/);
     });
 
     it('documents registration order on GET /library/rotation/cards, mirrored from /library/rotation/{id}', () => {
