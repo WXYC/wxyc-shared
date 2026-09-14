@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.55.0');
+      expect(spec.info.version).toBe('1.56.0');
     });
 
     it('should have components section', () => {
@@ -3194,6 +3194,88 @@ describe('OpenAPI Specification', () => {
         properties: Record<string, unknown>;
       };
       expect(schema.properties).toHaveProperty(prop);
+    });
+  });
+
+  // WXYC/wxyc-shared#464: the release's definitive external links land on the
+  // catalog read shapes and get a dedicated release-scoped write, all sharing
+  // ONE `urls` vocabulary — position-ordered, replace-wholesale, bare-domain
+  // tolerant (no `format: uri`), bounded at 20 links of 2048 chars. The bounds
+  // mirror `RotationCreateFields.urls` (the filings/rotation-add path already
+  // carries links); the standalone write here sets them independent of a
+  // rotation stint (Backend storage: BS#2491).
+  describe('release-level urls (#464)', () => {
+    // Structural bounds only — the descriptions are tuned per site, so the one
+    // `urls` vocabulary is pinned by identical SHAPE, not identical prose.
+    const boundsOf = (prop: Record<string, unknown> | undefined) => ({
+      type: prop?.type,
+      maxItems: prop?.maxItems,
+      items: prop?.items,
+    });
+
+    for (const schemaName of ['AlbumSearchResult', 'AlbumDetail'] as const) {
+      it(`${schemaName} gains optional urls: a bounded array of plain strings, no format: uri`, () => {
+        const prop = propertyOf(schemaName, 'urls');
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('array');
+        expect(prop?.maxItems).toBe(20);
+        const items = prop?.items as Record<string, unknown> | undefined;
+        expect(items?.type).toBe('string');
+        expect(items?.maxLength).toBe(2048);
+        expect(items?.format).toBeUndefined();
+        expect(requiredKeysOf(schemaName)).not.toContain('urls');
+      });
+    }
+
+    it('AlbumUrlsUpdate is the write shape: urls required, bounded identically', () => {
+      const schema = spec.components.schemas.AlbumUrlsUpdate as {
+        type?: string;
+        required?: string[];
+        properties?: Record<string, Record<string, unknown>>;
+      };
+      expect(schema).toBeDefined();
+      expect(schema.type).toBe('object');
+      expect(schema.required).toEqual(['urls']);
+      const prop = schema.properties?.urls;
+      expect(prop?.type).toBe('array');
+      expect(prop?.maxItems).toBe(20);
+      const items = prop?.items as Record<string, unknown> | undefined;
+      expect(items?.type).toBe('string');
+      expect(items?.maxLength).toBe(2048);
+      expect(items?.format).toBeUndefined();
+    });
+
+    it('read and write shapes carry the identical urls bounds — one vocabulary, not four hand-copies', () => {
+      const search = boundsOf(propertyOf('AlbumSearchResult', 'urls'));
+      const detail = boundsOf(propertyOf('AlbumDetail', 'urls'));
+      const write = boundsOf(propertyOf('AlbumUrlsUpdate', 'urls'));
+      const rotation = boundsOf(propertyOf('RotationCreateFields', 'urls'));
+      expect(detail).toEqual(search);
+      expect(write).toEqual(search);
+      expect(rotation).toEqual(search);
+    });
+
+    it('declares PUT /library/{id}/urls under BearerAuth, taking AlbumUrlsUpdate and returning AlbumDetail', () => {
+      const put = (spec.paths['/library/{id}/urls'] as Record<string, unknown> | undefined)?.put as
+        | {
+            'x-wxyc-service'?: string;
+            security?: Array<Record<string, unknown>>;
+            requestBody?: { content?: Record<string, { schema?: { $ref?: string } }> };
+            responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+          }
+        | undefined;
+      expect(put).toBeDefined();
+      expect(put?.['x-wxyc-service']).toBe('backend-service');
+      expect(put?.security).toEqual([{ BearerAuth: [] }]);
+      expect(put?.requestBody?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/AlbumUrlsUpdate'
+      );
+      expect(put?.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/AlbumDetail'
+      );
+      expect(put?.responses?.['404']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ApiErrorResponse'
+      );
     });
   });
 

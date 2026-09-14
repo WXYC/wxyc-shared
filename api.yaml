@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.55.0
+  version: 1.56.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1947,6 +1947,38 @@ components:
           nullable: true
           maxLength: 500
 
+    AlbumUrlsUpdate:
+      type: object
+      description: >
+        Replace-wholesale set of a catalogued release's definitive external
+        links — the request body of `PUT /library/{id}/urls`. The `urls` array
+        REPLACES whatever links the release currently has; position IS the
+        contract (storage order), an empty array clears them, and there is no
+        partial/merge form. This is the release-scoped write that stands alone
+        from a rotation add: `RotationCreateFields.urls` already carries links
+        on the filings/rotation-add path (Backend persists those release-scoped
+        for the catalogued arm), while this sets them independent of any
+        rotation stint (BS#2491). Same one `urls` vocabulary as the read shapes
+        (`AlbumSearchResult`/`AlbumDetail`) and `RotationCreateFields.urls`.
+      required:
+        - urls
+      properties:
+        urls:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 2048
+          description: >
+            The links to store for this release, in the order they should be
+            displayed. Plain strings, not `format: uri` — MDs paste bare
+            domains, so a value carries no scheme guarantee and a renderer must
+            not bind one into an href without checking it. An empty array
+            clears the release's links. Bounded at 20 links of 2048 characters
+            each — identical to the read shapes and `RotationCreateFields.urls`
+            — and the bounds ship with the field because oasdiff treats adding
+            a request-side bound later as a breaking change.
+
     AlbumSearchResult:
       type: object
       required:
@@ -2083,6 +2115,25 @@ components:
             (which is track-title provenance). Empty or absent on normal
             artist/album hits. Backward-compatible — existing consumers
             ignore the field.
+        urls:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 2048
+          description: >
+            The release's definitive external links (label page, Bandcamp,
+            streaming, press), in storage order — position IS the contract, so
+            a consumer renders them in array order. Plain strings, not
+            `format: uri` — MDs paste bare domains, so a value carries no
+            scheme guarantee and a renderer must not bind one into an href
+            without checking it. Release-scoped and rotation-independent: set
+            replace-wholesale via `PUT /library/{id}/urls`. Bounded
+            identically to that write shape (`AlbumUrlsUpdate.urls`) and
+            `RotationCreateFields.urls` — at most 20 links, 2048 characters
+            each — so the one `urls` vocabulary is the same on read and write.
+            Optional here (never required) and absent until Backend-Service
+            persists it (BS#2491); a consumer must tolerate its absence.
 
     CatalogExportRow:
       type: object
@@ -2833,6 +2884,25 @@ components:
             Stamped on every recheck attempt by the
             `library-discogs-unavailable-recheck` cron. Read-only from the
             client side.
+        urls:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 2048
+          description: >
+            The release's definitive external links (label page, Bandcamp,
+            streaming, press), in storage order — position IS the contract, so
+            a consumer renders them in array order. Plain strings, not
+            `format: uri` — MDs paste bare domains, so a value carries no
+            scheme guarantee and a renderer must not bind one into an href
+            without checking it. Release-scoped and rotation-independent: set
+            replace-wholesale via `PUT /library/{id}/urls`. Same `urls`
+            vocabulary and bounds as the search read (`AlbumSearchResult.urls`)
+            and the write shape (`AlbumUrlsUpdate.urls`) — at most 20 links,
+            2048 characters each. Optional here (never required) and absent
+            until Backend-Service persists it (BS#2491); a consumer must
+            tolerate its absence.
         reconciled_identity:
           $ref: '#/components/schemas/ReconciledIdentity'
 
@@ -11421,6 +11491,52 @@ paths:
           description: >
             The album with `date_found` set, re-read through `getAlbumFromDB`
             after the write — the same shape `GET /library/info` serves.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumDetail'
+        '404':
+          description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/{id}/urls:
+    put:
+      x-wxyc-service: backend-service
+      summary: Set a catalogued release's definitive external links
+      description: |
+        Replace-wholesale write of the release's links, keyed to the release
+        (`library.id`) and independent of any rotation stint. The body's
+        `urls` array REPLACES the stored set in position order; an empty array
+        clears it. Backend-Service persists these release-scoped (not to a
+        rotation row) and reconciles each to LML on write, fail-open (BS#2491).
+        The filings/rotation-add paths that already carry `RotationCreateFields.urls`
+        continue to set links release-scoped for the catalogued arm; this is
+        the standalone write for setting them without touching rotation.
+      tags:
+        - Library
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlbumUrlsUpdate'
+      responses:
+        '200':
+          description: >
+            The release with its links replaced, re-read through
+            `getAlbumFromDB` — the same `AlbumDetail` shape `GET /library/info`
+            serves, now carrying the stored `urls`.
           content:
             application/json:
               schema:
