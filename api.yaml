@@ -3042,7 +3042,8 @@ components:
             type: string
           description: >
             Storage order. Plain strings, not `format: uri` — MDs paste bare
-            domains.
+            domains, so a value carries no scheme guarantee and a renderer
+            must not bind one into an href without checking it.
 
     AddRotationRequest:
       type: object
@@ -3058,11 +3059,21 @@ components:
           type: integer
         urls:
           type: array
+          maxItems: 20
           items:
             type: string
+            maxLength: 2048
           description: >
             Storage order. Plain strings, not `format: uri` — MDs paste bare
-            domains.
+            domains, so a value carries no scheme guarantee and a renderer
+            must not bind one into an href without checking it. Bounded here,
+            at publish time, because oasdiff treats adding request-side
+            bounds later as a breaking change — they could never be added
+            after this ships. The spec's existing request arrays split
+            between per-item-work caps (25) and bulk-drain caps (1000);
+            neither fits a hand-curated link list, so this takes a small cap
+            of 20, with 2048 characters per item covering any pasted URL. An
+            empty array is equivalent to omitting the field.
 
     KillRotationRequest:
       type: object
@@ -3148,7 +3159,8 @@ components:
             type: string
           description: >
             Storage order. Plain strings, not `format: uri` — MDs paste bare
-            domains.
+            domains, so a value carries no scheme guarantee and a renderer
+            must not bind one into an href without checking it.
 
     RotationRowSummary:
       type: object
@@ -10486,8 +10498,9 @@ paths:
         `GET /library/rotation` for the opposite convention.
 
         Registration order is load-bearing and permanent: this route must
-        stay registered *after* `/library/rotation/uncatalogued`, or the
-        literal segment is captured as an id. Pinned by Backend's
+        stay registered *after* its literal siblings
+        `/library/rotation/uncatalogued` and `/library/rotation/cards`, or
+        the literal segment is captured as an id. Pinned by Backend's
         `library-rotation-uncatalogued.route.test.ts` and
         `library-rotation-route-order.route.test.ts`, which asserts the
         router's registration order per method.
@@ -10518,6 +10531,19 @@ paths:
     get:
       x-wxyc-service: backend-service
       summary: List rotation cards
+      description: >
+        Every card across all bins, each with a count of the rotation rows
+        currently active on it.
+
+        Registration order is load-bearing and permanent: this literal path
+        is ambiguous with the templated `GET /library/rotation/{id}` (same
+        method, same `catalog: ['read']` permission), so it must stay
+        registered *before* the `/:id` route — registered in natural order,
+        Express matches `/:id` with id = "cards", the handler parses a
+        non-integer id, and this list fails on every request with no
+        auth-layer signal to distinguish it from any other failure. Pinned
+        by Backend's `library-rotation-route-order.route.test.ts`, which
+        asserts the router's registration order per method.
       # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
       security:
         - BearerAuth: []
@@ -10614,9 +10640,12 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: >
-            Card is not the last card in its bin, or still has rotation
-            entries assigned to it. Deletable only when it is the last
-            remaining card in its bin and holds no entries.
+            Deletion requires both conditions at once: the card is the
+            highest-numbered card in its bin AND it has zero active rotation
+            rows assigned to it. A card failing either — a sibling card with
+            a higher `number`, or any active rotation still on this card —
+            is refused with this status. Bins therefore shrink only from the
+            top, which is what keeps `RotationCard.number` contiguous 1..N.
           content:
             application/json:
               schema:

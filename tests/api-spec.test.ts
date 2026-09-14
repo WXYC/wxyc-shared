@@ -1843,6 +1843,15 @@ describe('OpenAPI Specification', () => {
       });
     }
 
+    // Request-side bounds must ship with the field: oasdiff treats a later
+    // maxItems/maxLength on a request property as a breaking change, so once
+    // this contract merges unbounded it can never be bounded cleanly.
+    it('bounds AddRotationRequest.urls at filing time (maxItems + per-item maxLength)', () => {
+      const prop = propertyOf('AddRotationRequest', 'urls');
+      expect(prop?.maxItems).toBe(20);
+      expect((prop?.items as Record<string, unknown>)?.maxLength).toBe(2048);
+    });
+
     it('AddRotationRequest gains optional card_id as an integer', () => {
       const prop = propertyOf('AddRotationRequest', 'card_id');
       expect(prop).toBeDefined();
@@ -1927,12 +1936,33 @@ describe('OpenAPI Specification', () => {
       );
     });
 
-    it('defines DELETE /library/rotation/cards/{id} documenting the last-in-bin-and-empty 409', () => {
+    it('defines DELETE /library/rotation/cards/{id} documenting the conjunctive 409 invariant', () => {
       const del = (
         spec.paths['/library/rotation/cards/{id}'] as Record<string, Record<string, unknown>>
       ).delete as { responses: Record<string, { description?: string }> };
       expect(del.responses['409']).toBeDefined();
-      expect(del.responses['409']?.description).toMatch(/last/i);
+      // Both conditions, stated once: highest-numbered card in its bin AND
+      // zero active rotation rows. An earlier draft said "last card in its
+      // bin" in one sentence and "last remaining card" in the next — two
+      // incompatible servers could each claim conformance.
+      expect(del.responses['409']?.description).toMatch(/highest-numbered/);
+      expect(del.responses['409']?.description).toMatch(/zero active rotation rows/);
+      expect(del.responses['409']?.description).not.toMatch(/last remaining/);
+    });
+
+    it('documents registration order on GET /library/rotation/cards, mirrored from /library/rotation/{id}', () => {
+      const cardsGet = (
+        spec.paths['/library/rotation/cards'] as Record<string, Record<string, unknown>>
+      ).get as { description?: string };
+      // The literal path is ambiguous with the templated GET
+      // /library/rotation/{id}; the note is what tells an emitter the
+      // literal must register first, and names the Backend test pinning it.
+      expect(cardsGet.description).toMatch(/[Rr]egistration order is load-bearing/);
+      expect(cardsGet.description).toMatch(/library-rotation-route-order\.route\.test\.ts/);
+      const idGet = (
+        spec.paths['/library/rotation/{id}'] as Record<string, Record<string, unknown>>
+      ).get as { description?: string };
+      expect(idGet.description).toMatch(/\/library\/rotation\/cards/);
     });
   });
 
