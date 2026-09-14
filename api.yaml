@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.52.0
+  version: 1.53.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2015,6 +2015,14 @@ components:
           $ref: '#/components/schemas/RotationBin'
         rotation_id:
           type: integer
+        card:
+          allOf:
+            - $ref: '#/components/schemas/RotationCard'
+          nullable: true
+          description: >
+            The card this release is on, from the same CURRENT_DATE-filtered
+            JOIN as rotation_bin. Non-null only while actively rotating,
+            never on a killed row.
         plays:
           type: integer
         on_streaming:
@@ -2966,6 +2974,43 @@ components:
     # Rotation Types
     # ===================
 
+    RotationCard:
+      type: object
+      required:
+        - id
+        - bin
+        - number
+      properties:
+        id:
+          type: integer
+        bin:
+          $ref: '#/components/schemas/RotationBin'
+        number:
+          type: integer
+          description: Card number within its bin, 1..N.
+        name:
+          type: string
+          nullable: true
+
+    AddRotationCardRequest:
+      type: object
+      required:
+        - bin
+      properties:
+        bin:
+          $ref: '#/components/schemas/RotationBin'
+        name:
+          type: string
+
+    UpdateRotationCardRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          nullable: true
+
     RotationEntry:
       type: object
       required:
@@ -2987,6 +3032,17 @@ components:
           type: string
           format: date
           nullable: true
+        card:
+          allOf:
+            - $ref: '#/components/schemas/RotationCard'
+          nullable: true
+        urls:
+          type: array
+          items:
+            type: string
+          description: >
+            Storage order. Plain strings, not `format: uri` — MDs paste bare
+            domains.
 
     AddRotationRequest:
       type: object
@@ -2998,6 +3054,15 @@ components:
           type: integer
         rotation_bin:
           $ref: '#/components/schemas/RotationBin'
+        card_id:
+          type: integer
+        urls:
+          type: array
+          items:
+            type: string
+          description: >
+            Storage order. Plain strings, not `format: uri` — MDs paste bare
+            domains.
 
     KillRotationRequest:
       type: object
@@ -3073,6 +3138,17 @@ components:
             AlbumSearchResult/BinLibraryDetails/AlbumInfoResponse): a
             library-unlinked rotation row has no library row at all, hence no
             legacy id.
+        card:
+          allOf:
+            - $ref: '#/components/schemas/RotationCard'
+          nullable: true
+        urls:
+          type: array
+          items:
+            type: string
+          description: >
+            Storage order. Plain strings, not `format: uri` — MDs paste bare
+            domains.
 
     RotationRowSummary:
       type: object
@@ -10286,6 +10362,19 @@ paths:
       # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
       security:
         - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, killed, all]
+            default: active
+          description: >
+            These facets are not a partition: `active` is `kill_date IS NULL
+            OR kill_date > CURRENT_DATE` (today's default read), `killed` is
+            `kill_date IS NOT NULL`, so a future-dated kill appears in both;
+            `all` applies no filter.
       responses:
         '200':
           description: List of rotations
@@ -10420,6 +10509,114 @@ paths:
                 $ref: '#/components/schemas/RotationRowSummary'
         '404':
           description: Rotation entry not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/rotation/cards:
+    get:
+      x-wxyc-service: backend-service
+      summary: List rotation cards
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Rotation cards, each with its currently-active rotation count
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  allOf:
+                    - $ref: '#/components/schemas/RotationCard'
+                    - type: object
+                      required:
+                        - active_count
+                      properties:
+                        active_count:
+                          type: integer
+
+    post:
+      x-wxyc-service: backend-service
+      summary: Add a rotation card
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddRotationCardRequest'
+      responses:
+        '200':
+          description: The newly created card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotationCard'
+
+  /library/rotation/cards/{id}:
+    patch:
+      x-wxyc-service: backend-service
+      summary: Rename a rotation card
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRotationCardRequest'
+      responses:
+        '200':
+          description: The updated card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotationCard'
+        '404':
+          description: Card not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+    delete:
+      x-wxyc-service: backend-service
+      summary: Delete a rotation card
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Card deleted
+        '404':
+          description: Card not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            Card is not the last card in its bin, or still has rotation
+            entries assigned to it. Deletable only when it is the last
+            remaining card in its bin and holds no entries.
           content:
             application/json:
               schema:

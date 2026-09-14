@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.52.0');
+      expect(spec.info.version).toBe('1.53.0');
     });
 
     it('should have components section', () => {
@@ -1803,6 +1803,136 @@ describe('OpenAPI Specification', () => {
 
     it('should define RotationWithAlbum', () => {
       expect(spec.components.schemas.RotationWithAlbum).toBeDefined();
+    });
+  });
+
+  describe('Rotation cards, per-entry URLs, status param (#453)', () => {
+    type SchemaProp = {
+      type?: string;
+      format?: string;
+      nullable?: boolean;
+      items?: Record<string, unknown>;
+      $ref?: string;
+      allOf?: Array<{ $ref?: string }>;
+    };
+    type Schema = {
+      properties?: Record<string, SchemaProp>;
+      required?: string[];
+      allOf?: unknown[];
+    };
+
+    it('defines RotationCard with id, bin, number, and a nullable name', () => {
+      const schema = spec.components.schemas.RotationCard as Schema;
+      expect(schema).toBeDefined();
+      expect(schema.properties?.id?.type).toBe('integer');
+      expect(schema.properties?.bin?.$ref).toBe('#/components/schemas/RotationBin');
+      expect(schema.properties?.number?.type).toBe('integer');
+      expect(schema.properties?.name?.type).toBe('string');
+      expect(schema.properties?.name?.nullable).toBe(true);
+      expect(schema.required ?? []).toEqual(expect.arrayContaining(['id', 'bin', 'number']));
+    });
+
+    for (const schemaName of ['AddRotationRequest', 'Rotation', 'RotationEntry'] as const) {
+      it(`${schemaName} gains optional urls as an array of plain strings`, () => {
+        const prop = propertyOf(schemaName, 'urls');
+        expect(prop).toBeDefined();
+        expect(prop?.type).toBe('array');
+        expect((prop?.items as Record<string, unknown>)?.type).toBe('string');
+        expect((prop?.items as Record<string, unknown>)?.format).toBeUndefined();
+        expect(requiredKeysOf(schemaName)).not.toContain('urls');
+      });
+    }
+
+    it('AddRotationRequest gains optional card_id as an integer', () => {
+      const prop = propertyOf('AddRotationRequest', 'card_id');
+      expect(prop).toBeDefined();
+      expect(prop?.type).toBe('integer');
+      expect(requiredKeysOf('AddRotationRequest')).not.toContain('card_id');
+    });
+
+    for (const schemaName of ['Rotation', 'RotationEntry', 'AlbumSearchResult'] as const) {
+      it(`${schemaName} gains optional nullable card as a $ref to RotationCard`, () => {
+        const prop = propertyOf(schemaName, 'card') as SchemaProp | undefined;
+        expect(prop).toBeDefined();
+        expect(prop?.allOf?.[0]?.$ref).toBe('#/components/schemas/RotationCard');
+        expect(prop?.nullable).toBe(true);
+        expect(requiredKeysOf(schemaName)).not.toContain('card');
+      });
+    }
+
+    it('GET /library/rotation gains a status query param defaulting to active', () => {
+      const get = (
+        spec.paths['/library/rotation'] as Record<string, Record<string, unknown>>
+      ).get as { parameters?: Array<Record<string, unknown>> };
+      const status = get.parameters?.find((p) => p.name === 'status');
+      expect(status).toBeDefined();
+      const schema = status?.schema as { enum?: string[]; default?: string };
+      expect(schema.enum).toEqual(['active', 'killed', 'all']);
+      expect(schema.default).toBe('active');
+    });
+
+    it('documents that status facets are not a partition', () => {
+      const get = (
+        spec.paths['/library/rotation'] as Record<string, Record<string, unknown>>
+      ).get as { parameters?: Array<Record<string, unknown>> };
+      const status = get.parameters?.find((p) => p.name === 'status') as { description?: string };
+      expect(status.description).toMatch(/not a partition/i);
+    });
+
+    it('defines GET /library/rotation/cards returning RotationCard rows with active_count', () => {
+      const get = (
+        spec.paths['/library/rotation/cards'] as Record<string, Record<string, unknown>>
+      ).get as {
+        responses: { '200': { content: { 'application/json': { schema: Record<string, unknown> } } } };
+      };
+      const itemSchema = (get.responses['200'].content['application/json'].schema.items ??
+        {}) as { allOf?: Array<Record<string, unknown>> };
+      const refs = (itemSchema.allOf ?? []).map((b) => b.$ref).filter(Boolean);
+      expect(refs).toContain('#/components/schemas/RotationCard');
+      const countBranch = (itemSchema.allOf ?? []).find(
+        (b) => (b.properties as Record<string, unknown> | undefined)?.active_count
+      ) as { properties?: Record<string, SchemaProp> } | undefined;
+      expect(countBranch?.properties?.active_count?.type).toBe('integer');
+    });
+
+    it('defines POST /library/rotation/cards accepting bin + optional name, returning RotationCard', () => {
+      const post = (
+        spec.paths['/library/rotation/cards'] as Record<string, Record<string, unknown>>
+      ).post as {
+        requestBody: { content: { 'application/json': { schema: { $ref?: string } } } };
+        responses: { '200': { content: { 'application/json': { schema: { $ref?: string } } } } };
+      };
+      const reqRef = post.requestBody.content['application/json'].schema.$ref;
+      const reqSchema = spec.components.schemas[reqRef!.split('/').pop() as string] as Schema;
+      expect(reqSchema.properties?.bin?.$ref).toBe('#/components/schemas/RotationBin');
+      expect(reqSchema.required ?? []).toContain('bin');
+      expect(reqSchema.required ?? []).not.toContain('name');
+      expect(post.responses['200'].content['application/json'].schema.$ref).toBe(
+        '#/components/schemas/RotationCard'
+      );
+    });
+
+    it('defines PATCH /library/rotation/cards/{id} accepting a name, returning RotationCard', () => {
+      const patch = (
+        spec.paths['/library/rotation/cards/{id}'] as Record<string, Record<string, unknown>>
+      ).patch as {
+        requestBody: { content: { 'application/json': { schema: { $ref?: string } } } };
+        responses: { '200': { content: { 'application/json': { schema: { $ref?: string } } } } };
+      };
+      const reqRef = patch.requestBody.content['application/json'].schema.$ref;
+      const reqSchema = spec.components.schemas[reqRef!.split('/').pop() as string] as Schema;
+      expect(reqSchema.properties?.name).toBeDefined();
+      expect(patch.responses['200'].content['application/json'].schema.$ref).toBe(
+        '#/components/schemas/RotationCard'
+      );
+    });
+
+    it('defines DELETE /library/rotation/cards/{id} documenting the last-in-bin-and-empty 409', () => {
+      const del = (
+        spec.paths['/library/rotation/cards/{id}'] as Record<string, Record<string, unknown>>
+      ).delete as { responses: Record<string, { description?: string }> };
+      expect(del.responses['409']).toBeDefined();
+      expect(del.responses['409']?.description).toMatch(/last/i);
     });
   });
 
