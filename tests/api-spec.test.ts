@@ -1984,6 +1984,15 @@ describe('OpenAPI Specification', () => {
       );
     });
 
+    it('keeps the "at least one of label or label_id" constraint on AlbumCreateFields, where those fields live', () => {
+      const schema = spec.components.schemas.AlbumCreateFields as { description?: string };
+      expect(schema.description).toMatch(/At least one of `label` or `label_id` must be provided/);
+      const addAlbumRequest = spec.components.schemas.AddAlbumRequest as {
+        allOf?: Array<{ description?: string }>;
+      };
+      expect(addAlbumRequest.allOf?.[1]?.description).toBeUndefined();
+    });
+
     it('recomposes AddAlbumRequest via allOf[AlbumCreateFields, artist fields] with an unchanged effective shape', () => {
       const schema = spec.components.schemas.AddAlbumRequest as { allOf?: Array<{ $ref?: string }> };
       expect(schema.allOf?.[0]?.$ref).toBe('#/components/schemas/AlbumCreateFields');
