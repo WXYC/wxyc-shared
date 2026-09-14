@@ -2604,7 +2604,7 @@ components:
             (`genre_artist_crossreference.artist_genre_code`) is a Postgres
             integer, hence the 2147483647 ceiling — bounded here, at
             publish time, because oasdiff treats adding request-side bounds
-            later as a breaking change (see `AddRotationRequest.urls`).
+            later as a breaking change (see `RotationCreateFields.urls`).
             Declared optional ahead of the Backend-Service relaxation that
             honors omission (WXYC/Backend-Service#2475): the deployed
             `POST /library/artists` still 400s on a body without it, so a
@@ -3090,7 +3090,18 @@ components:
             - $ref: '#/components/schemas/RotationCard'
           nullable: true
         urls:
-          $ref: '#/components/schemas/RotationUrlList'
+          type: array
+          items:
+            type: string
+          description: >
+            Storage order. Plain strings, not `format: uri` — MDs paste bare
+            domains, so a value carries no scheme guarantee and a renderer
+            must not bind one into an href without checking it. Deliberately
+            an inline twin: `Rotation.urls` and `RotationEntry.urls` are
+            pinned identical by a spec test rather than `$ref`ing a named
+            array schema, because naming a top-level array makes the Python
+            generator wrap the field in a RootModel (`.root` to reach the
+            list) while every other target keeps a plain string list.
 
     RotationCreateFields:
       type: object
@@ -3124,15 +3135,6 @@ components:
             neither fits a hand-curated link list, so this takes a small cap
             of 20, with 2048 characters per item covering any pasted URL. An
             empty array is equivalent to omitting the field.
-
-    RotationUrlList:
-      type: array
-      items:
-        type: string
-      description: >
-        Storage order. Plain strings, not `format: uri` — MDs paste bare
-        domains, so a value carries no scheme guarantee and a renderer must
-        not bind one into an href without checking it.
 
     AddRotationRequest:
       description: >
@@ -3284,7 +3286,9 @@ components:
         `artist_name_conflict` are the exact strings the deployed
         `POST /library/artists` controller already answers with — the
         composite reuses that create path; `rotation_card_bin_mismatch` is
-        the same string `RotationConflictReason` declares for the direct
+        defined ahead of the Backend-Service implementation for the
+        rotation arm's card-bin invariant, the same string
+        `RotationConflictReason` declares for the direct
         `POST /library/rotation` and `DELETE /library/rotation/cards/{id}`
         409s (WXYC/Backend-Service#2472, inherited by the composite per
         WXYC/Backend-Service#2474) — pinned equal by a spec test rather than
@@ -3304,7 +3308,12 @@ components:
         other two distinguish the card-delete guard's conjunctive halves: a
         sibling card with a higher `number` (`card_not_highest_in_bin`) vs.
         an active rotation row still assigned to this card
-        (`card_has_active_rotations`).
+        (`card_has_active_rotations`). All three values are declared ahead
+        of the Backend-Service implementation (WXYC/Backend-Service#2472 in
+        flight, WXYC/Backend-Service#2473 pending): the deployed backend
+        has no rotation-card code path yet, so no endpoint raises them
+        today — each endpoint's 409 states what the deployed behavior is
+        meanwhile.
 
     RotationConflictError:
       type: object
@@ -3397,7 +3406,18 @@ components:
             - $ref: '#/components/schemas/RotationCard'
           nullable: true
         urls:
-          $ref: '#/components/schemas/RotationUrlList'
+          type: array
+          items:
+            type: string
+          description: >
+            Storage order. Plain strings, not `format: uri` — MDs paste bare
+            domains, so a value carries no scheme guarantee and a renderer
+            must not bind one into an href without checking it. Deliberately
+            an inline twin: `Rotation.urls` and `RotationEntry.urls` are
+            pinned identical by a spec test rather than `$ref`ing a named
+            array schema, because naming a top-level array makes the Python
+            generator wrap the field in a RootModel (`.root` to reach the
+            list) while every other target keeps a plain string list.
 
     RotationRowSummary:
       type: object
@@ -10707,7 +10727,11 @@ paths:
           description: >
             `card_id` names a card in a bin other than `rotation_bin`
             (WXYC/Backend-Service#2472). The only reason this endpoint can
-            raise is `rotation_card_bin_mismatch`.
+            raise is `rotation_card_bin_mismatch`. Declared ahead of the
+            Backend-Service implementation: the deployed endpoint's field
+            allowlist silently drops `card_id` and answers 200 with the
+            rotation filed to no card, so a client must not rely on this
+            409 — nor on card assignment — until #2472 ships.
           content:
             application/json:
               schema:
@@ -10944,7 +10968,10 @@ paths:
             rotation still on this card (`card_has_active_rotations`) — is
             refused with this status, discriminated by `reason`. Bins
             therefore shrink only from the top, which is what keeps
-            `RotationCard.number` contiguous 1..N.
+            `RotationCard.number` contiguous 1..N. Declared ahead of the
+            Backend-Service implementation (WXYC/Backend-Service#2473): the
+            deployed backend registers no rotation-card routes yet, so
+            today this request 404s before any guard runs.
           content:
             application/json:
               schema:
