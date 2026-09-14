@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.53.0
+  version: 1.54.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2472,24 +2472,13 @@ components:
           nullable: true
           description: Track title; nullable varchar(255), matching the CTA column.
 
-    AddAlbumRequest:
+    AlbumCreateFields:
       type: object
       description: >
-        At least one of `label` or `label_id` must be provided (BS#2410; the
-        rotation-import plan's D5). With `label_id` alone, Backend resolves
-        `labels.label_name` server-side for the denormalized `library.label`
-        column and skips label creation; a dangling `label_id` is a 400. With
-        `label` alone, the create-or-reuse-by-exact-name behavior is
-        unchanged.
-
-        Both may be sent together — the rule is at-least-one, not
-        exactly-one. `label_id` is validated and written to the FK either
-        way, and an explicitly sent non-empty `label` wins over the name
-        resolved from `label_id` for the denormalized `library.label` column
-        (Backend's `resolveNewAlbumLabel`, pinned by "keeps an explicitly
-        sent label over the resolved name when both are present"). An empty
-        `label` does not win: it falls back to the resolved name rather than
-        storing `''`.
+        Every `AddAlbumRequest` field except the artist ones (`artist_name`,
+        `artist_id`) — extracted so `POST /library/filings` (#454) can
+        compose it with a top-level `artist` block without also accepting a
+        second, conflicting artist reference nested inside `release`.
       required:
         - album_title
         - genre_id
@@ -2497,10 +2486,6 @@ components:
       properties:
         album_title:
           type: string
-        artist_name:
-          type: string
-        artist_id:
-          type: integer
         label:
           type: string
         label_id:
@@ -2536,6 +2521,32 @@ components:
           type: string
         album_artist:
           type: string
+
+    AddAlbumRequest:
+      allOf:
+        - $ref: '#/components/schemas/AlbumCreateFields'
+        - type: object
+          description: >
+            At least one of `label` or `label_id` must be provided (BS#2410;
+            the rotation-import plan's D5). With `label_id` alone, Backend
+            resolves `labels.label_name` server-side for the denormalized
+            `library.label` column and skips label creation; a dangling
+            `label_id` is a 400. With `label` alone, the
+            create-or-reuse-by-exact-name behavior is unchanged.
+
+            Both may be sent together — the rule is at-least-one, not
+            exactly-one. `label_id` is validated and written to the FK
+            either way, and an explicitly sent non-empty `label` wins over
+            the name resolved from `label_id` for the denormalized
+            `library.label` column (Backend's `resolveNewAlbumLabel`, pinned
+            by "keeps an explicitly sent label over the resolved name when
+            both are present"). An empty `label` does not win: it falls back
+            to the resolved name rather than storing `''`.
+          properties:
+            artist_name:
+              type: string
+            artist_id:
+              type: integer
 
     Label:
       type: object
@@ -2573,6 +2584,15 @@ components:
           type: string
         genre_id:
           type: integer
+        code_number:
+          type: integer
+          minimum: 1
+          description: >
+            Operator-chosen artist call number within the `(genre_id,
+            code_letters)` bucket. Omitted, the server assigns the next
+            number in that bucket (the same generator `GET
+            /library/artists/search`'s peek path uses) — this field makes
+            that assignment overridable, it does not replace it.
 
     CatalogSearchParams:
       type: object
@@ -3105,6 +3125,71 @@ components:
               type: string
             code_number:
               type: integer
+
+    ExistingArtistRef:
+      type: object
+      required:
+        - artist_id
+      properties:
+        artist_id:
+          type: integer
+
+    FilingRotationRequest:
+      type: object
+      required:
+        - rotation_bin
+      properties:
+        rotation_bin:
+          $ref: '#/components/schemas/RotationBin'
+        card_id:
+          type: integer
+        urls:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 2048
+          description: >
+            Same shape and bounds as `AddRotationRequest.urls` — see that
+            field for the rationale. No `album_id` here: the release this
+            rotation entry attaches to is the one this same request creates.
+
+    LibraryFilingRequest:
+      type: object
+      description: >
+        Composite of the three sequential writes filing a new record into
+        rotation previously required (create artist, create release, create
+        rotation entry) — see `POST /library/filings` (#454). All-or-nothing:
+        a mid-chain failure rolls back the whole request rather than
+        stranding partial state for the client to reconcile.
+      required:
+        - artist
+        - release
+      properties:
+        artist:
+          oneOf:
+            - $ref: '#/components/schemas/AddArtistRequest'
+            - $ref: '#/components/schemas/ExistingArtistRef'
+          description: >
+            Either a full new-artist payload or a reference to an existing
+            one by `artist_id`.
+        release:
+          $ref: '#/components/schemas/AlbumCreateFields'
+        rotation:
+          $ref: '#/components/schemas/FilingRotationRequest'
+
+    LibraryFilingResponse:
+      type: object
+      required:
+        - artist
+        - release
+      properties:
+        artist:
+          $ref: '#/components/schemas/Artist'
+        release:
+          $ref: '#/components/schemas/Album'
+        rotation:
+          $ref: '#/components/schemas/RotationEntry'
 
     # Legacy rotation schema (for backward compatibility with existing endpoints)
     Rotation:
@@ -9987,6 +10072,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Album'
+
+  /library/filings:
+    post:
+      x-wxyc-service: backend-service
+      summary: File a new record into the catalog (and optionally rotation) transactionally
+      description: >
+        Composite of the artist, release, and (optional) rotation writes
+        filing a record previously required as three sequential calls
+        (#454). All-or-nothing: a mid-chain failure rolls back the entire
+        request, so the client never has to reconcile partial state. Named
+        as a noun resource — "a filing" — matching every other `/library`
+        sibling; `/library/file` would read as a file upload.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LibraryFilingRequest'
+      responses:
+        '200':
+          description: Successfully filed the artist, release, and (if requested) rotation entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LibraryFilingResponse'
+        '400':
+          description: Validation failure, or an `artist.artist_id` that does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /library/query:
     get:
