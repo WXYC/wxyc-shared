@@ -115,7 +115,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.53.0');
+      expect(spec.info.version).toBe('1.54.0');
     });
 
     it('should have components section', () => {
@@ -1963,6 +1963,121 @@ describe('OpenAPI Specification', () => {
         spec.paths['/library/rotation/{id}'] as Record<string, Record<string, unknown>>
       ).get as { description?: string };
       expect(idGet.description).toMatch(/\/library\/rotation\/cards/);
+    });
+  });
+
+  describe('Library filings transactional composite (#454)', () => {
+    it('extracts AlbumCreateFields with every AddAlbumRequest field except the artist ones', () => {
+      const schema = spec.components.schemas.AlbumCreateFields as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+      expect(schema).toBeDefined();
+      expect(schema.properties?.artist_name).toBeUndefined();
+      expect(schema.properties?.artist_id).toBeUndefined();
+      expect(schema.properties?.album_title).toBeDefined();
+      expect(schema.properties?.genre_id).toBeDefined();
+      expect(schema.properties?.format_id).toBeDefined();
+      expect(schema.properties?.code_number).toBeDefined();
+      expect(schema.required).toEqual(
+        expect.arrayContaining(['album_title', 'genre_id', 'format_id'])
+      );
+    });
+
+    it('recomposes AddAlbumRequest via allOf[AlbumCreateFields, artist fields] with an unchanged effective shape', () => {
+      const schema = spec.components.schemas.AddAlbumRequest as { allOf?: Array<{ $ref?: string }> };
+      expect(schema.allOf?.[0]?.$ref).toBe('#/components/schemas/AlbumCreateFields');
+      for (const field of [
+        'album_title',
+        'artist_name',
+        'artist_id',
+        'label',
+        'label_id',
+        'genre_id',
+        'format_id',
+        'code_number',
+        'code_volume_letters',
+        'disc_quantity',
+        'alternate_artist_name',
+        'album_artist',
+      ]) {
+        expect(propertyOf('AddAlbumRequest', field)).toBeDefined();
+      }
+      expect(requiredKeysOf('AddAlbumRequest')).toEqual(
+        expect.arrayContaining(['album_title', 'genre_id', 'format_id'])
+      );
+    });
+
+    it('AddArtistRequest gains optional code_number with server-assignment semantics documented', () => {
+      const prop = propertyOf('AddArtistRequest', 'code_number');
+      expect(prop).toBeDefined();
+      expect(prop?.type).toBe('integer');
+      expect(prop?.description).toMatch(/server assigns the next number/i);
+      expect(requiredKeysOf('AddArtistRequest')).not.toContain('code_number');
+    });
+
+    it('defines LibraryFilingRequest with artist oneOf[AddArtistRequest, ExistingArtistRef], release, and optional rotation', () => {
+      const schema = spec.components.schemas.LibraryFilingRequest as {
+        required?: string[];
+        properties?: {
+          artist?: { oneOf?: Array<{ $ref?: string }> };
+          release?: { $ref?: string };
+          rotation?: { $ref?: string };
+        };
+      };
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(expect.arrayContaining(['artist', 'release']));
+      const artistRefs = schema.properties?.artist?.oneOf?.map((b) => b.$ref) ?? [];
+      expect(artistRefs).toContain('#/components/schemas/AddArtistRequest');
+      expect(artistRefs).toContain('#/components/schemas/ExistingArtistRef');
+      expect(schema.properties?.release?.$ref).toBe('#/components/schemas/AlbumCreateFields');
+      expect(schema.properties?.rotation?.$ref).toBe('#/components/schemas/FilingRotationRequest');
+      expect(schema.required).not.toContain('rotation');
+    });
+
+    it('defines LibraryFilingResponse as all-$ref: artist, release, and optional rotation', () => {
+      const schema = spec.components.schemas.LibraryFilingResponse as {
+        required?: string[];
+        properties?: {
+          artist?: { $ref?: string };
+          release?: { $ref?: string };
+          rotation?: { $ref?: string };
+        };
+      };
+      expect(schema).toBeDefined();
+      expect(schema.required).toEqual(expect.arrayContaining(['artist', 'release']));
+      expect(schema.properties?.artist?.$ref).toBe('#/components/schemas/Artist');
+      expect(schema.properties?.release?.$ref).toBe('#/components/schemas/Album');
+      expect(schema.properties?.rotation?.$ref).toBe('#/components/schemas/RotationEntry');
+      expect(schema.required).not.toContain('rotation');
+    });
+
+    it('bounds FilingRotationRequest.urls the same way as AddRotationRequest.urls', () => {
+      const prop = propertyOf('FilingRotationRequest', 'urls');
+      expect(prop?.maxItems).toBe(20);
+      expect((prop?.items as Record<string, unknown>)?.maxLength).toBe(2048);
+      expect(requiredKeysOf('FilingRotationRequest')).toEqual(['rotation_bin']);
+    });
+
+    it('defines POST /library/filings with an all-$ref request and response', () => {
+      const post = (
+        spec.paths['/library/filings'] as Record<string, Record<string, unknown>>
+      ).post as {
+        security?: unknown[];
+        requestBody?: { content?: Record<string, { schema?: { $ref?: string } }> };
+        responses?: Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+      };
+      expect(post).toBeDefined();
+      expect(post.security).toEqual([{ BearerAuth: [] }]);
+      expect(post.requestBody?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/LibraryFilingRequest'
+      );
+      expect(post.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/LibraryFilingResponse'
+      );
+      expect(post.responses?.['400']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ApiErrorResponse'
+      );
     });
   });
 
