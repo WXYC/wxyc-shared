@@ -871,3 +871,227 @@ FAKESED
         [[ "$output" == *"$field"* ]]
     done
 }
+
+# --- #466: the post-condition above was a DENYLIST on the token `AnyUrl`,
+# --- read off the field's own annotation with no indirection resolved. Two
+# --- doors were left open, both found reviewing the port into
+# --- library-metadata-lookup (LML#1312) and both closed here.
+# ---
+# --- Door 1 -- a named `$ref` schema. api.yaml's `DiscogsMatchResult` says
+# --- the streaming URL fields "will be migrated to use $ref in a future
+# --- version", and this generator wraps a named scalar schema in a
+# --- RootModel: api.yaml 1.56.0 already emits `class Url(RootModel[
+# --- constr(max_length=2048)])` and `class Name(RootModel[constr(...)])`.
+# --- Point one of the five at such a schema and the generated field reads
+# --- `spotify_url: StreamingUrl | None` -- the sed doesn't match it, the
+# --- annotation holds no `AnyUrl` token, the denylist sees nothing, the
+# --- script exits 0, and the field decodes as a validated AnyUrl anyway.
+# --- That is precisely the outcome #428 exists to prevent, reached through
+# --- the one door the check left open.
+# ---
+# --- The fix is to assert what the annotation IS rather than what it is
+# --- not: the set of names the annotation references, minus the wrappers
+# --- that don't change what it decodes as, must be exactly {"str"}. That
+# --- also rejects a `constr(...)` narrowing and a `RootModel[str]` wrapper
+# --- -- deliberately. Neither decodes as plain `str` (the wrapper needs
+# --- `.root` to reach the value), and both want a human to look.
+
+write_streaming_url_ref_fixture_spec() {
+    # Same five fields as write_streaming_url_fixture_spec, except spotify_url
+    # is pointed at a NAMED schema instead of being declared inline -- the
+    # exact migration DiscogsMatchResult's description promises. The other
+    # four stay inline so a failure isolates the $ref field as the offender
+    # rather than reporting all five.
+    cat > "$TEST_TEMP_DIR/streaming-ref.yaml" <<'EOF'
+openapi: 3.0.3
+info:
+  title: Streaming Ref Fixture
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    StreamingUrl:
+      type: string
+      format: uri
+      description: A streaming service URL.
+    StreamingLinks:
+      type: object
+      properties:
+        spotify_url:
+          $ref: '#/components/schemas/StreamingUrl'
+        apple_music_url:
+          type: string
+          format: uri
+          nullable: true
+          description: Apple Music album URL fixture.
+        youtube_music_url:
+          type: string
+          format: uri
+          nullable: true
+          description: YouTube Music search URL fixture.
+        bandcamp_url:
+          type: string
+          format: uri
+          nullable: true
+          description: Bandcamp album URL fixture.
+        soundcloud_url:
+          type: string
+          format: uri
+          nullable: true
+          description: SoundCloud search URL fixture.
+EOF
+}
+
+@test "a named \$ref schema does not slip the pin past the post-condition (#466)" {
+    command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
+    write_streaming_url_ref_fixture_spec
+
+    run "$SCRIPT_PATH" --input "$TEST_TEMP_DIR/streaming-ref.yaml" --output "$TEST_TEMP_DIR/out/models.py"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"#428 pin did not apply"* ]]
+    # Named as the offender by name, with the wrapper it resolved through --
+    # "spotify_url is AnyUrl-by-indirection" is the fact a reader needs.
+    [[ "$output" == *"spotify_url"* ]]
+    [[ "$output" == *"StreamingUrl"* ]]
+    # The four inline fields pinned fine; they must NOT be reported.
+    for field in apple_music_url youtube_music_url bandcamp_url soundcloud_url; do
+        [[ "$output" != *"$field"* ]]
+    done
+}
+
+@test "the post-condition rejects a narrowed constr(...) as well as AnyUrl (#466)" {
+    command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
+    # An allowlist that accepts anything-but-AnyUrl would pass this. A
+    # constr(...) still validates at decode time -- a stored value longer
+    # than the bound raises on read, the same class of failure #428 is
+    # about, just triggered by length instead of shape.
+    cat > "$TEST_TEMP_DIR/streaming-constr.yaml" <<'EOF'
+openapi: 3.0.3
+info:
+  title: Streaming Constr Fixture
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    BoundedUrl:
+      type: string
+      maxLength: 2048
+      description: A length-bounded URL.
+    StreamingLinks:
+      type: object
+      properties:
+        spotify_url:
+          $ref: '#/components/schemas/BoundedUrl'
+        apple_music_url:
+          type: string
+          format: uri
+          nullable: true
+          description: Apple Music album URL fixture.
+        youtube_music_url:
+          type: string
+          format: uri
+          nullable: true
+          description: YouTube Music search URL fixture.
+        bandcamp_url:
+          type: string
+          format: uri
+          nullable: true
+          description: Bandcamp album URL fixture.
+        soundcloud_url:
+          type: string
+          format: uri
+          nullable: true
+          description: SoundCloud search URL fixture.
+EOF
+    run "$SCRIPT_PATH" --input "$TEST_TEMP_DIR/streaming-constr.yaml" --output "$TEST_TEMP_DIR/out/models.py"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"#428 pin did not apply"* ]]
+    [[ "$output" == *"spotify_url"* ]]
+}
+
+# --- #466 door 2 -- the pin goes VACUOUS on an upstream rename. Both the sed
+# --- and the post-condition key on the five literal names in
+# --- STREAMING_URL_FIELDS: the sed no-ops on a name that isn't there, and the
+# --- AST walk only ever grows its offender list from fields it FOUND, so it
+# --- reports nothing. Rename `spotify_url` in api.yaml and the run stays
+# --- green with four of five pinned.
+# ---
+# --- Where the assertion belongs is the one design question here, and it is
+# --- answered differently than in LML. LML's fork of this script has exactly
+# --- one input (its own api.yaml), so it asserts presence inside the script
+# --- at run time for free. This script takes `--input` and is exercised by
+# --- every case above that runs against `fixture.yaml` -- a minimal spec
+# --- that legitimately declares none of the five; an unconditional runtime
+# --- assertion would turn
+# --- "verify the pin applied" into "require this document to contain all five
+# --- streaming fields" and fail every one of them. Scoping it to the fields
+# --- the INPUT declares doesn't work either -- that is precisely what a
+# --- rename removes, so the check would go vacuous exactly when it is needed.
+# ---
+# --- A rename guard can only be written against a KNOWN document, so it lives
+# --- here, against this repo's own api.yaml, and runs in CI on every PR. That
+# --- is also where it has to fire: wxyc-shared is where api.yaml is edited,
+# --- so a rename is caught at its origin, before any consumer regenerates
+# --- against it. This line therefore stays deliberately divergent from LML's
+# --- fork -- see #466. The second case below exists so the guard cannot go
+# --- quietly vacuous itself.
+
+# Reports every field in #428's pinned set that does not appear as a pinned
+# `str` declaration in $1, naming each one. Deliberately a grep, not a reuse
+# of the script's own AST walk: a guard that shares its mechanism with the
+# thing it guards fails the same way for the same reason.
+assert_all_pinned_fields_pinned_to_str() {
+    local models="$1"
+    local missing=()
+    local field
+    for field in spotify_url apple_music_url youtube_music_url bandcamp_url soundcloud_url; do
+        # `str` followed by a non-word character or end of line -- matches
+        # `str`, `str | None = Field(...)` and `str = Field(...)`, and does not
+        # match a `str`-prefixed name like a hypothetical `strict_url`.
+        grep -qE "^ +${field}: str([^A-Za-z0-9_]|\$)" "$models" || missing+=("$field")
+    done
+    if [ "${#missing[@]}" -ne 0 ]; then
+        echo "not pinned to str in $models: ${missing[*]}"
+        return 1
+    fi
+    return 0
+}
+
+@test "every field in STREAMING_URL_FIELDS is present and pinned in this repo's own api.yaml (#466)" {
+    command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
+    # Confined to TEST_TEMP_DIR the same way the no-flags default-path test
+    # above is (Finding 5): a copy of the script plus this repo's real
+    # api.yaml, laid out so PROJECT_DIR resolves inside the temp copy and the
+    # developer's own generated/python/models.py is never touched.
+    mkdir -p "$TEST_TEMP_DIR/proj/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/proj/scripts/generate-python-models.sh"
+    cp "$REPO_ROOT/api.yaml" "$TEST_TEMP_DIR/proj/api.yaml"
+
+    run bash "$TEST_TEMP_DIR/proj/scripts/generate-python-models.sh"
+    [ "$status" -eq 0 ]
+
+    run assert_all_pinned_fields_pinned_to_str "$TEST_TEMP_DIR/proj/generated/python/models.py"
+    [ "$status" -eq 0 ]
+}
+
+@test "the rename guard names the field, rather than passing vacuously, when one is absent (#466)" {
+    command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
+    # Stands in for an upstream rename: the spec declares spotify_uri where
+    # STREAMING_URL_FIELDS still says spotify_url. The script itself exits 0
+    # here -- four of five pinned, nothing found to report, which is the whole
+    # defect -- so the guard above is what has to catch it.
+    write_streaming_url_fixture_spec
+    sed -i.bak 's/^        spotify_url:/        spotify_uri:/' "$TEST_TEMP_DIR/streaming.yaml"
+
+    run "$SCRIPT_PATH" --input "$TEST_TEMP_DIR/streaming.yaml" --output "$TEST_TEMP_DIR/out/models.py"
+    [ "$status" -eq 0 ]
+
+    run assert_all_pinned_fields_pinned_to_str "$TEST_TEMP_DIR/out/models.py"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"spotify_url"* ]]
+    # Only the renamed one is reported -- a guard that names all five on a
+    # single rename is too blunt to act on.
+    for field in apple_music_url youtube_music_url bandcamp_url soundcloud_url; do
+        [[ "$output" != *"$field"* ]]
+    done
+}
