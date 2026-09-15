@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.56.0
+  version: 1.57.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -400,6 +400,40 @@ components:
           type: string
         record_label:
           type: string
+        rotation_label:
+          type: string
+          nullable: true
+          description: >-
+            The rotation release's CANONICAL label, resolved server-side
+            `flowsheet.rotation_id -> rotation.label_id -> labels.label_name`
+            (WXYC/Backend-Service#2505).
+
+
+            Distinct from `record_label` above, which is the free text a DJ
+            typed mid-show and is UNCHANGED by this field's addition — it stays
+            the snapshot and the fallback. The two exist together because the
+            weekly airplay report names each ranked line from the FIRST
+            rotation-linked play of the week, and 2.5% of rotation releases
+            carry more than one label spelling across their weekly plays (2.2%
+            differing by more than case), so one variant or one wrong early
+            entry names the whole line. Resolving from the linked release
+            removes the spelling contest at the root: every play of a release
+            reads one row.
+
+
+            Null when the entry has no rotation link, and null when the linked
+            release has no `label_id` — the state of every row until
+            WXYC/Backend-Service#2412 backfills it from tubafrenzy's
+            `COMPANY_ID`, and the permanent state of a release whose label never
+            resolved to a `labels` row. Consumers must fall back to
+            `record_label` on null.
+
+
+            Resolved by rotation id with no status filter, so a KILLED release
+            with plays in the window still names its label — unlike
+            `GET /library/rotation`, which serves active rows only. A historical
+            report must not lose the releases that were retired since the week
+            it covers.
         label_id:
           type: integer
         rotation_id:
@@ -1108,6 +1142,40 @@ components:
             record_label:
               type: string
               nullable: true
+            rotation_label:
+              type: string
+              nullable: true
+              description: >-
+                The rotation release's CANONICAL label, resolved server-side
+                `flowsheet.rotation_id -> rotation.label_id -> labels.label_name`
+                (WXYC/Backend-Service#2505).
+
+
+                Distinct from `record_label` above, which is the free text a DJ
+                typed mid-show and is UNCHANGED by this field's addition — it stays
+                the snapshot and the fallback. The two exist together because the
+                weekly airplay report names each ranked line from the FIRST
+                rotation-linked play of the week, and 2.5% of rotation releases
+                carry more than one label spelling across their weekly plays (2.2%
+                differing by more than case), so one variant or one wrong early
+                entry names the whole line. Resolving from the linked release
+                removes the spelling contest at the root: every play of a release
+                reads one row.
+
+
+                Null when the entry has no rotation link, and null when the linked
+                release has no `label_id` — the state of every row until
+                WXYC/Backend-Service#2412 backfills it from tubafrenzy's
+                `COMPANY_ID`, and the permanent state of a release whose label never
+                resolved to a `labels` row. Consumers must fall back to
+                `record_label` on null.
+
+
+                Resolved by rotation id with no status filter, so a KILLED release
+                with plays in the window still names its label — unlike
+                `GET /library/rotation`, which serves active rows only. A historical
+                report must not lose the releases that were retired since the week
+                it covers.
             request_flag:
               type: boolean
             segue:
