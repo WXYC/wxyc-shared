@@ -395,15 +395,43 @@ pin_streaming_url_fields_to_str() {
 #
 # The check is therefore AST-level, not textual: parse $OUTPUT as Python,
 # walk every class body's AnnAssign nodes, and for each of
-# STREAMING_URL_FIELDS confirm "AnyUrl" does not appear anywhere in the
-# unparsed annotation source. That catches `AnyUrl`, `AnyUrl | None`, and
-# `Annotated[AnyUrl | None, Field(...)]` alike -- and any future shape,
-# because it asks "is AnyUrl present in this field's annotation at all"
-# rather than "does the annotation look like shape X". The three unrelated
-# `format: uri` fields (the archive presigned-GET `url`, the OAuth
+# STREAMING_URL_FIELDS assert what the annotation IS -- the set of names it
+# references, minus the wrappers that do not change what it decodes as
+# (Optional, Union, Annotated, Field), must be exactly {"str"}. That catches
+# `AnyUrl`, `AnyUrl | None`, and `Annotated[AnyUrl | None, Field(...)]`
+# alike, and any future shape too, because it asks "does this field resolve
+# to str" rather than "does the annotation look like shape X". The three
+# unrelated `format: uri` fields (the archive presigned-GET `url`, the OAuth
 # device-flow `verification_uri`/`verification_uri_complete`) are not in
 # STREAMING_URL_FIELDS, so they are untouched by this check and free to keep
 # AnyUrl -- exactly the pin's intended scope.
+#
+# An allowlist, not a denylist on the token `AnyUrl` (#466). A denylist reads
+# the field's OWN annotation and resolves no indirection, so it fails open
+# through a named `$ref` schema: point one of the five at one and this
+# generator emits `class StreamingUrl(RootModel[AnyUrl])` plus
+# `spotify_url: StreamingUrl | None`. The sed does not match it, the
+# annotation holds no `AnyUrl` token, a denylist reports nothing, and the
+# field decodes as a validated AnyUrl anyway -- the exact outcome #428 rules
+# out, through the one door left open. That migration is scheduled, not
+# hypothetical: api.yaml's `DiscogsMatchResult` says these fields "will be
+# migrated to use $ref in a future version", and 1.56.0 already emits
+# `class Url(RootModel[constr(max_length=2048)])` for a named scalar schema.
+#
+# The allowlist also rejects a narrowed `constr(...)` and a `RootModel[str]`
+# wrapper, deliberately. Neither is plain `str`: a bound still validates at
+# decode time (the #428 failure, triggered by length instead of shape), and
+# a wrapper needs `.root` to reach the value. Both want a human to look.
+#
+# What this does NOT assert is that all five fields were found -- that guard
+# cannot live here. This script takes `--input` and is run against minimal
+# fixture specs that legitimately declare none of the five, so requiring them
+# unconditionally would fail those runs, and scoping the requirement to what
+# the input declares goes vacuous exactly on the rename it is meant to catch.
+# A rename guard can only be written against a KNOWN document, so it lives in
+# scripts/__tests__/generate-python-models.test.sh against this repo's own
+# api.yaml, where it fires at the rename's origin. LML's fork asserts it here
+# instead, correctly -- that fork has exactly one input. See #466.
 #
 # Needs a Python interpreter to run the AST walk. If codegen ran at all,
 # one exists somewhere -- via `uv` (the authoritative path above) or via
@@ -435,21 +463,31 @@ fields = set(os.environ["STREAMING_URL_FIELDS_CSV"].split(","))
 with open(output_path, "r", encoding="utf-8") as f:
     source = f.read()
 
+# Names that may surround the pinned type without changing what it decodes
+# as. Anything else the annotation references makes it not-plain-str.
+# `None` is deliberately absent: it parses as ast.Constant, never ast.Name,
+# so `str | None` never yields it here.
+WRAPPERS = {"Optional", "Union", "Annotated", "Field"}
+
 tree = ast.parse(source, filename=output_path)
 offenders = []
 for node in ast.walk(tree):
     if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
         if node.target.id in fields:
             annotation_src = ast.unparse(node.annotation)
-            if "AnyUrl" in annotation_src:
+            referenced = {
+                n.id for n in ast.walk(node.annotation) if isinstance(n, ast.Name)
+            } - WRAPPERS
+            if referenced != {"str"}:
                 offenders.append(f"{node.target.id} (line {node.lineno}): {annotation_src}")
 
 if offenders:
     sys.stderr.write(
-        "#428 pin did not apply -- the following streaming URL fields still "
-        "carry AnyUrl in their generated annotation (pin_streaming_url_fields_to_str "
+        "#428 pin did not apply -- the following streaming URL fields do not "
+        "resolve to plain `str` in their generated annotation (pin_streaming_url_fields_to_str "
         "silently no-op'\''d, most likely because the generator emitted a shape its "
-        "sed pattern does not match):\n"
+        "sed pattern does not match -- an Annotated[...], a named RootModel wrapper, "
+        "or a narrowed constr(...)):\n"
     )
     for offender in offenders:
         sys.stderr.write(f"  - {offender}\n")
