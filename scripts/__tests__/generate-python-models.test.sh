@@ -1012,29 +1012,42 @@ EOF
 # --- #466 door 2 -- the pin goes VACUOUS on an upstream rename. Both the sed
 # --- and the post-condition key on the five literal names in
 # --- STREAMING_URL_FIELDS: the sed no-ops on a name that isn't there, and the
-# --- AST walk only ever grows its offender list from fields it FOUND, so it
-# --- reports nothing. Rename `spotify_url` in api.yaml and the run stays
-# --- green with four of five pinned.
+# --- AST post-condition only ever grows its offender list from fields it
+# --- FOUND, so it reports nothing. Rename `spotify_url` in api.yaml and the
+# --- run stays green with the renamed field generating as an unpinned AnyUrl.
 # ---
 # --- Where the assertion belongs is the one design question here, and it is
 # --- answered differently than in LML. LML's fork of this script has exactly
 # --- one input (its own api.yaml), so it asserts presence inside the script
 # --- at run time for free. This script takes `--input` and is exercised by
-# --- every case above that runs against `fixture.yaml` -- a minimal spec
-# --- that legitimately declares none of the five; an unconditional runtime
-# --- assertion would turn
-# --- "verify the pin applied" into "require this document to contain all five
-# --- streaming fields" and fail every one of them. Scoping it to the fields
-# --- the INPUT declares doesn't work either -- that is precisely what a
-# --- rename removes, so the check would go vacuous exactly when it is needed.
+# --- every case above that runs against `fixture.yaml` -- a minimal spec that
+# --- legitimately declares none of the five; an unconditional runtime
+# --- assertion would turn "verify the pin applied" into "require this
+# --- document to contain all five streaming fields" and fail every one of
+# --- them. Scoping it to the fields the INPUT declares doesn't work either --
+# --- that is precisely what a rename removes, so the check would go vacuous
+# --- exactly when it is needed.
 # ---
 # --- A rename guard can only be written against a KNOWN document, so it lives
 # --- here, against this repo's own api.yaml, and runs in CI on every PR. That
 # --- is also where it has to fire: wxyc-shared is where api.yaml is edited,
 # --- so a rename is caught at its origin, before any consumer regenerates
 # --- against it. This line therefore stays deliberately divergent from LML's
-# --- fork -- see #466. The second case below exists so the guard cannot go
-# --- quietly vacuous itself.
+# --- fork -- see #466.
+# ---
+# --- Two assertions, because a name-presence check alone is not enough. Each
+# --- of the five names is declared by FIVE separate schemas (AlbumMetadata,
+# --- StreamingLinks, FlowsheetEntryFields, FlowsheetV2TrackEntry,
+# --- DiscogsMatchResult), so "does `spotify_url: str` appear somewhere" is
+# --- satisfied by the four survivors of a one-schema rename while the fifth
+# --- ships as AnyUrl. Counting declarations against pinned declarations does
+# --- not close that either -- a renamed field leaves both counts equal at
+# --- four. What does close it is asserting from the other side: the set of
+# --- fields that generate as AnyUrl at all must be exactly the three unrelated
+# --- `format: uri` fields #428 deliberately left alone. A renamed streaming
+# --- field lands in that set and is named; so does a NEW streaming URL field
+# --- added to api.yaml without being added to STREAMING_URL_FIELDS, which is
+# --- the same defect arriving from the other direction.
 
 # Reports every field in #428's pinned set that does not appear as a pinned
 # `str` declaration in $1, naming each one. Deliberately a grep, not a reuse
@@ -1048,7 +1061,7 @@ assert_all_pinned_fields_pinned_to_str() {
         # `str` followed by a non-word character or end of line -- matches
         # `str`, `str | None = Field(...)` and `str = Field(...)`, and does not
         # match a `str`-prefixed name like a hypothetical `strict_url`.
-        grep -qE "^ +${field}: str([^A-Za-z0-9_]|\$)" "$models" || missing+=("$field")
+        grep -qE "^ +${field}: str([^A-Za-z0-9_]|$)" "$models" || missing+=("$field")
     done
     if [ "${#missing[@]}" -ne 0 ]; then
         echo "not pinned to str in $models: ${missing[*]}"
@@ -1057,29 +1070,91 @@ assert_all_pinned_fields_pinned_to_str() {
     return 0
 }
 
-@test "every field in STREAMING_URL_FIELDS is present and pinned in this repo's own api.yaml (#466)" {
+# Prints every field name in $1 whose generated type is AnyUrl, one per line,
+# deduplicated. #428's decided scope leaves exactly three: the archive
+# presigned-GET `url` and the OAuth device-flow `verification_uri` /
+# `verification_uri_complete`. Anything else appearing here is a streaming URL
+# field the pin did not reach.
+anyurl_fields_in() {
+    grep -oE "^ +[a-z_]+: [^=]*AnyUrl" "$1" | sed -E 's/^ +([a-z_]+):.*/\1/' | sort -u
+}
+
+@test "the pin's coverage over this repo's own api.yaml is exactly what STREAMING_URL_FIELDS claims (#466)" {
     command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
     # Confined to TEST_TEMP_DIR the same way the no-flags default-path test
     # above is (Finding 5): a copy of the script plus this repo's real
     # api.yaml, laid out so PROJECT_DIR resolves inside the temp copy and the
-    # developer's own generated/python/models.py is never touched.
+    # developer's own generated/python/models.py is never touched. Both
+    # assertions share this one generation -- it is the most expensive
+    # operation in the suite, and they are two facets of one invariant.
     mkdir -p "$TEST_TEMP_DIR/proj/scripts"
     cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/proj/scripts/generate-python-models.sh"
     cp "$REPO_ROOT/api.yaml" "$TEST_TEMP_DIR/proj/api.yaml"
 
     run bash "$TEST_TEMP_DIR/proj/scripts/generate-python-models.sh"
     [ "$status" -eq 0 ]
+    local models="$TEST_TEMP_DIR/proj/generated/python/models.py"
 
-    run assert_all_pinned_fields_pinned_to_str "$TEST_TEMP_DIR/proj/generated/python/models.py"
+    # 1. Every name the pin claims to cover is actually there, pinned.
+    run assert_all_pinned_fields_pinned_to_str "$models"
     [ "$status" -eq 0 ]
+
+    # 2. Nothing ELSE decodes as AnyUrl. A new `format: uri` field failing
+    #    this is the point, not a nuisance: it forces the "is this a streaming
+    #    URL that needs pinning?" decision at the moment the field is added,
+    #    which is the only moment anyone has the context to answer it.
+    run anyurl_fields_in "$models"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 3 ]
+    [ "${lines[0]}" = "url" ]
+    [ "${lines[1]}" = "verification_uri" ]
+    [ "${lines[2]}" = "verification_uri_complete" ]
 }
 
-@test "the rename guard names the field, rather than passing vacuously, when one is absent (#466)" {
+@test "a rename is caught even when only ONE of a field's five schemas moves (#466)" {
     command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
-    # Stands in for an upstream rename: the spec declares spotify_uri where
-    # STREAMING_URL_FIELDS still says spotify_url. The script itself exits 0
-    # here -- four of five pinned, nothing found to report, which is the whole
-    # defect -- so the guard above is what has to catch it.
+    # The hard case: rename spotify_url in DiscogsMatchResult only. Four
+    # `spotify_url: str` declarations survive, so a presence check passes and
+    # a declared-vs-pinned count comparison stays equal at 4/4 -- while the
+    # renamed field ships as `spotify_uri: AnyUrl | None`, unpinned, for every
+    # Python consumer. The script itself exits 0 here, which is the defect.
+    mkdir -p "$TEST_TEMP_DIR/proj/scripts"
+    cp "$SCRIPT_PATH" "$TEST_TEMP_DIR/proj/scripts/generate-python-models.sh"
+    python3 - "$REPO_ROOT/api.yaml" "$TEST_TEMP_DIR/proj/api.yaml" <<'PYRENAME'
+import re, sys
+src, dst = sys.argv[1], sys.argv[2]
+lines = open(src, encoding="utf-8").read().split("\n")
+start = next(i for i, l in enumerate(lines) if l == "    DiscogsMatchResult:")
+end = next(i for i in range(start + 1, len(lines)) if re.match(r"^    [A-Za-z]", lines[i]))
+renamed = 0
+for i in range(start, end):
+    if re.match(r"^\s+spotify_url:", lines[i]):
+        lines[i] = lines[i].replace("spotify_url:", "spotify_uri:")
+        renamed += 1
+assert renamed == 1, f"expected exactly one spotify_url in DiscogsMatchResult, renamed {renamed}"
+open(dst, "w", encoding="utf-8").write("\n".join(lines))
+PYRENAME
+
+    run bash "$TEST_TEMP_DIR/proj/scripts/generate-python-models.sh"
+    [ "$status" -eq 0 ]
+    local models="$TEST_TEMP_DIR/proj/generated/python/models.py"
+
+    # The presence check is satisfied by the four survivors -- this is why it
+    # is not, on its own, a rename guard.
+    run assert_all_pinned_fields_pinned_to_str "$models"
+    [ "$status" -eq 0 ]
+
+    # The AnyUrl-set assertion is what catches it, naming the renamed field.
+    run anyurl_fields_in "$models"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"spotify_uri"* ]]
+    [ "${#lines[@]}" -eq 4 ]
+}
+
+@test "a rename of ALL five schemas' copies is caught too (#466)" {
+    command -v uv > /dev/null || command -v datamodel-codegen > /dev/null || skip "neither uv nor datamodel-codegen installed"
+    # The simple case, for completeness: nothing named spotify_url survives,
+    # so the presence check fires as well as the AnyUrl-set one.
     write_streaming_url_fixture_spec
     sed -i.bak 's/^        spotify_url:/        spotify_uri:/' "$TEST_TEMP_DIR/streaming.yaml"
 
@@ -1091,6 +1166,75 @@ assert_all_pinned_fields_pinned_to_str() {
     [[ "$output" == *"spotify_url"* ]]
     # Only the renamed one is reported -- a guard that names all five on a
     # single rename is too blunt to act on.
+    for field in apple_music_url youtube_music_url bandcamp_url soundcloud_url; do
+        [[ "$output" != *"$field"* ]]
+    done
+}
+
+# --- #466: a bound has a second spelling the name allowlist cannot see. Under
+# --- `--use-annotated` a `maxLength` moves out of the type and into the
+# --- metadata -- `Annotated[str | None, Field(description=..., max_length=2048)]`
+# --- -- whose referenced names are exactly {str} once the wrappers come off.
+# --- `Field` has to stay in WRAPPERS or every correctly pinned field fails the
+# --- moment that flag is added, so the post-condition checks the narrowing
+# --- keywords directly instead. run_codegen does not pass --use-annotated
+# --- today, so this shape cannot be produced through the script's own CLI;
+# --- the check is exercised directly against a file carrying it, by sourcing
+# --- only the function (the same "source just this fragment" approach the
+# --- STREAMING_URL_FIELDS test above uses, for the same reason -- sourcing
+# --- the whole script would run its argument parsing and codegen).
+
+run_post_condition_against() {
+    local models="$1"
+    bash -c "
+        source <(sed -n '/^STREAMING_URL_FIELDS=(/,/^)/p' '$SCRIPT_PATH')
+        source <(sed -n '/^verify_streaming_url_fields_pinned()/,/^}/p' '$SCRIPT_PATH')
+        OUTPUT='$models'
+        verify_streaming_url_fields_pinned
+    "
+}
+
+@test "the post-condition accepts the --use-annotated shape of a correctly pinned field (#466)" {
+    cat > "$TEST_TEMP_DIR/annotated_ok.py" <<'EOF'
+from typing import Annotated
+from pydantic import BaseModel, Field
+
+
+class StreamingLinks(BaseModel):
+    spotify_url: Annotated[str | None, Field(description='Spotify.')] = None
+    apple_music_url: Annotated[str | None, Field(description='Apple.')] = None
+    youtube_music_url: str | None = None
+    bandcamp_url: str | None = None
+    soundcloud_url: str | None = None
+EOF
+    run run_post_condition_against "$TEST_TEMP_DIR/annotated_ok.py"
+    [ "$status" -eq 0 ]
+}
+
+@test "the post-condition rejects a bound carried as Field metadata, not just constr(...) (#466)" {
+    # Identical to the case above except for max_length, which is what
+    # --use-annotated does with a maxLength on a pinned field. An allowlist
+    # over referenced NAMES alone passes this: {Annotated, str, Field} minus
+    # the wrappers is {str}.
+    cat > "$TEST_TEMP_DIR/annotated_bound.py" <<'EOF'
+from typing import Annotated
+from pydantic import BaseModel, Field
+
+
+class StreamingLinks(BaseModel):
+    spotify_url: Annotated[
+        str | None, Field(description='Spotify.', max_length=2048)
+    ] = None
+    apple_music_url: str | None = None
+    youtube_music_url: str | None = None
+    bandcamp_url: str | None = None
+    soundcloud_url: str | None = None
+EOF
+    run run_post_condition_against "$TEST_TEMP_DIR/annotated_bound.py"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"#428 pin did not apply"* ]]
+    [[ "$output" == *"spotify_url"* ]]
+    [[ "$output" == *"max_length"* ]]
     for field in apple_music_url youtube_music_url bandcamp_url soundcloud_url; do
         [[ "$output" != *"$field"* ]]
     done
