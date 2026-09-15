@@ -423,6 +423,19 @@ pin_streaming_url_fields_to_str() {
 # decode time (the #428 failure, triggered by length instead of shape), and
 # a wrapper needs `.root` to reach the value. Both want a human to look.
 #
+# A bound has two spellings and the allowlist alone only catches one, so the
+# keyword check below covers the other. Today a `maxLength` on a pinned field
+# generates as `constr(max_length=...)` -- a name, caught by the allowlist.
+# Under `--use-annotated` (the same flag the shape discussion above is about)
+# the identical constraint instead moves INTO the metadata, as
+# `Annotated[str | None, Field(description=..., max_length=2048)]`, whose
+# referenced names are just {str} once the wrappers come off. `Field` cannot
+# come out of WRAPPERS to fix that -- it has to stay, or every correctly
+# pinned field fails the moment that flag is added. So the narrowing keywords
+# are checked directly. The set is closed, not a guess at an open-ended
+# denylist: `max_length`, `min_length` and `pattern` are the only ways
+# pydantic narrows a `str`.
+#
 # What this does NOT assert is that all five fields were found -- that guard
 # cannot live here. This script takes `--input` and is run against minimal
 # fixture specs that legitimately declare none of the five, so requiring them
@@ -469,6 +482,12 @@ with open(output_path, "r", encoding="utf-8") as f:
 # so `str | None` never yields it here.
 WRAPPERS = {"Optional", "Union", "Annotated", "Field"}
 
+# The complete set of ways pydantic narrows a `str`. `Field` has to stay in
+# WRAPPERS (see the comment above), so a bound carried as Field metadata --
+# the `--use-annotated` spelling -- is invisible to the name allowlist and is
+# checked here instead.
+STR_NARROWING_KWARGS = {"max_length", "min_length", "pattern"}
+
 tree = ast.parse(source, filename=output_path)
 offenders = []
 for node in ast.walk(tree):
@@ -478,8 +497,25 @@ for node in ast.walk(tree):
             referenced = {
                 n.id for n in ast.walk(node.annotation) if isinstance(n, ast.Name)
             } - WRAPPERS
+            narrowing = sorted(
+                {
+                    kw.arg
+                    for call in ast.walk(node.annotation)
+                    if isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Name)
+                    and call.func.id == "Field"
+                    for kw in call.keywords
+                    if kw.arg in STR_NARROWING_KWARGS
+                }
+            )
             if referenced != {"str"}:
                 offenders.append(f"{node.target.id} (line {node.lineno}): {annotation_src}")
+            elif narrowing:
+                narrowed_by = ", ".join(narrowing)
+                offenders.append(
+                    f"{node.target.id} (line {node.lineno}): {annotation_src} "
+                    f"[narrowed by {narrowed_by}]"
+                )
 
 if offenders:
     sys.stderr.write(
