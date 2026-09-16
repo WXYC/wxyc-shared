@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.63.0');
+      expect(spec.info.version).toBe('1.64.0');
     });
 
     it('should have components section', () => {
@@ -2650,8 +2650,21 @@ describe('OpenAPI Specification', () => {
       expect(spec.components.schemas.SongRequest).toBeDefined();
     });
 
-    it('should define EnhancedRequest', () => {
-      expect(spec.components.schemas.EnhancedRequest).toBeDefined();
+    // Deleted, and asserted absent so they cannot return. `EnhancedRequest`
+    // wrapped `SongRequest` with parse output and ranked `LibraryMatch`
+    // candidates -- request-o-matic's enrichment result. That enrichment is
+    // real, but it happens inside request-o-matic and its Slack post; this API
+    // never returned it, and `SongRequest`/`ParsedSongRequest` (asserted above
+    // and below) are the shapes that do cross the wire. `DeviceRegistration`
+    // and `DeviceToken` were push-notification plumbing for a feature that was
+    // never built and has no endpoint, no table, and no client.
+    it.each([
+      'EnhancedRequest',
+      'LibraryMatch',
+      'DeviceRegistration',
+      'DeviceToken',
+    ])('does not define %s', (name) => {
+      expect(spec.components.schemas).not.toHaveProperty(name);
     });
 
     it('should define ParsedSongRequest', () => {
@@ -5952,10 +5965,10 @@ describe('OpenAPI Specification', () => {
     // themed batch and delete it, do not add to this list.
     const BULK_IMPORT_RESIDUE = [
     'AddToBinRequest', 'AlbumMetadata', 'ArtistMetadata', 'ArtistWithGenre', 'BinLibraryDetails',
-    'CatalogSearchParams', 'DateTimeEntry', 'DeviceRegistration',
-    'DeviceToken', 'EnhancedRequest', 'FlowsheetBreakpointEntry',
+    'CatalogSearchParams', 'DateTimeEntry',
+    'FlowsheetBreakpointEntry',
     'FlowsheetMessageEntry', 'FlowsheetQueryParams', 'FlowsheetShowBlockEntry',
-    'FlowsheetSongEntry', 'LibraryMatch', 'MetadataFetchRequest', 'MetadataFetchResponse',
+    'FlowsheetSongEntry', 'MetadataFetchRequest', 'MetadataFetchResponse',
     'MetadataSource', 'PaginationParams', 'ParsedSongRequest',
     'RequestStatus', 'RotationWithAlbum', 'SongRequest', 'SpecialtyShow',
     'TrackSearchParams', 'TrackSearchResult',

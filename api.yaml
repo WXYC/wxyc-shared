@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.63.0
+  version: 1.64.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4034,68 +4034,6 @@ components:
           maximum: 1
         interpretation:
           type: string
-
-    LibraryMatch:
-      type: object
-      required:
-        - album
-        - confidence
-        - matchType
-      properties:
-        album:
-          $ref: '#/components/schemas/AlbumSearchResult'
-        confidence:
-          type: number
-          minimum: 0
-          maximum: 1
-        matchType:
-          type: string
-          enum:
-            - exact
-            - fuzzy
-            - partial
-        reasoning:
-          type: string
-
-    EnhancedRequest:
-      allOf:
-        - $ref: '#/components/schemas/SongRequest'
-        - type: object
-          properties:
-            parsed:
-              $ref: '#/components/schemas/ParsedSongRequest'
-            matches:
-              type: array
-              items:
-                $ref: '#/components/schemas/LibraryMatch'
-            artwork_url:
-              type: string
-            discogs_url:
-              type: string
-
-    DeviceRegistration:
-      type: object
-      required:
-        - device_id
-        - registered_at
-      properties:
-        device_id:
-          type: string
-        registered_at:
-          type: string
-          format: date-time
-
-    DeviceToken:
-      type: object
-      required:
-        - token
-        - expires_at
-      properties:
-        token:
-          type: string
-        expires_at:
-          type: string
-          format: date-time
 
     # ===================
     # Concerts / On Tour Types (Backend-Service#1603)
