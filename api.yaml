@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.65.0
+  version: 1.66.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -305,11 +305,24 @@ components:
         Each entry in `services` reports the live state of one external
         dependency (database, upstream HTTP service, queue, etc.).
 
-        Status values:
-          - `ok`          — dependency reachable and responsive
-          - `unavailable` — dependency reachable but reporting an error,
-                            or the connection itself failed
-          - `timeout`     — dependency exceeded the readiness probe deadline
+        The status value is a free string, not a closed set, and the set of
+        keys is per-service. Each probe classifies its own failures, and the
+        vocabulary is expected to grow as probes are added.
+
+        The convention the existing probes follow, so a new one has something
+        to match rather than inventing a fourth spelling: `ok` on success, and
+        on failure one of `auth-error`, `rate-limited`, `upstream-error`,
+        `network-error`, `error` — shared deliberately between
+        Backend-Service's `services.database` and library-metadata-lookup's
+        `services.discogs_api` so operators can pattern-match one against the
+        other. Probes that cannot distinguish those buckets report a coarser
+        value: Backend-Service's auth proxy emits `unavailable`.
+
+        A probe-timeout value is deliberately absent. Postgres has no timeout
+        bucket distinct from "couldn't get a response", so a canceled
+        statement is reported as `network-error`; a probe whose client can
+        tell the two apart should say so in its own terms rather than reach
+        for a shared `timeout`.
       allOf:
         - $ref: '#/components/schemas/HealthCheckResponse'
         - type: object
@@ -321,10 +334,9 @@ components:
               description: Per-dependency readiness map keyed by dependency name.
               additionalProperties:
                 type: string
-                enum:
-                  - ok
-                  - unavailable
-                  - timeout
+                description: >-
+                  Free string. See the schema description for the vocabulary
+                  the existing probes share.
 
     # `Genre` and `Format` used to live here as closed enums. Both were
     # transcribed from dj-site's own presentation-layer unions
