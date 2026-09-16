@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.61.0');
+      expect(spec.info.version).toBe('1.62.0');
     });
 
     it('should have components section', () => {
@@ -2674,8 +2674,23 @@ describe('OpenAPI Specification', () => {
       expect(metadataSource.enum).toContain('spotify');
     });
 
-    it('should define DiscogsRelease', () => {
-      expect(spec.components.schemas.DiscogsRelease).toBeDefined();
+    // Deleted, and asserted absent so they cannot return. These six mirrored
+    // the raw Discogs API response verbatim -- no descriptions, Discogs's own
+    // field names, an isolated `DiscogsRelease` tree plus a standalone
+    // `DiscogsSearchResult`. No WXYC endpoint proxies Discogs unmodified, so
+    // nothing ever referenced them: the shape this API actually serves is
+    // `DiscogsMatchResult`, the processed result. Re-adding any of them
+    // reintroduces an upstream vendor's schema into a contract that only
+    // describes WXYC's own responses.
+    it.each([
+      'DiscogsSearchResult',
+      'DiscogsArtistRef',
+      'DiscogsLabelRef',
+      'DiscogsTrack',
+      'DiscogsImage',
+      'DiscogsRelease',
+    ])('does not define %s', (name) => {
+      expect(spec.components.schemas).not.toHaveProperty(name);
     });
 
     it('should define TrackListItem schema', () => {
@@ -5929,8 +5944,7 @@ describe('OpenAPI Specification', () => {
     const BULK_IMPORT_RESIDUE = [
     'AddToBinRequest', 'AlbumMetadata', 'ArtistMetadata', 'ArtistWithGenre', 'BinLibraryDetails',
     'CatalogSearchParams', 'DJPlaylistsResponse', 'DateTimeEntry', 'DeviceRegistration',
-    'DeviceToken', 'DiscogsArtistRef', 'DiscogsImage', 'DiscogsLabelRef', 'DiscogsRelease',
-    'DiscogsSearchResult', 'DiscogsTrack', 'EnhancedRequest', 'FlowsheetBreakpointEntry',
+    'DeviceToken', 'EnhancedRequest', 'FlowsheetBreakpointEntry',
     'FlowsheetMessageEntry', 'FlowsheetQueryParams', 'FlowsheetShowBlockEntry',
     'FlowsheetSongEntry', 'LibraryMatch', 'MetadataFetchRequest', 'MetadataFetchResponse',
     'MetadataSource', 'PaginationParams', 'ParsedSongRequest', 'Playlist', 'PlaylistEntry',
