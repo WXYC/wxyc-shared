@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.57.0');
+      expect(spec.info.version).toBe('1.58.0');
     });
 
     it('should have components section', () => {
@@ -2185,6 +2185,131 @@ describe('OpenAPI Specification', () => {
       expect(responses?.['400']?.content?.['application/json']?.schema?.$ref).toBe(
         '#/components/schemas/ApiErrorResponse'
       );
+    });
+  });
+
+  // `GET /flowsheet/shows/recent` (WXYC/Backend-Service#2435) shipped with its
+  // shape declared only in Backend's app.yaml, which is Swagger-UI display and
+  // not a codegen source — so dj-site, iOS and Android generated nothing for an
+  // endpoint whose stated consumer is a DJ-facing handoff screen (#469).
+  describe('GET /flowsheet/shows/recent (#469 / BS#2435)', () => {
+    const operation = () =>
+      (spec.paths['/flowsheet/shows/recent'] as Record<string, Record<string, unknown>> | undefined)?.get as {
+        description?: string;
+        security?: unknown;
+        parameters?: Array<Record<string, unknown>>;
+        responses?: Record<string, { description?: string; content?: Record<string, { schema?: { $ref?: string } }> }>;
+      };
+    const windowHours = () =>
+      operation()?.parameters?.find((p) => p.name === 'window_hours') as
+        | {
+            in?: string;
+            required?: boolean;
+            schema?: { type?: string; minimum?: number; maximum?: number; default?: number };
+          }
+        | undefined;
+
+    it('declares the path the SSOT was missing', () => {
+      expect(spec.paths['/flowsheet/shows/recent']).toBeDefined();
+      expect(operation()).toBeDefined();
+    });
+
+    it('returns RecentShowsResponse on the 200', () => {
+      expect(operation()?.responses?.['200']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/RecentShowsResponse'
+      );
+    });
+
+    // One week, deliberately far below the 30-year ceiling its /open-shows
+    // neighbour offers — this is a handoff read, not an archive walk. Backend
+    // rejects an out-of-range value rather than clamping it.
+    it('bounds window_hours at one week and defaults to the last shift', () => {
+      const parameter = windowHours();
+      expect(parameter).toBeDefined();
+      expect(parameter?.in).toBe('query');
+      expect(parameter?.required).toBe(false);
+      expect(parameter?.schema).toMatchObject({ type: 'integer', minimum: 1, maximum: 168, default: 24 });
+    });
+
+    // The route is `requirePermissions({ flowsheet: ['read'] })`, so it takes
+    // the document-level BearerAuth default. An operation-level `security: []`
+    // here would promise a 200 to a tokenless client and deliver a 401 — the
+    // #368 failure mode the PUBLIC_OPERATIONS allowlist exists to catch.
+    it('does not override the document security default', () => {
+      // Asserted against a operation that exists: `operation()?.security` is
+      // vacuously undefined when the path is absent, which would let this pass
+      // against the very spec it was written to reject.
+      const op = operation();
+      expect(op).toBeDefined();
+      expect(Object.keys(op as object)).not.toContain('security');
+    });
+
+    it('declares the 400 the bounds make reachable, and the 403 the gate does', () => {
+      expect(operation()?.responses?.['400']?.description).toMatch(/window_hours/);
+      expect(operation()?.responses?.['403']?.description).toMatch(/flowsheet: read/);
+    });
+
+    it('declares RecentShow with every field the handler always emits', () => {
+      const schema = spec.components.schemas.RecentShow as { required?: string[] } | undefined;
+      expect(schema).toBeDefined();
+      expect(schema?.required).toEqual(['id', 'show_name', 'start_time', 'end_time', 'djs']);
+    });
+
+    // The reason #469 was worth filing rather than pasting app.yaml's block in:
+    // the DJ item is byte-for-byte OnAirDJ. Backend composes both endpoints'
+    // lists from one function (`composeShowDJList`); a second inline copy in the
+    // contract is how the two come to disagree anyway.
+    it('refs OnAirDJ for djs[] rather than re-inlining the shape', () => {
+      const djs = propertyOf('RecentShow', 'djs') as
+        | { type?: string; items?: { $ref?: string; properties?: unknown } }
+        | undefined;
+      expect(djs?.type).toBe('array');
+      expect(djs?.items?.$ref).toBe('#/components/schemas/OnAirDJ');
+      expect(djs?.items?.properties).toBeUndefined();
+    });
+
+    it('declares RecentShowsResponse as a shows envelope over RecentShow', () => {
+      const schema = spec.components.schemas.RecentShowsResponse as
+        | { required?: string[]; properties?: Record<string, { items?: { $ref?: string } }> }
+        | undefined;
+      expect(schema).toBeDefined();
+      expect(schema?.required).toEqual(['shows']);
+      expect(schema?.properties?.shows?.items?.$ref).toBe('#/components/schemas/RecentShow');
+    });
+  });
+
+  // What `$ref`ing OnAirDJ above forced into the open: the schema declared
+  // `dj_name` non-nullable while every operation composing it resolved the
+  // handle through `resolveDjDisplayName`, which yields null for a blank handle
+  // and for the literal "Anonymous" (BS#1286). The declaration was wrong, not
+  // the server — see oasdiff-err-ignore.txt for why the resulting
+  // response-property-became-nullable ERR marks a correction, not a break.
+  describe('OnAirDJ.dj_name nullability (#469)', () => {
+    const onAirDj = () =>
+      spec.components.schemas.OnAirDJ as { required?: string[]; properties: Record<string, Record<string, unknown>> };
+
+    // Nullable and required are orthogonal, and both halves matter: the key is
+    // always on the wire carrying null, never omitted.
+    it('is a nullable string and stays required — present-but-null, not absent', () => {
+      expect(onAirDj().properties.dj_name?.type).toBe('string');
+      expect(onAirDj().properties.dj_name?.nullable).toBe(true);
+      expect(onAirDj().required).toContain('dj_name');
+    });
+
+    // ShowPlaylistDJ was forked from OnAirDJ on the claim that a non-null
+    // dj_name "holds for the live-DJ endpoints". It never did — /flowsheet/
+    // playlist, /flowsheet/djs-on-air and /flowsheet/shows/recent all run the
+    // same resolver. A fork rationale that outlives its premise is how the next
+    // author forks it again.
+    it('retires the ShowPlaylistDJ rationale the widening falsifies', () => {
+      const description = (spec.components.schemas.ShowPlaylistDJ as { description?: string }).description ?? '';
+      expect(description).not.toMatch(/requires a non-null `dj_name`, which holds/);
+      expect(description).toMatch(/does not hold/);
+    });
+
+    it('retires the same claim where ShowPlaylist repeats it', () => {
+      const description = (spec.components.schemas.ShowPlaylist as { description?: string }).description ?? '';
+      expect(description).not.toMatch(/`dj_name` is non-nullable where this route's is not/);
     });
   });
 
