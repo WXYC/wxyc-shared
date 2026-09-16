@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.58.0
+  version: 1.59.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1460,6 +1460,18 @@ components:
 
     OnAirDJ:
       type: object
+      description: >-
+        One DJ in a DJ list — the `auth_user.id` and the PII-safe on-air handle,
+        both nullable.
+
+
+        The single shape for all three list sites: `/flowsheet/djs-on-air`,
+        `/flowsheet/shows/recent`'s `djs` and `/flowsheet/playlist`'s
+        `show_djs`. Every one of them resolves the handle through the same
+        `resolveDjDisplayName`, so none can constrain `dj_name` more tightly
+        than the others — the premise a per-site fork would rest on. A second
+        declaration of one shape is how the two come to disagree; declare the
+        site, not the shape.
       required:
         - id
         - dj_name
@@ -1725,10 +1737,8 @@ components:
         schema previously described a shape the route has not emitted for some
         time: it declared `specialty_show` (emitted as `specialty_show_name`),
         typed `entries` as the V1 `FlowsheetEntryResponse` (emitted as the V2
-        discriminated union), declared no identifier at all, omitted the six
-        `shows` columns the spread ships, and `$ref`ed `OnAirDJ`, which then
-        declared `dj_name` non-nullable — a constraint this route has never
-        honoured, and which `OnAirDJ` no longer states.
+        discriminated union), declared no identifier at all, and omitted the
+        six `shows` columns the spread ships.
       required:
         - id
         - specialty_id
@@ -1794,7 +1804,7 @@ components:
         show_djs:
           type: array
           items:
-            $ref: '#/components/schemas/ShowPlaylistDJ'
+            $ref: '#/components/schemas/OnAirDJ'
         previous_show_id:
           type: integer
           nullable: true
@@ -1848,37 +1858,6 @@ components:
             The V2 discriminated union, the same shape `GET /flowsheet` serves.
             The handler projects through `projectEntriesV2`; there is no V1
             variant of this response.
-
-    ShowPlaylistDJ:
-      type: object
-      description: >-
-        A DJ on an archived show — the `auth_user.id` and the PII-safe on-air
-        handle, both nullable.
-
-
-        Structurally identical to `OnAirDJ`, which declares the same two
-        nullable fields, and retained as its own schema only so that collapsing
-        the two does not retire a generated type consumers already import.
-        Prefer `OnAirDJ` for new declarations. The fork's stated rationale — a
-        non-null `dj_name` that "holds for the live-DJ endpoints but not here"
-        — does not hold: `/flowsheet/playlist`'s `show_djs`,
-        `/flowsheet/djs-on-air` and `/flowsheet/shows/recent` all resolve the
-        handle through the same `resolveDjDisplayName`, so every one of them
-        can return `null`.
-      required:
-        - id
-        - dj_name
-      properties:
-        id:
-          type: string
-          nullable: true
-          description: The DJ's better-auth `auth_user.id`, or null.
-        dj_name:
-          type: string
-          nullable: true
-          description: >-
-            The DJ's public on-air handle, never their legal name. Null when the
-            PII-safe chain resolves to nothing.
 
     ShowPeek:
       type: object
