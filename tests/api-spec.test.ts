@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.58.0');
+      expect(spec.info.version).toBe('1.59.0');
     });
 
     it('should have components section', () => {
@@ -2296,20 +2296,47 @@ describe('OpenAPI Specification', () => {
       expect(onAirDj().required).toContain('dj_name');
     });
 
-    // ShowPlaylistDJ was forked from OnAirDJ on the claim that a non-null
-    // dj_name "holds for the live-DJ endpoints". It never did — /flowsheet/
-    // playlist, /flowsheet/djs-on-air and /flowsheet/shows/recent all run the
-    // same resolver. A fork rationale that outlives its premise is how the next
-    // author forks it again.
-    it('retires the ShowPlaylistDJ rationale the widening falsifies', () => {
-      const description = (spec.components.schemas.ShowPlaylistDJ as { description?: string }).description ?? '';
-      expect(description).not.toMatch(/requires a non-null `dj_name`, which holds/);
-      expect(description).toMatch(/does not hold/);
-    });
-
     it('retires the same claim where ShowPlaylist repeats it', () => {
       const description = (spec.components.schemas.ShowPlaylist as { description?: string }).description ?? '';
       expect(description).not.toMatch(/`dj_name` is non-nullable where this route's is not/);
+    });
+  });
+
+  // ShowPlaylistDJ was forked from OnAirDJ on the claim that a non-null
+  // dj_name "holds for the live-DJ endpoints but not here". It never did:
+  // /flowsheet/playlist's show_djs, /flowsheet/djs-on-air and
+  // /flowsheet/shows/recent all resolve the handle through the same
+  // `resolveDjDisplayName`. Widening OnAirDJ.dj_name (#469) removed the last
+  // structural difference, leaving two names for one shape and a generated
+  // type per name in four languages.
+  describe('ShowPlaylistDJ collapsed into OnAirDJ (#473)', () => {
+    it('refs OnAirDJ for show_djs[] rather than a forked twin', () => {
+      const showDjs = propertyOf('ShowPlaylist', 'show_djs') as
+        | { type?: string; items?: { $ref?: string; properties?: unknown } }
+        | undefined;
+      expect(showDjs?.type).toBe('array');
+      expect(showDjs?.items?.$ref).toBe('#/components/schemas/OnAirDJ');
+      expect(showDjs?.items?.properties).toBeUndefined();
+    });
+
+    it('deletes ShowPlaylistDJ from components.schemas', () => {
+      expect(spec.components.schemas.ShowPlaylistDJ).toBeUndefined();
+    });
+
+    // Whole-document, not just the two sites above: a name that survives
+    // anywhere — a stale $ref, a description naming the retired twin as the
+    // one to prefer — is a name the next author can reach for.
+    it('leaves no mention of the retired name anywhere in the document', () => {
+      expect(specText).not.toContain('ShowPlaylistDJ');
+    });
+
+    // The collapse restores the `$ref` ShowPlaylist carried before the fork, so
+    // a description recounting that it "previously $ref'ed OnAirDJ" now
+    // contradicts the line directly beneath it. The nullability the sentence
+    // exists to disown is stated where it belongs, on OnAirDJ.dj_name.
+    it('stops recounting a non-nullable dj_name it no longer has a twin to contrast', () => {
+      const description = (spec.components.schemas.ShowPlaylist as { description?: string }).description ?? '';
+      expect(description).not.toMatch(/non-nullable/);
     });
   });
 
