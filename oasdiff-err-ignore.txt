@@ -39,27 +39,3 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
-
-# wxyc-shared#469 — OnAirDJ.dj_name gains `nullable: true`.
-#
-# NOT a behaviour change, and this entry is not a waiver for one. Backend has
-# always been able to return `null` here: every operation serving this schema
-# composes the field through `resolveDjDisplayName`, which discards a blank
-# handle and the literal "Anonymous" (WXYC/Backend-Service#1286). The
-# declaration said `string`; the wire said `string | null`. oasdiff is a
-# document differ and cannot tell "the server started sending null" from "the
-# document started admitting the null it always sent" — this is the latter, so
-# the ERR marks the correction rather than the defect.
-#
-# Blast radius checked before suppressing: `OnAirDJ` is reachable from exactly
-# one operation (`OnAirStatusResponse` is declared but referenced by no path,
-# and `ShowPlaylist` uses `ShowPlaylistDJ`), and no hand-written consumer
-# decodes it — wxyc-ios-64 and wxyc-dj-ios reference it only from generated
-# models, dj-site hand-rolls its own `OnAirDJResponse`, WXYC-Android not at
-# all. Regeneration today retypes something nothing calls; leaving it wrong
-# only gets more expensive once a screen is wired up, at which point a
-# non-optional Swift `String` throws DecodingError.valueNotFound on the first
-# blank handle.
-#
-# Diff-scoped like every entry here: inert once this lands on main. Prune it.
-get /flowsheet/djs-on-air the response property `items/dj_name` became nullable for the status `200`
