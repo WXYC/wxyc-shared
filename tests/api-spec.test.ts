@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.65.0');
+      expect(spec.info.version).toBe('1.66.0');
     });
 
     it('should have components section', () => {
@@ -5547,7 +5547,32 @@ describe('OpenAPI Specification', () => {
       const services = extension!.properties?.services;
       expect(services?.type).toBe('object');
       expect(services?.additionalProperties?.type).toBe('string');
-      expect(services?.additionalProperties?.enum).toEqual(['ok', 'unavailable', 'timeout']);
+    });
+
+    // The value was a closed enum of `ok | unavailable | timeout`, and the
+    // producer has never emitted two of those three. `checkDatabase()`
+    // classifies into `ok | auth-error | rate-limited | upstream-error |
+    // network-error | error`, a vocabulary chosen to match
+    // library-metadata-lookup's `discogs_api` probe so the two can be
+    // pattern-matched together -- so four of the five failure values were
+    // enum violations on every 503 this endpoint has ever served, against a
+    // strict generated decoder. `timeout` was not merely unused but
+    // deliberately rejected upstream: Postgres has no timeout bucket distinct
+    // from a lost connection, so a canceled statement reports
+    // `network-error`.
+    //
+    // The same mistake as `Genre` and `Format` (see their note in api.yaml),
+    // and from the same cause: a plausible-sounding set written down without a
+    // call site. An open string is what a per-service map keyed by
+    // per-service probes can honestly promise.
+    it('leaves the per-dependency status open, since each probe classifies its own failures', () => {
+      const schema = spec.components.schemas.ReadinessResponse as {
+        allOf: Array<{
+          properties?: Record<string, { additionalProperties?: { enum?: string[] } }>;
+        }>;
+      };
+      const services = schema.allOf[1]!.properties?.services;
+      expect(services?.additionalProperties?.enum).toBeUndefined();
     });
   });
 
