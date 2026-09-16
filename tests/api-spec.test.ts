@@ -5961,6 +5961,15 @@ describe('OpenAPI Specification', () => {
   // and is alive because those are reachable; a schema referenced ONLY by an
   // unreachable schema is itself unreachable, so the closure is what decides.
   describe('schema reachability (#476)', () => {
+    // Every name below is unreachable and stays that way deliberately. The
+    // lists are grouped by WHY, because the remedy differs per group and a
+    // single flat list hid that: what follows is the verdict of the #476
+    // sweep, not a backlog. The sweep's finding is that "unreachable" in this
+    // contract almost never means "unused" -- codegen emits the whole
+    // components table, so a consumer imports any schema it likes whether or
+    // not a path references it. Path-reachability measures what the SPEC
+    // references; it has never measured what the org uses.
+
     // The AutoDJ WebSocket protocol. `AutoDJWebSocketMessage` is a
     // discriminated union over six message types and OpenAPI paths cannot
     // describe a socket, so unreachability is the correct state here, not a
@@ -5973,47 +5982,85 @@ describe('OpenAPI Specification', () => {
     'AutoDJRelayState', 'AutoDJState', 'AutoDJStatus', 'AutoDJTransport', 'AutoDJWebSocketMessage',
     ];
 
-    // Arrived in the 2026-01-31 bulk import (`1c231db`), which consolidated
-    // "Backend-Service app.yaml and all TypeScript DTOs" without evaluating
-    // entries individually -- so client-side view models no server produces
-    // landed in the same table as real response shapes.
+    // Imported by hand-written code in at least one consumer, found by
+    // sweeping every consumer repo for references outside `generated/` and the
+    // vendored Swift trees. Deleting one breaks a build somewhere, so this
+    // list is permanent and is not expected to shrink.
     //
-    // DO NOT DELETE THESE. The list started at 37 and the deletable members
-    // are gone; every name below has at least one hand-written consumer that
-    // imports the generated type, found by sweeping all nine consumer repos.
-    // Codegen emits the whole components table, so a consumer can import any
-    // schema whether or not a path references it -- unreachable measures what
-    // the SPEC references, never what the org uses. `FlowsheetSongEntry` and
-    // its three siblings are imported by this package's own
-    // `src/dtos/extensions.ts` to build the `FlowsheetEntry` union and its type
-    // guards; deleting them breaks the build here, not just downstream.
+    // Most entries are plain imports -- `AlbumReview` and `AlbumReviewsResponse`
+    // from Backend-Service's album-reviews service and controller, the `Discogs*`
+    // family from library-metadata-lookup's `discogs/models.py` (which imports
+    // them from `generated.api_models` and re-aliases them) and from
+    // Backend-Service's `shared/lml-client`, `HealthCheckResponse` from both
+    // Backend-Service apps' health handlers, `PlaylistSearchParams` from three
+    // dj-site modules. Three are not, and each would read as deletable to a
+    // grep that only looked for imports:
     //
-    // The flowsheet four are unreachable for a structural reason worth fixing
-    // rather than exempting: /flowsheet declares the flattened
-    // `FlowsheetEntryResponse` (every field optional) while these are the
-    // discriminated variants consumers narrow into. A `oneOf` over them on the
-    // path would make this guard see the truth. Until then the honest name for
-    // this list is vocabulary, not residue -- #476 owns the rename.
-    const BULK_IMPORT_RESIDUE = [
-    'AddToBinRequest', 'AlbumMetadata', 'ArtistMetadata', 'BinLibraryDetails', 'DateTimeEntry',
-    'FlowsheetBreakpointEntry', 'FlowsheetMessageEntry', 'FlowsheetQueryParams',
-    'FlowsheetShowBlockEntry', 'FlowsheetSongEntry', 'MetadataSource', 'PaginationParams',
-    'ParsedSongRequest', 'RequestStatus', 'RotationWithAlbum', 'SongRequest',
-    ];
-
-    // Unreachable but added after that import, so a different cause: some are
-    // declared ahead of an implementation (which this repo does deliberately),
-    // others are their own residue. Untriaged -- #476 owns splitting them.
-    const UNREACHABLE_SINCE_ADDED = [
-    'AlbumReview', 'AlbumReviewsResponse', 'DiscogsArtistCredit', 'DiscogsArtistDetails',
+    //   - The four `Flowsheet*Entry` variants are imported by THIS package's
+    //     `src/dtos/extensions.ts`, which unions them into `FlowsheetEntry` and
+    //     builds its type guards. Deleting them breaks the build here.
+    //   - `StreamingLinks` is named by library-metadata-lookup's codegen pin
+    //     test as one of five classes that must carry the pinned streaming-URL
+    //     fields as `str`. No code imports the type; a test asserts the class
+    //     exists with that shape.
+    //   - `RotationWithAlbum` has no consumer yet. It is declared ahead of
+    //     implementation -- `album_id` + `rotation_bin` over `RotationEntry` is
+    //     the rotation-admin shape, and that work is in flight. `Rotation`, the
+    //     shape `GET /library/rotation` actually serves, is a superset of it in
+    //     every field but those two.
+    const GENERATED_TYPE_VOCABULARY = [
+    'AddToBinRequest', 'AlbumMetadata', 'AlbumReview', 'AlbumReviewsResponse', 'ArtistMetadata',
+    'BinLibraryDetails', 'DateTimeEntry', 'DiscogsArtistCredit', 'DiscogsArtistDetails',
     'DiscogsLabelCredit', 'DiscogsReleaseInfo', 'DiscogsReleaseMetadata', 'DiscogsReleaseVideo',
-    'DiscogsTrackReleasesResponse', 'FlowsheetV2PaginatedResponse', 'HealthCheckResponse',
-    'LibrarySearchItem', 'LibrarySearchResponse', 'OnAirInfo', 'PlaylistSearchParams',
-    'ReadinessResponse', 'StreamingCheckRequest', 'StreamingCheckResponse', 'StreamingCheckSources',
-    'StreamingLinks', 'StreamingSourceMatch',
+    'DiscogsTrackReleasesResponse', 'FlowsheetBreakpointEntry', 'FlowsheetMessageEntry',
+    'FlowsheetQueryParams', 'FlowsheetShowBlockEntry', 'FlowsheetSongEntry', 'HealthCheckResponse',
+    'LibrarySearchItem', 'LibrarySearchResponse', 'MetadataSource', 'PaginationParams',
+    'ParsedSongRequest', 'PlaylistSearchParams', 'RequestStatus', 'RotationWithAlbum',
+    'SongRequest', 'StreamingCheckResponse', 'StreamingCheckSources', 'StreamingLinks',
+    'StreamingSourceMatch',
     ];
 
-    const EXEMPT = new Set([...WEBSOCKET_PROTOCOL, ...BULK_IMPORT_RESIDUE, ...UNREACHABLE_SINCE_ADDED]);
+    // No importer, but the shape is real and served -- the PATH declares
+    // something looser, so the accurate schema sits unreferenced beside it.
+    // This group is expected to empty out, by fixing the path rather than by
+    // deleting the schema.
+    //
+    // `GET /flowsheet` declares `array<FlowsheetEntryResponse>`, the flattened
+    // V1 shape with every field optional. It does not serve that.
+    // `wxyc-ios-64` decodes the response as an object of `{entries, on_air}`
+    // and branches three ways on `on_air` -- absent, JSON null, or an object --
+    // which is `FlowsheetV2PaginatedResponse` carrying `OnAirInfo`, field for
+    // field. `ShowPlaylist` (reachable, `GET /flowsheet/playlist`) inlines the
+    // same eight-variant discriminated union and says so in its own
+    // description: "the same shape `GET /flowsheet` serves". So the named
+    // schema for that shape is referenced by nothing while a copy of it is
+    // pasted into a sibling, and `OnAirInfo` is reachable only through the
+    // orphan. Pointing the path at the named schema retires both entries and
+    // deletes the duplicate.
+    const PATH_DECLARES_A_LOOSER_SHAPE = [
+    'FlowsheetV2PaginatedResponse', 'OnAirInfo',
+    ];
+
+    // No importer, and no path here to attach them to: these describe payloads
+    // of endpoints this contract does not declare. `ReadinessResponse` is the
+    // readiness half of a health pair whose other half (`HealthCheckResponse`)
+    // both Backend-Service apps import, and no `/healthcheck` or `/ready` path
+    // is declared. `StreamingCheckRequest` is the request body for
+    // library-metadata-lookup's streaming check, whose RESPONSE
+    // (`StreamingCheckResponse`) Backend-Service's lml-client imports; LML
+    // itself defines the request locally in `streaming/models.py` rather than
+    // importing the generated one. Deleting either would make the contract
+    // less truthful, not more -- the endpoints exist.
+    const ENDPOINT_NOT_DECLARED_HERE = [
+    'ReadinessResponse', 'StreamingCheckRequest',
+    ];
+
+    const EXEMPT = new Set([
+      ...WEBSOCKET_PROTOCOL,
+      ...GENERATED_TYPE_VOCABULARY,
+      ...PATH_DECLARES_A_LOOSER_SHAPE,
+      ...ENDPOINT_NOT_DECLARED_HERE,
+    ]);
 
     function reachableSchemas(): Set<string> {
       const schemas = spec.components.schemas as Record<string, unknown>;
