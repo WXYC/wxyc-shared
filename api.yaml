@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.61.0
+  version: 1.62.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -5559,127 +5559,6 @@ components:
         cached:
           type: boolean
 
-    DiscogsSearchResult:
-      type: object
-      required:
-        - id
-        - title
-        - resource_url
-        - type
-      properties:
-        id:
-          type: integer
-        title:
-          type: string
-        year:
-          type: integer
-        thumb:
-          type: string
-        cover_image:
-          type: string
-        resource_url:
-          type: string
-        type:
-          type: string
-          enum:
-            - release
-            - master
-            - artist
-
-    DiscogsArtistRef:
-      type: object
-      required:
-        - name
-        - id
-      properties:
-        name:
-          type: string
-        id:
-          type: integer
-
-    DiscogsLabelRef:
-      type: object
-      required:
-        - name
-        - id
-      properties:
-        name:
-          type: string
-        id:
-          type: integer
-
-    DiscogsTrack:
-      type: object
-      required:
-        - position
-        - title
-      properties:
-        position:
-          type: string
-        title:
-          type: string
-        duration:
-          type: string
-
-    DiscogsImage:
-      type: object
-      required:
-        - type
-        - uri
-        - width
-        - height
-      properties:
-        type:
-          type: string
-        uri:
-          type: string
-        width:
-          type: integer
-        height:
-          type: integer
-
-    DiscogsRelease:
-      type: object
-      required:
-        - id
-        - title
-        - artists
-        - labels
-        - genres
-        - styles
-        - tracklist
-      properties:
-        id:
-          type: integer
-        title:
-          type: string
-        year:
-          type: integer
-        artists:
-          type: array
-          items:
-            $ref: '#/components/schemas/DiscogsArtistRef'
-        labels:
-          type: array
-          items:
-            $ref: '#/components/schemas/DiscogsLabelRef'
-        genres:
-          type: array
-          items:
-            type: string
-        styles:
-          type: array
-          items:
-            type: string
-        tracklist:
-          type: array
-          items:
-            $ref: '#/components/schemas/DiscogsTrack'
-        images:
-          type: array
-          items:
-            $ref: '#/components/schemas/DiscogsImage'
-
     # ============================
     # Shared Streaming Types
     # ============================
@@ -5946,9 +5825,10 @@ components:
       type: object
       description: >
         A processed Discogs search result with artwork and enriched metadata.
-        Distinct from the raw DiscogsSearchResult which mirrors the Discogs
-        API response directly. Streaming URL fields match the StreamingLinks
-        schema and will be migrated to use $ref in a future version.
+        Distinct from the raw Discogs API search response, which this contract
+        deliberately does not model -- no WXYC endpoint proxies Discogs
+        unmodified. Streaming URL fields match the StreamingLinks schema and
+        will be migrated to use $ref in a future version.
 
         Two distinct states share this shape, told apart by `release_id`:
         a real Discogs identity has `release_id > 0` with a non-empty
