@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.60.0
+  version: 1.61.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1575,20 +1575,6 @@ components:
             A null `dj_name` and a null `id` never co-occur. The legacy arm is
             the only source of a null `id`, and it emits an entry only when it
             has a name to put in it.
-
-    OnAirStatusResponse:
-      type: object
-      required:
-        - djs
-        - onAir
-      properties:
-        djs:
-          type: array
-          items:
-            $ref: '#/components/schemas/OnAirDJ'
-        onAir:
-          type: string
-          description: Status indicator - "on" or "off"
 
     Show:
       type: object

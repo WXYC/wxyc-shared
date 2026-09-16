@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.60.0');
+      expect(spec.info.version).toBe('1.61.0');
     });
 
     it('should have components section', () => {
@@ -242,8 +242,15 @@ describe('OpenAPI Specification', () => {
       expect(spec.components.schemas.FlowsheetMessageEntry).toBeDefined();
     });
 
-    it('should define OnAirStatusResponse', () => {
-      expect(spec.components.schemas.OnAirStatusResponse).toBeDefined();
+    // Deleted, and asserted absent so it cannot return. `{djs, onAir}` was
+    // dj-site's client-side view model, composed in the browser after the
+    // fetch -- no endpoint ever served it, and no path ever referenced it. Its
+    // `onAir` was declared a status indicator of "on" or "off" while the only
+    // code producing it emitted a rendered label ("Off Air", or a comma-joined
+    // DJ list), so anything re-adding this shape is reintroducing a described
+    // contract for a response that does not exist.
+    it('does not define OnAirStatusResponse', () => {
+      expect(spec.components.schemas).not.toHaveProperty('OnAirStatusResponse');
     });
 
     // OnAirDJ.id is the better-auth `auth_user.id` (a varchar(255) string) at
