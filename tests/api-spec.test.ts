@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.56.0');
+      expect(spec.info.version).toBe('1.57.0');
     });
 
     it('should have components section', () => {
@@ -2101,6 +2101,90 @@ describe('OpenAPI Specification', () => {
         spec.paths['/library/rotation/{id}'] as Record<string, Record<string, unknown>>
       ).get as { description?: string };
       expect(idGet.description).toMatch(/\/library\/rotation\/cards/);
+    });
+  });
+
+  // The queue's `status` (WXYC/Backend-Service#2504) borrows the sibling's
+  // vocabulary and inverts its default. api.yaml asserted the opposite --
+  // "Deliberately not status-filtered" -- for as long as the parameter had
+  // shipped, so these pin the reversal in both directions (#470).
+  describe('status on GET /library/rotation/uncatalogued (#470 / BS#2504)', () => {
+    const operation = () =>
+      (spec.paths['/library/rotation/uncatalogued'] as Record<string, Record<string, unknown>>).get as {
+        description?: string;
+        parameters?: Array<Record<string, unknown>>;
+        responses?: Record<string, { description?: string }>;
+      };
+    const statusParam = () =>
+      operation().parameters?.find((p) => p.name === 'status') as
+        | { in?: string; required?: boolean; description?: string; schema?: { enum?: string[]; default?: string } }
+        | undefined;
+    const siblingGet = () =>
+      (spec.paths['/library/rotation'] as Record<string, Record<string, unknown>>).get as {
+        parameters?: Array<Record<string, unknown>>;
+        responses?: Record<string, { description?: string; content?: Record<string, { schema?: { $ref?: string } }> }>;
+      };
+
+    it('declares status as an optional query param over the sibling vocabulary', () => {
+      const status = statusParam();
+      expect(status).toBeDefined();
+      expect(status?.in).toBe('query');
+      expect(status?.required).toBe(false);
+      expect(status?.schema?.enum).toEqual(['active', 'killed', 'all']);
+    });
+
+    // The whole reason the parameter belongs in the published contract: an
+    // `active` default would render dj-site's "Show killed releases too"
+    // checkbox permanently empty, and the killed cohort is most of the backlog.
+    it('defaults to all here and to active on the sibling -- the asymmetry a client author gets wrong', () => {
+      const here = statusParam()?.schema?.default;
+      const sibling = siblingGet().parameters?.find((p) => p.name === 'status') as
+        | { schema?: { default?: string } }
+        | undefined;
+      expect(here).toBe('all');
+      expect(sibling?.schema?.default).toBe('active');
+      expect(here).not.toBe(sibling?.schema?.default);
+    });
+
+    it('states the differing default in prose, not only in the schema', () => {
+      expect(statusParam()?.description).toMatch(/`all` here, `active`\s+there/);
+    });
+
+    it("carries the sibling's non-partition warning, so a future-dated kill is not a surprise", () => {
+      const description = statusParam()?.description ?? '';
+      expect(description).toMatch(/do not partition/i);
+      expect(description).toMatch(/kill_date IS NULL OR kill_date > CURRENT_DATE/);
+      expect(description).toMatch(/kill_date IS NOT NULL/);
+    });
+
+    it('retires the "Deliberately not status-filtered" claim the parameter falsified', () => {
+      expect(operation().description ?? '').not.toMatch(/not status-filtered/i);
+    });
+
+    it('documents both orderings on the 200, since killed sorts on a different key', () => {
+      const description = operation().responses?.['200']?.description ?? '';
+      expect(description).toMatch(/kill_date DESC/);
+      expect(description).toMatch(/add_date DESC/);
+      // The quirk that falls out of kill-date ordering and never applied to
+      // the add-date one: a kill scheduled ahead sorts above the real ones.
+      expect(description).toMatch(/future-dated\s+kill sorts to the TOP/);
+    });
+
+    it('covers the third refusal on the 400, alongside limit and offset', () => {
+      const description = operation().responses?.['400']?.description ?? '';
+      expect(description).toMatch(/limit/);
+      expect(description).toMatch(/offset/);
+      expect(description).toMatch(/status/);
+    });
+
+    // Same handler guard on the sibling, which has been able to 400 on a bad
+    // status since #453 declared the parameter without declaring the refusal.
+    it('declares the sibling 400 the status param made reachable', () => {
+      const responses = siblingGet().responses;
+      expect(responses?.['400']?.description).toMatch(/status/);
+      expect(responses?.['400']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ApiErrorResponse'
+      );
     });
   });
 

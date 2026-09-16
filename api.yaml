@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.56.0
+  version: 1.57.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -10764,7 +10764,8 @@ paths:
             These facets are not a partition: `active` is `kill_date IS NULL
             OR kill_date > CURRENT_DATE` (today's default read), `killed` is
             `kill_date IS NOT NULL`, so a future-dated kill appears in both;
-            `all` applies no filter.
+            `all` applies no filter. `GET /library/rotation/uncatalogued`
+            takes the same three values and defaults to `all`, not `active`.
       responses:
         '200':
           description: List of rotations
@@ -10774,6 +10775,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Rotation'
+        '400':
+          description: '`status` outside `active|killed|all`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
     post:
       x-wxyc-service: backend-service
@@ -10833,12 +10840,13 @@ paths:
       x-wxyc-service: backend-service
       summary: List uncatalogued rotation rows (the Awaiting Cataloging queue)
       description: >
-        Every rotation row with `album_id IS NULL`, newest first — the
-        worklist behind dj-site's Awaiting Cataloging facet and the Import
-        to Library flow (WXYC/dj-site#1161, BS#2109). Deliberately not
-        status-filtered: active and killed rows arrive together, and two
-        physically distinct promos sharing an artist and title are two rows
-        a librarian has to catalogue — clients must not dedupe this queue.
+        Every rotation row with `album_id IS NULL` — the worklist behind
+        dj-site's Awaiting Cataloging facet and the Import to Library flow
+        (WXYC/dj-site#1161, BS#2109). Unfiltered unless you ask: `status`
+        defaults to `all` here, so active and killed rows arrive together
+        (BS#2504). Two physically distinct promos sharing an artist and
+        title are two rows a librarian has to catalogue — clients must not
+        dedupe this queue.
       # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
       security:
         - BearerAuth: []
@@ -10861,9 +10869,44 @@ paths:
           schema:
             type: integer
             minimum: 0
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, killed, all]
+            default: all
+          description: >
+            BS#2504. Same vocabulary as `GET /library/rotation` and
+            deliberately NOT the same default — `all` here, `active`
+            there. This endpoint shipped unfiltered and dj-site's Awaiting
+            Cataloging facet still reads it with no parameter, so an
+            omitted `status` has to keep returning what it always
+            returned; and the killed cohort is most of what the queue
+            exists to serve (~3.7k of the ~3.8k unlinked rows when
+            BS#2504 shipped), which an `active` default would hide.
+            Concretely: omit `status` here and killed rows come back,
+            where omitting it on the sibling leaves them out.
+
+            The facets do not partition, exactly as on the sibling:
+            `active` is `kill_date IS NULL OR kill_date > CURRENT_DATE`,
+            `killed` is `kill_date IS NOT NULL`, so a release whose kill
+            is scheduled for a future date — still rotating, already
+            marked — matches both. `killed` also changes the sort; see the
+            200 response.
       responses:
         '200':
-          description: Uncatalogued rotation rows, newest first
+          description: >
+            Uncatalogued rotation rows. `status=killed` orders them
+            `kill_date DESC, id ASC`, most recently killed first — the
+            weekly worklist, matching tubafrenzy `/wxycdb`'s
+            `findKilledUncataloged()`. `active` and `all` keep
+            `add_date DESC, id ASC`. The `id` tiebreak makes both sorts
+            total, so `offset` paging cannot skip or repeat a row.
+
+            One quirk `killed` inherits with that ordering: a future-dated
+            kill sorts to the TOP, ahead of releases already off the air.
+            The add-date ordering never had this.
           content:
             application/json:
               schema:
@@ -10871,7 +10914,9 @@ paths:
                 items:
                   $ref: '#/components/schemas/RotationRowSummary'
         '400':
-          description: '`limit` outside 1..500, or a negative `offset`'
+          description: >
+            `limit` outside 1..500, a negative `offset`, or a `status`
+            outside `active|killed|all`.
           content:
             application/json:
               schema:
