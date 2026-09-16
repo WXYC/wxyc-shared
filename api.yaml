@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.62.0
+  version: 1.63.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3807,65 +3807,6 @@ components:
         album_id:
           type: integer
 
-    Playlist:
-      type: object
-      required:
-        - id
-        - dj_id
-        - name
-        - created_at
-        - updated_at
-      properties:
-        id:
-          type: integer
-        dj_id:
-          type: integer
-        name:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-
-    PlaylistEntry:
-      type: object
-      required:
-        - id
-        - playlist_id
-        - album_id
-        - position
-        - album_title
-        - artist_name
-      properties:
-        id:
-          type: integer
-        playlist_id:
-          type: integer
-        album_id:
-          type: integer
-        track_title:
-          type: string
-        position:
-          type: integer
-        album_title:
-          type: string
-        artist_name:
-          type: string
-
-    PlaylistWithEntries:
-      allOf:
-        - $ref: '#/components/schemas/Playlist'
-        - type: object
-          required:
-            - entries
-          properties:
-            entries:
-              type: array
-              items:
-                $ref: '#/components/schemas/PlaylistEntry'
-
     DJBinResponse:
       type: object
       required:
@@ -3878,19 +3819,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BinEntry'
-
-    DJPlaylistsResponse:
-      type: object
-      required:
-        - dj_id
-        - playlists
-      properties:
-        dj_id:
-          type: integer
-        playlists:
-          type: array
-          items:
-            $ref: '#/components/schemas/Playlist'
 
     BinLibraryDetails:
       type: object
