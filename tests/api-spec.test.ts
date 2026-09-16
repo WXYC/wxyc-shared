@@ -5898,4 +5898,120 @@ describe('OpenAPI Specification', () => {
       expect(res.required).toEqual(['applied', 'resolved']);
     });
   });
+
+  // Every schema in `components.schemas` should be reachable by following
+  // `$ref` from a path (or from a non-schema component). One that is not still
+  // generates a public type in four languages on every codegen run, and until
+  // this guard existed nothing noticed: 79 of 284 had accumulated.
+  //
+  // Reachability is transitive. `OnAirDJ` is referenced only by other schemas,
+  // and is alive because those are reachable; a schema referenced ONLY by an
+  // unreachable schema is itself unreachable, so the closure is what decides.
+  describe('schema reachability (#476)', () => {
+    // The AutoDJ WebSocket protocol. `AutoDJWebSocketMessage` is a
+    // discriminated union over six message types and OpenAPI paths cannot
+    // describe a socket, so unreachability is the correct state here, not a
+    // finding. Permanent -- this group is not expected to shrink.
+    const WEBSOCKET_PROTOCOL = [
+    'AutoDJAck', 'AutoDJActivationSource', 'AutoDJActivationSourceType', 'AutoDJButtonToggle',
+    'AutoDJCommand', 'AutoDJCommandAction', 'AutoDJCurrentTrack', 'AutoDJDeactivateResponse',
+    'AutoDJDeviceStatus', 'AutoDJDeviceSummary', 'AutoDJErrorCode', 'AutoDJErrorLevel',
+    'AutoDJErrorReport', 'AutoDJHeartbeat', 'AutoDJLastTrack', 'AutoDJNowPlaying',
+    'AutoDJRelayState', 'AutoDJState', 'AutoDJStatus', 'AutoDJTransport', 'AutoDJWebSocketMessage',
+    ];
+
+    // Residue of the 2026-01-31 bulk import (`1c231db`), which consolidated
+    // "Backend-Service app.yaml and all TypeScript DTOs" without evaluating
+    // entries individually -- so client-side view models no server produces
+    // landed in the same table as real response shapes. Grandfathered so the
+    // guard can land before the deletions. EXPECTED TO SHRINK TO EMPTY; take a
+    // themed batch and delete it, do not add to this list.
+    const BULK_IMPORT_RESIDUE = [
+    'AddToBinRequest', 'AlbumMetadata', 'ArtistMetadata', 'ArtistWithGenre', 'BinLibraryDetails',
+    'CatalogSearchParams', 'DJPlaylistsResponse', 'DateTimeEntry', 'DeviceRegistration',
+    'DeviceToken', 'DiscogsArtistRef', 'DiscogsImage', 'DiscogsLabelRef', 'DiscogsRelease',
+    'DiscogsSearchResult', 'DiscogsTrack', 'EnhancedRequest', 'FlowsheetBreakpointEntry',
+    'FlowsheetMessageEntry', 'FlowsheetQueryParams', 'FlowsheetShowBlockEntry',
+    'FlowsheetSongEntry', 'LibraryMatch', 'MetadataFetchRequest', 'MetadataFetchResponse',
+    'MetadataSource', 'PaginationParams', 'ParsedSongRequest', 'Playlist', 'PlaylistEntry',
+    'PlaylistWithEntries', 'RequestStatus', 'RotationWithAlbum', 'SongRequest', 'SpecialtyShow',
+    'TrackSearchParams', 'TrackSearchResult',
+    ];
+
+    // Unreachable but added after that import, so a different cause: some are
+    // declared ahead of an implementation (which this repo does deliberately),
+    // others are their own residue. Untriaged -- #476 owns splitting them.
+    const UNREACHABLE_SINCE_ADDED = [
+    'AlbumReview', 'AlbumReviewsResponse', 'DiscogsArtistCredit', 'DiscogsArtistDetails',
+    'DiscogsLabelCredit', 'DiscogsReleaseInfo', 'DiscogsReleaseMetadata', 'DiscogsReleaseVideo',
+    'DiscogsTrackReleasesResponse', 'FlowsheetV2PaginatedResponse', 'HealthCheckResponse',
+    'LibrarySearchItem', 'LibrarySearchResponse', 'OnAirInfo', 'PlaylistSearchParams',
+    'ReadinessResponse', 'StreamingCheckRequest', 'StreamingCheckResponse', 'StreamingCheckSources',
+    'StreamingLinks', 'StreamingSourceMatch',
+    ];
+
+    const EXEMPT = new Set([...WEBSOCKET_PROTOCOL, ...BULK_IMPORT_RESIDUE, ...UNREACHABLE_SINCE_ADDED]);
+
+    function reachableSchemas(): Set<string> {
+      const schemas = spec.components.schemas as Record<string, unknown>;
+      const collect = (node: unknown, out: Set<string>): void => {
+        if (Array.isArray(node)) {
+          for (const child of node) collect(child, out);
+          return;
+        }
+        if (node === null || typeof node !== 'object') return;
+        for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+          if (key === '$ref' && typeof value === 'string' && value.includes('/schemas/')) {
+            out.add(value.slice(value.lastIndexOf('/') + 1));
+          } else {
+            collect(value, out);
+          }
+        }
+      };
+
+      // Roots are the paths plus every non-schema component (securitySchemes,
+      // parameters, responses...), since those are entry points too.
+      const roots = new Set<string>();
+      collect(spec.paths, roots);
+      for (const [key, value] of Object.entries(spec.components as Record<string, unknown>)) {
+        if (key !== 'schemas') collect(value, roots);
+      }
+
+      const alive = new Set<string>();
+      const frontier = [...roots];
+      while (frontier.length > 0) {
+        const name = frontier.pop()!;
+        if (alive.has(name) || !(name in schemas)) continue;
+        alive.add(name);
+        const children = new Set<string>();
+        collect(schemas[name], children);
+        frontier.push(...children);
+      }
+      return alive;
+    }
+
+    it('declares no schema that no path can reach', () => {
+      const alive = reachableSchemas();
+      const orphans = Object.keys(spec.components.schemas)
+        .filter((name) => !alive.has(name) && !EXEMPT.has(name))
+        .sort();
+      expect(orphans).toEqual([]);
+    });
+
+    // The counterpart, and the half that keeps the lists honest. An exemption
+    // that outlives its reason is worse than no exemption: it reads as a
+    // considered decision while describing a state that no longer holds. The
+    // same rot the oasdiff whitelist is pruned for.
+    it('carries no exemption for a schema that is now reachable', () => {
+      const alive = reachableSchemas();
+      const stale = [...EXEMPT].filter((name) => alive.has(name)).sort();
+      expect(stale).toEqual([]);
+    });
+
+    it('exempts nothing that no longer exists', () => {
+      const schemas = spec.components.schemas as Record<string, unknown>;
+      const vanished = [...EXEMPT].filter((name) => !(name in schemas)).sort();
+      expect(vanished).toEqual([]);
+    });
+  });
 });
