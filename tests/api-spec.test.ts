@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.62.0');
+      expect(spec.info.version).toBe('1.63.0');
     });
 
     it('should have components section', () => {
@@ -2590,19 +2590,28 @@ describe('OpenAPI Specification', () => {
       // The surviving /djs surface is bin + playlists, and it has its own
       // shapes — this is a deletion of dead types, not of the DJ concept.
       expect(spec.components.schemas.BinEntry).toBeDefined();
-      expect(spec.components.schemas.DJPlaylistsResponse).toBeDefined();
+      expect(spec.components.schemas.ShowPeek).toBeDefined();
     });
 
     it('should define BinEntry', () => {
       expect(spec.components.schemas.BinEntry).toBeDefined();
     });
 
-    it('should define Playlist', () => {
-      expect(spec.components.schemas.Playlist).toBeDefined();
-    });
-
-    it('should define PlaylistWithEntries', () => {
-      expect(spec.components.schemas.PlaylistWithEntries).toBeDefined();
+    // Deleted, and asserted absent so they cannot return. This family modelled
+    // a user-curated playlist -- `dj_id` plus a name plus ordered album entries
+    // -- and no endpoint was ever built for it. The playlist surface this API
+    // does serve is show-shaped and uses different types entirely:
+    // `/flowsheet/playlist` returns `ShowPlaylist`, `/djs/playlists` returns
+    // `ShowPeek`. `DJPlaylistsResponse` in particular is a shape-for-shape twin
+    // of the live `DJBinResponse` it sat beside, which is why the components
+    // table read as though both features existed. Only the bin one does.
+    it.each([
+      'Playlist',
+      'PlaylistEntry',
+      'PlaylistWithEntries',
+      'DJPlaylistsResponse',
+    ])('does not define %s', (name) => {
+      expect(spec.components.schemas).not.toHaveProperty(name);
     });
   });
 
@@ -5943,12 +5952,12 @@ describe('OpenAPI Specification', () => {
     // themed batch and delete it, do not add to this list.
     const BULK_IMPORT_RESIDUE = [
     'AddToBinRequest', 'AlbumMetadata', 'ArtistMetadata', 'ArtistWithGenre', 'BinLibraryDetails',
-    'CatalogSearchParams', 'DJPlaylistsResponse', 'DateTimeEntry', 'DeviceRegistration',
+    'CatalogSearchParams', 'DateTimeEntry', 'DeviceRegistration',
     'DeviceToken', 'EnhancedRequest', 'FlowsheetBreakpointEntry',
     'FlowsheetMessageEntry', 'FlowsheetQueryParams', 'FlowsheetShowBlockEntry',
     'FlowsheetSongEntry', 'LibraryMatch', 'MetadataFetchRequest', 'MetadataFetchResponse',
-    'MetadataSource', 'PaginationParams', 'ParsedSongRequest', 'Playlist', 'PlaylistEntry',
-    'PlaylistWithEntries', 'RequestStatus', 'RotationWithAlbum', 'SongRequest', 'SpecialtyShow',
+    'MetadataSource', 'PaginationParams', 'ParsedSongRequest',
+    'RequestStatus', 'RotationWithAlbum', 'SongRequest', 'SpecialtyShow',
     'TrackSearchParams', 'TrackSearchResult',
     ];
 
