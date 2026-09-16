@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.57.0
+  version: 1.58.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1476,12 +1476,25 @@ components:
             runtime (BS#1547).
         dj_name:
           type: string
+          nullable: true
           description: >-
             The DJ's public on-air handle, never the DJ's legal name. For a
             DJ with a Backend-Service account, the DJ's chosen handle
             (`user.djName`); for a legacy/tubafrenzy-mirrored show with no
             account, the full PII-safe chain (BS#1371) down to
             `shows.legacy_dj_name`.
+
+
+            `null` when that chain resolves to nothing. The account arm keeps
+            the DJ's row and nulls the name — `resolveDjDisplayName` discards a
+            blank handle and the literal "Anonymous" (BS#1286) — so every
+            operation serving this schema can return it. Present-but-null,
+            never omitted: `dj_name` stays required.
+
+
+            A null `dj_name` and a null `id` never co-occur. The legacy arm is
+            the only source of a null `id`, and it emits an entry only when it
+            has a name to put in it.
 
     OnAirStatusResponse:
       type: object
@@ -1610,6 +1623,84 @@ components:
             contract version should drop them rather than preserve them out of
             habit.
 
+    RecentShow:
+      type: object
+      description: >
+        One show as reported by `GET /flowsheet/shows/recent`. Distinct from
+        `OpenShow`: it carries `end_time` and the DJ list, and omits the
+        `entry_count`, `is_current` and `likely_abandoned` fields that exist to
+        help an operator decide what to force-end.
+
+
+        Every property is always present on the wire; the nullable ones carry
+        `null`, they are not omitted.
+      required:
+        - id
+        - show_name
+        - start_time
+        - end_time
+        - djs
+      properties:
+        id:
+          type: integer
+          description: >
+            `shows.id` — the value to pass as `show_id` to
+            `GET /flowsheet/playlist` to read the show itself.
+        show_name:
+          type: string
+          nullable: true
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            `null` while the show is still on the air — and also when its
+            sign-off was lost, which is common enough that `null` must not be
+            read as "live". `GET /flowsheet/open-shows` is the read that
+            separates the two, via its `is_current` field.
+        djs:
+          type: array
+          description: >
+            Who had the room. `$ref`s the same `OnAirDJ` that
+            `GET /flowsheet/djs-on-air` returns, because Backend composes both
+            from one function (`composeShowDJList`) — a second declaration of
+            the shape is how the two would come to disagree.
+
+
+            Empty when the show carries no account rows AND no resolvable
+            show-level handle. The show is still listed, so a consumer renders
+            "unknown" against real times rather than losing the row.
+
+
+            Membership is NOT filtered to still-active DJs, unlike
+            `/flowsheet/djs-on-air`: sign-off deactivates every remaining
+            membership, so filtering would empty the list for every properly
+            ended show. Co-hosts therefore appear alongside the primary DJ.
+          items:
+            $ref: '#/components/schemas/OnAirDJ'
+
+    RecentShowsResponse:
+      type: object
+      required:
+        - shows
+      properties:
+        shows:
+          type: array
+          description: >
+            Ordered newest-first by `start_time`, tie-broken on `id` DESC.
+
+
+            Capped at 200 rows, which truncates the OLDEST shows in the window
+            — the reason no `limit` parameter is offered, since those are the
+            least useful rows to a DJ taking over. A page that reaches the cap
+            carries no flag saying so; narrow `window_hours` if you need to
+            know you have the whole window.
+          items:
+            $ref: '#/components/schemas/RecentShow'
+
     ShowDJ:
       type: object
       properties:
@@ -1635,8 +1726,9 @@ components:
         time: it declared `specialty_show` (emitted as `specialty_show_name`),
         typed `entries` as the V1 `FlowsheetEntryResponse` (emitted as the V2
         discriminated union), declared no identifier at all, omitted the six
-        `shows` columns the spread ships, and `$ref`ed `OnAirDJ`, whose
-        `dj_name` is non-nullable where this route's is not.
+        `shows` columns the spread ships, and `$ref`ed `OnAirDJ`, which then
+        declared `dj_name` non-nullable — a constraint this route has never
+        honoured, and which `OnAirDJ` no longer states.
       required:
         - id
         - specialty_id
@@ -1760,10 +1852,19 @@ components:
     ShowPlaylistDJ:
       type: object
       description: >-
-        A DJ on an archived show. Deliberately not `OnAirDJ`: that schema
-        requires a non-null `dj_name`, which holds for the live-DJ endpoints but
-        not here — an archived show can carry a member whose handle resolves to
-        nothing.
+        A DJ on an archived show — the `auth_user.id` and the PII-safe on-air
+        handle, both nullable.
+
+
+        Structurally identical to `OnAirDJ`, which declares the same two
+        nullable fields, and retained as its own schema only so that collapsing
+        the two does not retire a generated type consumers already import.
+        Prefer `OnAirDJ` for new declarations. The fork's stated rationale — a
+        non-null `dj_name` that "holds for the live-DJ endpoints but not here"
+        — does not hold: `/flowsheet/playlist`'s `show_djs`,
+        `/flowsheet/djs-on-air` and `/flowsheet/shows/recent` all resolve the
+        handle through the same `resolveDjDisplayName`, so every one of them
+        can return `null`.
       required:
         - id
         - dj_name
@@ -9803,6 +9904,66 @@ paths:
           description: "window_hours or limit was not an integer in range"
         '403':
           description: "Caller lacks the `flowsheet: manage` permission"
+
+  /flowsheet/shows/recent:
+    get:
+      x-wxyc-service: backend-service
+      summary: List recent shows and the DJs who were on them
+      description: >
+        Shows that started inside the lookback window, newest first, each with
+        its start/end times and the on-air handles of the DJs who had the room
+        (WXYC/Backend-Service#2435). The handoff read: a DJ arriving for a shift
+        wants to know who preceded them.
+
+
+        Answers what neither neighbour does. `GET /flowsheet/djs-on-air`
+        reports who is on NOW and goes empty the moment a show ends;
+        `GET /flowsheet/open-shows` lists only shows still open, and is gated to
+        `flowsheet: manage`. This read includes closed shows and is gated to
+        `flowsheet: read` — every signed-in station account. Nothing here is
+        destructive and a list of who was on the radio is public by the time it
+        airs, so the tier is deliberately lower than its `open-shows`
+        neighbour's; it is still gated, though, so a client must send a token.
+
+
+        **Handles, never legal names.** `djs[].dj_name` is the public on-air
+        handle, resolved through the same chain as `/flowsheet/djs-on-air`.
+        Neither query behind this operation selects a legal-name column.
+
+
+        There is no `limit` parameter — see `RecentShowsResponse.shows` for why
+        the row cap is not one.
+      parameters:
+        - name: window_hours
+          in: query
+          required: false
+          description: >
+            Lookback in whole hours from now, applied to `start_time`. Defaults
+            to 24 — the shift a DJ is taking over from. A non-integer or
+            out-of-range value is a 400, never a silent clamp.
+
+
+            The one-week ceiling is deliberate, and far below the 30-year one
+            `GET /flowsheet/open-shows` offers: this is a handoff read, not an
+            archive walk. For that, use `GET /flowsheet/playlist`.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 168
+            default: 24
+      responses:
+        '200':
+          description: Shows inside the window, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecentShowsResponse'
+        '400':
+          description: '`window_hours` was not an integer between 1 and 168'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `flowsheet: read` permission'
 
   /flowsheet/shows/{id}/force-end:
     post:
