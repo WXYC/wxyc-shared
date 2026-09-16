@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.64.0');
+      expect(spec.info.version).toBe('1.65.0');
     });
 
     it('should have components section', () => {
@@ -699,8 +699,29 @@ describe('OpenAPI Specification', () => {
       expect(spec.components.schemas.AddAlbumRequest).toBeDefined();
     });
 
-    it('should define TrackSearchResult', () => {
-      expect(spec.components.schemas.TrackSearchResult).toBeDefined();
+    // Deleted, and asserted absent so they cannot return. None described a
+    // response this API serves: track search is served by
+    // `CatalogCompilationTrackRow` off /library/catalog/compilation-tracks,
+    // artists by `Artist` off /library/artists, and genres by `GenreEntry` off
+    // /library/genres. The query-parameter shapes (`TrackSearchParams`,
+    // `CatalogSearchParams`) described no declared parameter, and the metadata
+    // fetch pair no endpoint at all.
+    //
+    // `ArtistWithGenre` is the one worth knowing about: it carried a curated
+    // description naming GET /library/genres as authoritative, which reads as
+    // maintenance on a live schema. It was a documentation pass that applied
+    // the same sentence to every `genre_name` it found; the copy that mattered
+    // landed on `AlbumDetail` and is still asserted below. Curation is not
+    // evidence of a consumer.
+    it.each([
+      'TrackSearchResult',
+      'TrackSearchParams',
+      'CatalogSearchParams',
+      'ArtistWithGenre',
+      'MetadataFetchRequest',
+      'MetadataFetchResponse',
+    ])('does not define %s', (name) => {
+      expect(spec.components.schemas).not.toHaveProperty(name);
     });
   });
 
@@ -2640,8 +2661,12 @@ describe('OpenAPI Specification', () => {
       }
     });
 
-    it('should define SpecialtyShow', () => {
-      expect(spec.components.schemas.SpecialtyShow).toBeDefined();
+    // Deleted, and asserted absent so it cannot return. Specialty shows exist
+    // in the schedule -- `Schedule.specialty_id` still carries the reference --
+    // but no endpoint ever resolved one into a name and description, so this
+    // shape described a lookup that is not offered.
+    it('does not define SpecialtyShow', () => {
+      expect(spec.components.schemas).not.toHaveProperty('SpecialtyShow');
     });
   });
 
@@ -3584,15 +3609,6 @@ describe('OpenAPI Specification', () => {
           get: () =>
             (spec.components.schemas.GenreEntry as { properties: Record<string, { type?: string }> })
               .properties.genre_name!,
-        },
-        {
-          label: 'ArtistWithGenre',
-          get: () =>
-            (
-              spec.components.schemas.ArtistWithGenre as {
-                allOf: Array<{ properties?: Record<string, { type?: string }> }>;
-              }
-            ).allOf.find((m) => m.properties?.genre_name)!.properties!.genre_name!,
         },
         {
           label: 'AlbumSearchResult',
@@ -5957,21 +5973,32 @@ describe('OpenAPI Specification', () => {
     'AutoDJRelayState', 'AutoDJState', 'AutoDJStatus', 'AutoDJTransport', 'AutoDJWebSocketMessage',
     ];
 
-    // Residue of the 2026-01-31 bulk import (`1c231db`), which consolidated
+    // Arrived in the 2026-01-31 bulk import (`1c231db`), which consolidated
     // "Backend-Service app.yaml and all TypeScript DTOs" without evaluating
     // entries individually -- so client-side view models no server produces
-    // landed in the same table as real response shapes. Grandfathered so the
-    // guard can land before the deletions. EXPECTED TO SHRINK TO EMPTY; take a
-    // themed batch and delete it, do not add to this list.
+    // landed in the same table as real response shapes.
+    //
+    // DO NOT DELETE THESE. The list started at 37 and the deletable members
+    // are gone; every name below has at least one hand-written consumer that
+    // imports the generated type, found by sweeping all nine consumer repos.
+    // Codegen emits the whole components table, so a consumer can import any
+    // schema whether or not a path references it -- unreachable measures what
+    // the SPEC references, never what the org uses. `FlowsheetSongEntry` and
+    // its three siblings are imported by this package's own
+    // `src/dtos/extensions.ts` to build the `FlowsheetEntry` union and its type
+    // guards; deleting them breaks the build here, not just downstream.
+    //
+    // The flowsheet four are unreachable for a structural reason worth fixing
+    // rather than exempting: /flowsheet declares the flattened
+    // `FlowsheetEntryResponse` (every field optional) while these are the
+    // discriminated variants consumers narrow into. A `oneOf` over them on the
+    // path would make this guard see the truth. Until then the honest name for
+    // this list is vocabulary, not residue -- #476 owns the rename.
     const BULK_IMPORT_RESIDUE = [
-    'AddToBinRequest', 'AlbumMetadata', 'ArtistMetadata', 'ArtistWithGenre', 'BinLibraryDetails',
-    'CatalogSearchParams', 'DateTimeEntry',
-    'FlowsheetBreakpointEntry',
-    'FlowsheetMessageEntry', 'FlowsheetQueryParams', 'FlowsheetShowBlockEntry',
-    'FlowsheetSongEntry', 'MetadataFetchRequest', 'MetadataFetchResponse',
-    'MetadataSource', 'PaginationParams', 'ParsedSongRequest',
-    'RequestStatus', 'RotationWithAlbum', 'SongRequest', 'SpecialtyShow',
-    'TrackSearchParams', 'TrackSearchResult',
+    'AddToBinRequest', 'AlbumMetadata', 'ArtistMetadata', 'BinLibraryDetails', 'DateTimeEntry',
+    'FlowsheetBreakpointEntry', 'FlowsheetMessageEntry', 'FlowsheetQueryParams',
+    'FlowsheetShowBlockEntry', 'FlowsheetSongEntry', 'MetadataSource', 'PaginationParams',
+    'ParsedSongRequest', 'RequestStatus', 'RotationWithAlbum', 'SongRequest',
     ];
 
     // Unreachable but added after that import, so a different cause: some are

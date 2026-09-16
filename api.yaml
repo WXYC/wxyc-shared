@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.64.0
+  version: 1.65.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1969,20 +1969,6 @@ components:
         genre_id:
           type: integer
 
-    ArtistWithGenre:
-      allOf:
-        - $ref: '#/components/schemas/Artist'
-        - type: object
-          required:
-            - genre_name
-          properties:
-            genre_name:
-              type: string
-              description: >
-                Free-form: `genres.genre_name` is a `varchar(64)` in a lookup
-                table `POST /library/genres` appends to. `GET /library/genres`
-                is the authoritative enumeration (#367).
-
     Album:
       type: object
       required:
@@ -2800,24 +2786,6 @@ components:
             not declare) — and this field makes that assignment
             overridable, it does not replace it.
 
-    CatalogSearchParams:
-      type: object
-      properties:
-        artist_name:
-          type: string
-        album_title:
-          type: string
-        n:
-          type: integer
-          description: Maximum number of results
-        orderBy:
-          type: string
-        orderDirection:
-          type: string
-          enum:
-            - asc
-            - desc
-
     FormatEntry:
       type: object
       required:
@@ -3039,57 +3007,6 @@ components:
             tolerate its absence.
         reconciled_identity:
           $ref: '#/components/schemas/ReconciledIdentity'
-
-    TrackSearchResult:
-      type: object
-      required:
-        - title
-        - album_title
-        - artist_name
-        - source
-      properties:
-        track_id:
-          type: integer
-        title:
-          type: string
-        position:
-          type: string
-        duration:
-          type: string
-        album_id:
-          type: integer
-        album_title:
-          type: string
-        artist_name:
-          type: string
-        label:
-          type: string
-        rotation_id:
-          type: integer
-        rotation_bin:
-          $ref: '#/components/schemas/RotationBin'
-        source:
-          type: string
-          enum:
-            - discogs
-            - flowsheet
-            - bin
-
-    TrackSearchParams:
-      type: object
-      required:
-        - song
-      properties:
-        song:
-          type: string
-        artist:
-          type: string
-        album:
-          type: string
-        label:
-          type: string
-        n:
-          type: integer
 
     # ===================
     # Compilation Track (CTA) Write — BS#1964
@@ -3931,19 +3848,6 @@ components:
           type: string
         specialty_id:
           type: integer
-
-    SpecialtyShow:
-      type: object
-      required:
-        - id
-        - specialty_name
-      properties:
-        id:
-          type: integer
-        specialty_name:
-          type: string
-        description:
-          type: string
 
     Schedule:
       type: object
@@ -5399,31 +5303,6 @@ components:
         last_fetched:
           type: string
           format: date-time
-
-    MetadataFetchRequest:
-      type: object
-      properties:
-        album_id:
-          type: integer
-        artist_id:
-          type: integer
-        force_refresh:
-          type: boolean
-
-    MetadataFetchResponse:
-      type: object
-      required:
-        - source
-        - cached
-      properties:
-        album:
-          $ref: '#/components/schemas/AlbumMetadata'
-        artist:
-          $ref: '#/components/schemas/ArtistMetadata'
-        source:
-          $ref: '#/components/schemas/MetadataSource'
-        cached:
-          type: boolean
 
     # ============================
     # Shared Streaming Types
