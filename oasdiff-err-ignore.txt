@@ -39,32 +39,3 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
-
-# wxyc-shared#485 — `GET /flowsheet` response retyped from `array<FlowsheetEntryResponse>`
-# to a oneOf over `FlowsheetV2PaginatedResponse` and `array<FlowsheetV2Entry>`.
-#
-# Genuinely breaking for generated clients, and whitelisted anyway because the
-# break is from a declaration that never described the wire. The handler has
-# three branches and all three project through `projectEntriesV2`; the default
-# one wraps that in a pagination envelope. `array<FlowsheetEntryResponse>` — the
-# flattened V1 row, every field optional, no discriminator — matched none of
-# them. Verified against a live `GET /flowsheet` on 2026-09-16: the envelope
-# matches `FlowsheetV2PaginatedResponse` field for field, with no wire-only key
-# and no declared-but-absent key. So no consumer can have been correctly
-# depending on the shape being removed, and the ones decoding this endpoint
-# today (wxyc-ios-64) hand-wrote a decoder precisely because the generated type
-# was wrong.
-#
-# Whitelisted, NOT waved through: this ships as the contract's first major,
-# 1.66.0 -> 2.0.0, so `info.version` carries the incompatibility the whitelist
-# line suppresses. A suppression plus a minor bump would have left nothing
-# anywhere saying the shape changed.
-#
-# Both Swift consumers pin older contracts (wxyc-ios-64 1.36.0, wxyc-dj-ios
-# 1.50.0), so they absorb this at their next pin bump. It must be called out in
-# that bump rather than discovered.
-#
-# PRUNE BOTH LINES BELOW once this lands on main — they stop matching then, and
-# an entry that outlives its diff suppresses nothing while reading as if it does.
-get /flowsheet added `#/components/schemas/FlowsheetV2PaginatedResponse, subschema #2` to the response body `oneOf` list for the response status `200`
-get /flowsheet the response's body `type` changed from `array<any>` to `any` for status `200`
