@@ -204,8 +204,13 @@ describe('OpenAPI Compliance', () => {
   });
 
   describe('Flowsheet Endpoints', () => {
-    it('GET /flowsheet response matches FlowsheetEntryResponse[] schema', async () => {
-      const response = await client.get<unknown[]>('/flowsheet?limit=5');
+    // Validates the default branch against the envelope, and each entry
+    // against the V2 variant its own `entry_type` selects. Validating every
+    // row against one flattened schema is what let the endpoint serve a shape
+    // the contract did not describe: a schema with no required fields and no
+    // discriminator accepts anything.
+    it('GET /flowsheet response matches FlowsheetV2PaginatedResponse schema', async () => {
+      const response = await client.get<{ entries?: unknown[] }>('/flowsheet?limit=5');
 
       // Skip validation if backend not available
       if (!response.ok) {
@@ -214,11 +219,32 @@ describe('OpenAPI Compliance', () => {
       }
 
       expect(response.status).toBe(200);
-      expect(Array.isArray(response.body)).toBe(true);
+      expect(Array.isArray(response.body)).toBe(false);
+      expect(Array.isArray(response.body.entries)).toBe(true);
 
-      // Validate each entry
-      for (const entry of response.body) {
-        const result = validateAgainstSchema(entry, 'FlowsheetEntryResponse', schemas);
+      const envelope = validateAgainstSchema(response.body, 'FlowsheetV2PaginatedResponse', schemas);
+      if (!envelope.valid) {
+        console.log('Validation errors:', envelope.errors);
+      }
+      expect(envelope.valid).toBe(true);
+
+      const variantOf: Record<string, string> = {
+        track: 'FlowsheetV2TrackEntry',
+        show_start: 'FlowsheetV2ShowStartEntry',
+        show_end: 'FlowsheetV2ShowEndEntry',
+        dj_join: 'FlowsheetV2DJJoinEntry',
+        dj_leave: 'FlowsheetV2DJLeaveEntry',
+        talkset: 'FlowsheetV2TalksetEntry',
+        breakpoint: 'FlowsheetV2BreakpointEntry',
+        message: 'FlowsheetV2MessageEntry',
+      };
+
+      for (const entry of response.body.entries ?? []) {
+        const entryType = (entry as { entry_type?: string }).entry_type;
+        expect(entryType, 'every V2 entry carries its discriminator').toBeDefined();
+        const variant = variantOf[entryType as string];
+        expect(variant, `unmapped entry_type: ${entryType}`).toBeDefined();
+        const result = validateAgainstSchema(entry, variant as string, schemas);
         if (!result.valid) {
           console.log('Validation errors:', result.errors);
         }

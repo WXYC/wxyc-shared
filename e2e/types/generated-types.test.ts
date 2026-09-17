@@ -15,6 +15,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { createE2EClient, E2EClient, getE2EConfig } from '../setup.js';
 import type {
   FlowsheetEntryResponse,
+  FlowsheetV2PaginatedResponse,
   AlbumSearchResult,
   FormatEntry,
   GenreEntry,
@@ -32,32 +33,39 @@ describe('Generated Type Parsing (E2E)', () => {
 
   describe('FlowsheetEntryResponse', () => {
     it('parses real flowsheet entries without errors', async () => {
-      const response = await client.get<FlowsheetEntryResponse[]>('/flowsheet?limit=10');
+      const response = await client.get<FlowsheetV2PaginatedResponse>('/flowsheet?limit=10');
 
       if (!response.ok) {
         console.log('Skipping: Backend not available');
         return;
       }
 
-      expect(Array.isArray(response.body)).toBe(true);
+      expect(Array.isArray(response.body.entries)).toBe(true);
 
-      for (const entry of response.body) {
+      for (const entry of response.body.entries) {
         expect(typeof entry.id).toBe('number');
         expect(typeof entry.play_order).toBe('number');
         expect(typeof entry.show_id).toBe('number');
-        expect(typeof entry.request_flag).toBe('boolean');
+        expect(typeof entry.entry_type).toBe('string');
+        // `request_flag` is a track-only field. Reaching it requires narrowing
+        // on the discriminator — the compiler rejects it on a marker variant,
+        // which is the whole reason the response is typed as the union rather
+        // than as one flattened row where every field is optional.
+        if (entry.entry_type === 'track') {
+          expect(typeof entry.request_flag).toBe('boolean');
+        }
       }
     });
 
     it('handles song entries with all optional fields', async () => {
-      const response = await client.get<FlowsheetEntryResponse[]>('/flowsheet?limit=50');
+      const response = await client.get<FlowsheetV2PaginatedResponse>('/flowsheet?limit=50');
 
       if (!response.ok) {
         console.log('Skipping: Backend not available');
         return;
       }
 
-      const songEntries = response.body.filter((e) => e.track_title);
+      const songEntries = response.body.entries.filter((e) => e.entry_type === 'track');
 
       for (const entry of songEntries) {
         if (entry.track_title) {
