@@ -1422,6 +1422,39 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  describe('AlbumSearchResult.label_id and album_artist admit their genuine nulls (#140)', () => {
+    // Same producer-side shape as `label` above, for the two other
+    // `library` columns sitting one and three lines away in the schema:
+    // `library.label_id` and `library.album_artist` carry no NOT NULL
+    // (`shared/database/src/schema.ts`), `library_artist_view`'s latest
+    // definition (migration 0166) selects both straight off the base
+    // `library` FROM table with no COALESCE, and neither `/library/query`
+    // mapper (`taggedRowToAlbumSearchResultRow` / `toAlbumSearchResultRow` in
+    // `library-search.service.ts`) nor the `GET /library` serializer
+    // (`serializeLibraryArtistViewEntry` in `library.service.ts`) coalesces
+    // either field -- both pass the row value through unchanged, so a real
+    // unlabeled / non-compilation row reaches the wire with a genuine null.
+    //
+    // Unlike `label`, neither field is in `required` today, so admitting the
+    // null is a narrower fix than `label`'s: only `nullable: true`.
+    // Promoting either to `required` would be the separate, wider "the key
+    // is always present" claim that `legacy_release_id`'s description says
+    // needs its own per-projection audit, not a text edit alongside this fix.
+    it('declares label_id nullable, staying out of required', () => {
+      const prop = propertyOf('AlbumSearchResult', 'label_id');
+      expect(prop?.type).toBe('integer');
+      expect(prop?.nullable).toBe(true);
+      expect(requiredKeysOf('AlbumSearchResult')).not.toContain('label_id');
+    });
+
+    it('declares album_artist nullable, staying out of required', () => {
+      const prop = propertyOf('AlbumSearchResult', 'album_artist');
+      expect(prop?.type).toBe('string');
+      expect(prop?.nullable).toBe(true);
+      expect(requiredKeysOf('AlbumSearchResult')).not.toContain('album_artist');
+    });
+  });
+
   describe('on_streaming nullability (#127)', () => {
     it.each(['AlbumSearchResult', 'LibraryCatalogItem'])(
       '%s declares on_streaming nullable, matching its own "Null if unknown" wording',
