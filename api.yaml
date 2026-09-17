@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 2.0.0
+  version: 3.0.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -391,12 +391,15 @@ components:
 
     FlowsheetEntryFields:
       description: >-
-        Every non-identity field of a v1 flowsheet row. Factored out of
-        `FlowsheetEntryResponse` so `FlowsheetRangeEntry` can carry the identical
-        field set while relaxing `show_id` to nullable — the two response shapes
-        must not drift, because iOS V2 decodes both with one decoder
-        (tubafrenzy-decommissioning plan §2.5, consumer #3). Not referenced
-        directly by any path; compose it with an identity block instead.
+        Every non-identity field of a v1 flowsheet row, factored out so that
+        more than one identity block can carry the identical field set without
+        the copies drifting. `FlowsheetEntryResponse` is currently the only
+        composer — the sibling that shared it has since moved to the V2 union —
+        and it stays factored rather than inlined for two reasons: the V1 shape
+        is being retired one caller at a time, and this schema is where the two
+        streaming-URL YAML anchors are defined, which a YAML alias requires to
+        precede every use. Not referenced directly by any path; compose it with
+        an identity block instead.
       type: object
       required:
         - request_flag
@@ -629,48 +632,6 @@ components:
         - $ref: '#/components/schemas/FlowsheetEntryBase'
         - $ref: '#/components/schemas/FlowsheetEntryFields'
 
-    FlowsheetRangeEntryBase:
-      description: >-
-        Identity block for `GET /flowsheet/range`. Identical to
-        `FlowsheetEntryBase` except that `show_id` is nullable — see that
-        property's description. Kept separate rather than relaxing
-        `FlowsheetEntryBase` in place so the other flowsheet paths' documented
-        shapes are untouched by this endpoint.
-      type: object
-      required:
-        - id
-        - play_order
-        - show_id
-      properties:
-        id:
-          type: integer
-        play_order:
-          type: integer
-        show_id:
-          type: integer
-          nullable: true
-          description: >-
-            The show this entry belongs to, or `null` for an **unattributed**
-            entry — a row that exists with no linked show. 20 of 2,619,011 rows
-            are in that state (2005-02-06 → 2026-04-21), and the Phase 0 audit
-            for the tubafrenzy decommissioning decided against backfilling them,
-            so this endpoint returns them rather than dropping them. Consumers
-            that group entries by show must render an unattributed bucket; they
-            must not assume every entry joins to a member of `shows`, and must
-            not crash on the null. The key is always present.
-
-    FlowsheetRangeEntry:
-      description: >-
-        A flowsheet row as returned by `GET /flowsheet/range`. Carries the exact
-        field set of `FlowsheetEntryResponse` (both compose
-        `FlowsheetEntryFields`) and differs from it in one respect: `show_id` is
-        nullable. Field parity is a contract requirement, not a coincidence —
-        iOS V2 decodes this endpoint and `GET /flowsheet` with a single decoder
-        (tubafrenzy-decommissioning plan §2.5, consumer #3).
-      allOf:
-        - $ref: '#/components/schemas/FlowsheetRangeEntryBase'
-        - $ref: '#/components/schemas/FlowsheetEntryFields'
-
     FlowsheetRangeShow:
       description: >-
         Show metadata for one show overlapping a `GET /flowsheet/range` window.
@@ -686,8 +647,7 @@ components:
         id:
           type: integer
           description: >-
-            Matches `FlowsheetRangeEntry.show_id` for every entry belonging to
-            this show.
+            Matches `entries[].show_id` for every entry belonging to this show.
         show_name:
           type: string
           nullable: true
@@ -750,8 +710,19 @@ components:
             leaves `FlowsheetRangeShow.end_time` null), so a consumer that
             segments purely on markers will run one show's entries into the
             next. Segment on `show_id` and treat the markers as labels.
+
+
+            The rows are `FlowsheetV2Entry` — the same discriminated union
+            `GET /flowsheet` serves, discriminated on `entry_type` — so a
+            marker row carries only the marker's own fields and not the track
+            field set. Sharing the union with `GET /flowsheet` is a contract
+            requirement rather than a convenience: iOS V2 decodes both
+            endpoints with a single decoder (tubafrenzy-decommissioning plan
+            §2.5, consumer #3). `show_id` is nullable here as it is everywhere
+            in the union; see `FlowsheetV2Base.show_id` for the unattributed
+            case a window of historical entries can contain.
           items:
-            $ref: '#/components/schemas/FlowsheetRangeEntry'
+            $ref: '#/components/schemas/FlowsheetV2Entry'
 
     FlowsheetSongEntry:
       description: Song entry in the flowsheet
@@ -1091,6 +1062,15 @@ components:
         show_id:
           type: integer
           nullable: true
+          description: >-
+            The show this entry belongs to, or `null` for an **unattributed**
+            entry — a row that exists with no linked show. 20 of 2,619,011 rows
+            are in that state (2005-02-06 → 2026-04-21), and the Phase 0 audit
+            for the tubafrenzy decommissioning decided against backfilling
+            them, so every read that can reach a historical row can reach a
+            null here. Consumers that group entries by show must render an
+            unattributed bucket; they must not assume every entry joins to a
+            show, and must not crash on the null. The key is always present.
         play_order:
           type: integer
         add_time:
@@ -1461,13 +1441,13 @@ components:
         `projectEntriesV2` caller emits.
 
 
-        Declared once and referenced from all three of its sites
-        (`FlowsheetV2PaginatedResponse.entries`, `ShowPlaylist.entries`, and the
-        array branches of `GET /flowsheet`) rather than inlined per site. It was
-        previously pasted into two of them, which is how the copies come to
-        disagree: nothing makes an inlined `oneOf` track a variant added to its
-        twin. Add a variant here and to `entry_type`'s mapping, never to a call
-        site.
+        Declared once and referenced from all four of its sites
+        (`FlowsheetV2PaginatedResponse.entries`, `ShowPlaylist.entries`,
+        `FlowsheetRangeResponse.entries`, and the array branches of
+        `GET /flowsheet`) rather than inlined per site. It was previously
+        pasted into two of them, which is how the copies come to disagree:
+        nothing makes an inlined `oneOf` track a variant added to its twin. Add
+        a variant here and to `entry_type`'s mapping, never to a call site.
       oneOf:
         - $ref: '#/components/schemas/FlowsheetV2TrackEntry'
         - $ref: '#/components/schemas/FlowsheetV2ShowStartEntry'
@@ -9835,7 +9815,7 @@ paths:
                     `GET /flowsheet/range` is affected less than it might seem:
                     it admits any show an in-window entry references, so a
                     truncated show is not lost from a window that contains its
-                    entries and `FlowsheetRangeEntry.show_id` stays resolvable.
+                    entries and their `show_id` stays resolvable.
                     What it does lose is a window containing none of them but
                     lying inside the show's real airtime — the range read then
                     reports that the show did not air.
@@ -10024,7 +10004,10 @@ paths:
             strictly greater than `start`.
       responses:
         '200':
-          description: Shows and entries for the window.
+          description: >-
+            Shows and entries for the window. `entries` carries the same
+            `FlowsheetV2Entry` union `GET /flowsheet` serves, discriminated on
+            `entry_type`, so the two endpoints decode with one decoder.
           content:
             application/json:
               schema:
