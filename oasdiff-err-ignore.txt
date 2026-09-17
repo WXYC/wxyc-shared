@@ -39,3 +39,24 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
+
+# wxyc-shared#298 — `RotationEntry.album_id` declared a required non-nullable
+# integer for a column that carries no NOT NULL. `rotation.album_id` is null on
+# every row of the Awaiting Cataloging queue (`GET
+# /library/rotation/uncatalogued` is defined as exactly the rows where it is
+# null), and both operations returning this schema echo the raw rotation row,
+# so a kill against an uncatalogued row already reports the null these entries
+# say is impossible. dj-site carries a guard against it in `killRotationEntry`
+# whose comment states that the contract contradicts the column.
+#
+# These are errors rather than the warnings the sibling nullability fixes drew
+# (#332, #496): those properties sat inside an `allOf` branch, so oasdiff could
+# not rule out a sibling branch still guaranteeing non-null and downgraded.
+# `RotationEntry` is a flat object, so the finding is certain. The break is
+# real and intended — the contract takes a major (6.0.0 -> 7.0.0), which is the
+# signal consumers actually receive. Suppressed here only so the diff can land.
+#
+# PRUNE AFTER MERGE: diff-scoped, inert the moment this lands on main.
+post /library/filings the response property `rotation/album_id` became nullable for the status `200`
+patch /library/rotation the response property `album_id` became nullable for the status `200`
+post /library/rotation the response property `album_id` became nullable for the status `200`

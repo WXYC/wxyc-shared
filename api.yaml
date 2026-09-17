@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 6.0.0
+  version: 7.0.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3267,6 +3267,21 @@ components:
           type: integer
         album_id:
           type: integer
+          nullable: true
+          description: >-
+            Linked `library.id`, or `null` on a rotation row that never linked
+            to a catalog release — the defining state of the Awaiting
+            Cataloging queue, which `GET /library/rotation/uncatalogued`
+            serves as exactly the rows where this is null. Passed straight
+            through from `rotation.album_id`, which carries no NOT NULL and
+            whose table documents the unlinked row as a shape
+            Backend-canonical writes must accept. Both operations returning
+            this schema echo the raw rotation row, so `PATCH
+            /library/rotation` reports null whenever the killed row was never
+            catalogued. Same column and same contract as
+            `RotationRowSummary.album_id`. A consumer keying a catalog cache
+            on this value must skip the null rather than write an entry under
+            it.
         rotation_bin:
           $ref: '#/components/schemas/RotationBin'
         add_date:

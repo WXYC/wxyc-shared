@@ -81,6 +81,26 @@ describe('OpenAPI Specification', () => {
     return walk(spec.components.schemas[schemaName]);
   }
 
+  // `propertyOf` stops at the first declaration it finds in composition order,
+  // which answers "what shape does a consumer see" only while nothing else
+  // declares the same key. This returns every declaration, so a test can assert
+  // that a composed schema adds no local copy shadowing what it inherits — an
+  // override placed after the `$ref` branch is invisible to `propertyOf` and
+  // would otherwise pass an identity check while the generated type took the
+  // shadow.
+  function declarationsOf(schemaName: string, prop: string): Array<Record<string, unknown>> {
+    const found: Array<Record<string, unknown>> = [];
+    function walk(node: unknown): void {
+      const schema = deref(node);
+      if (!schema) return;
+      const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
+      if (properties?.[prop]) found.push(properties[prop]);
+      for (const branch of (schema.allOf as unknown[] | undefined) ?? []) walk(branch);
+    }
+    walk(spec.components.schemas[schemaName]);
+    return found;
+  }
+
   function requiredKeysOf(schemaName: string): string[] {
     function walk(node: unknown): string[] {
       const schema = deref(node);
@@ -132,7 +152,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('6.0.0');
+      expect(spec.info.version).toBe('7.0.0');
     });
 
     it('should have components section', () => {
@@ -2064,6 +2084,65 @@ describe('OpenAPI Specification', () => {
     it('should define RotationWithAlbum', () => {
       expect(spec.components.schemas.RotationWithAlbum).toBeDefined();
     });
+  });
+
+  // `rotation.album_id` carries no NOT NULL, and its table docblock lists
+  // "NULL `album_id` (rotation entries that pre-date or didn't link to a
+  // library row)" among the shapes Backend-canonical writes must accept.
+  // `RotationEntry` is the echo both `POST /library/rotation` and `PATCH
+  // /library/rotation` return, and both return the raw `rotation` row — so a
+  // kill against the Awaiting Cataloging queue, whose rows are `album_id IS
+  // NULL` by construction, echoes that null through a declaration that said
+  // the field was a required non-nullable integer (#298).
+  describe('RotationEntry.album_id admits the uncatalogued row (#298)', () => {
+    it('declares album_id nullable, and still required', () => {
+      const albumId = propertyOf('RotationEntry', 'album_id');
+      expect(albumId?.type).toBe('integer');
+      expect(albumId?.nullable).toBe(true);
+      // Nullable value, still-present key. Both writers return the raw row,
+      // which always carries the column; dropping it from `required` would
+      // make the key omissible, which neither writer does.
+      expect(requiredKeysOf('RotationEntry')).toContain('album_id');
+    });
+
+    // The document contradicted itself before this: `RotationRowSummary`
+    // already declared the same column nullable and said why ("null while
+    // uncatalogued"), so the two read shapes described one column two ways
+    // and a consumer could pick either.
+    it('agrees with RotationRowSummary on the shape of that column', () => {
+      const entry = propertyOf('RotationEntry', 'album_id');
+      const summary = propertyOf('RotationRowSummary', 'album_id');
+      expect({ type: entry?.type, nullable: entry?.nullable }).toEqual({
+        type: summary?.type,
+        nullable: summary?.nullable,
+      });
+    });
+
+    // Asserted on the composer as well as the base: a schema that stopped
+    // reaching `RotationEntry` would keep the old shape while the assertion
+    // above stayed green. Counted rather than merely identity-checked,
+    // because a local override in a later `allOf` branch is what `propertyOf`
+    // cannot see — exactly one declaration must exist, and it must be the
+    // base's own object.
+    it('RotationWithAlbum inherits album_id and declares no copy of its own', () => {
+      const declarations = declarationsOf('RotationWithAlbum', 'album_id');
+      expect(declarations).toHaveLength(1);
+      expect(declarations[0]).toBe(propertyOf('RotationEntry', 'album_id'));
+    });
+
+    // Deliberately not widened. Both are request bodies naming the album a
+    // caller is linking or adding, where the whole point of the field is that
+    // it resolves; `LinkRotationRequest.album_id` even carries `minimum: 1`.
+    // A null there would be a request to link a row to nothing.
+    it.each(['AddRotationRequest', 'LinkRotationRequest'])(
+      '%s keeps album_id required and non-nullable, being a request body',
+      (schemaName) => {
+        const albumId = propertyOf(schemaName, 'album_id');
+        expect(albumId?.type).toBe('integer');
+        expect(albumId?.nullable).toBeUndefined();
+        expect(requiredKeysOf(schemaName)).toContain('album_id');
+      }
+    );
   });
 
   describe('Rotation cards, per-entry URLs, status param (#453)', () => {
