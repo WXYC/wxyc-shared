@@ -217,11 +217,15 @@ describe('Generated Type Parsing (E2E)', () => {
       const validBins = ['H', 'M', 'L', 'S'];
 
       for (const rotation of response.body) {
-        if (rotation.id !== undefined) {
+        // `!= null`, not `!== undefined`: `id` is `library.id` reached through
+        // a LEFT JOIN, so it is null on every uncatalogued rotation row — and
+        // `typeof null` is `'object'`, which failed this assertion against any
+        // backend holding such rows.
+        if (rotation.id != null) {
           expect(typeof rotation.id).toBe('number');
         }
-        if (rotation.play_freq) {
-          expect(validBins).toContain(rotation.play_freq);
+        if (rotation.rotation_bin) {
+          expect(validBins).toContain(rotation.rotation_bin);
         }
         if (rotation.artist_name) {
           expect(typeof rotation.artist_name).toBe('string');

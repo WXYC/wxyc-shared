@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('9.0.0');
+      expect(spec.info.version).toBe('10.0.0');
     });
 
     it('should have components section', () => {
@@ -2719,6 +2719,110 @@ describe('OpenAPI Specification', () => {
         spec.paths['/library/rotation/{id}'] as Record<string, Record<string, unknown>>
       ).get as { description?: string };
       expect(idGet.description).toMatch(/\/library\/rotation\/cards/);
+    });
+  });
+
+  // `Rotation` (GET /library/rotation) is a JOIN across rotation, library,
+  // artists, format, genres and rotation_cards, distinct from `RotationEntry`
+  // (the raw rotation-row echo from POST/PATCH). Its contract had drifted
+  // from that JOIN's actual SELECT list in library.service.ts's
+  // `getRotationFromDB`: two published fields carried the wrong wire name,
+  // and four wire fields were undeclared entirely (#228).
+  describe('Rotation reconciled with the GET /library/rotation wire shape (#228)', () => {
+    it('renames play_freq to rotation_bin — the wire name the endpoint has always emitted', () => {
+      expect(propertyOf('Rotation', 'play_freq')).toBeUndefined();
+      const prop = propertyOf('Rotation', 'rotation_bin');
+      expect(prop).toBeDefined();
+      expect(prop?.$ref).toBe('#/components/schemas/RotationBin');
+    });
+
+    // A pure rename, not a retype: play_freq was already `$ref: RotationBin`,
+    // so rotation_bin keeps that exact type. Kept as the ENUM rather than
+    // widened to a raw string, because the premise for widening has since
+    // been retracted: 'N' was dropped from freq_enum by migration 0150, so
+    // RotationBin's [H,M,L,S] now admits exactly the values the live Postgres
+    // domain does (the two differ only in declaration order, which nothing
+    // reads), and enum -> string would trade Swift and Kotlin exhaustive
+    // switches for resilience against a value that can no longer occur.
+    // The non-nullability argument is spelled out in api.yaml's own comment
+    // above this property.
+    it('types rotation_bin as a plain, non-nullable $ref to RotationBin', () => {
+      const prop = propertyOf('Rotation', 'rotation_bin');
+      expect(prop?.$ref).toBe('#/components/schemas/RotationBin');
+      expect(prop?.type).toBeUndefined();
+      expect(prop?.nullable).toBeUndefined();
+      expect(prop?.allOf).toBeUndefined();
+    });
+
+    it('renames kill_date to rotation_kill_date, keeping its nullable date shape', () => {
+      expect(propertyOf('Rotation', 'kill_date')).toBeUndefined();
+      const prop = propertyOf('Rotation', 'rotation_kill_date');
+      expect(prop?.type).toBe('string');
+      expect(prop?.format).toBe('date');
+      expect(prop?.nullable).toBe(true);
+    });
+
+    // COALESCE(artists.alphabetical_name, rotation.artist_name): nullable
+    // because the fallback (`rotation.artist_name`) carries no NOT NULL —
+    // an uncatalogued row added with no artist snapshot at all reaches it.
+    it('adds alphabetical_name as a nullable string', () => {
+      const prop = propertyOf('Rotation', 'alphabetical_name');
+      expect(prop?.type).toBe('string');
+      expect(prop?.nullable).toBe(true);
+    });
+
+    // library.label_id: nullable both because the column itself carries no
+    // NOT NULL (a catalogued release can have no resolved label) and because
+    // an uncatalogued rotation row has no library row to join at all.
+    it('adds label_id as a nullable integer', () => {
+      const prop = propertyOf('Rotation', 'label_id');
+      expect(prop?.type).toBe('integer');
+      expect(prop?.nullable).toBe(true);
+    });
+
+    // rotation.add_date, distinct from add_date (library.add_date, the
+    // catalog release's own add date). Always present and never nullable:
+    // rotation is the driving table, so every returned row carries its own
+    // add_date regardless of whether it ever linked to a library row. The
+    // `date` here is checked against the column: `rotation.add_date` really is
+    // a Postgres `date`, so the wire carries a bare YYYY-MM-DD.
+    it('adds rotation_add_date as a non-nullable date', () => {
+      const prop = propertyOf('Rotation', 'rotation_add_date');
+      expect(prop?.type).toBe('string');
+      expect(prop?.format).toBe('date');
+      expect(prop?.nullable).toBeUndefined();
+    });
+
+    // The sibling `add_date` survives as its own property — the whole point of
+    // introducing `rotation_add_date` under a separate name is that the two
+    // name different columns. Deliberately an existence-and-distinctness check
+    // rather than an equality pin on `{type: string, format: date}`: that
+    // declaration predates this change, it was never verified against the
+    // wire, and `library.add_date` is a `timestamptz` that three other schemas
+    // in this file already publish as `date-time`. Pinning the value here
+    // would dress an unexamined inheritance up as a decision and make
+    // correcting it look like a regression.
+    it('leaves the sibling add_date in place as a distinct property', () => {
+      const addDate = propertyOf('Rotation', 'add_date');
+      expect(addDate).toBeDefined();
+      expect(addDate).not.toBe(propertyOf('Rotation', 'rotation_add_date'));
+    });
+
+    it('adds reconciled_identity as a nullable reference to the shared ReconciledIdentity schema', () => {
+      const prop = propertyOf('Rotation', 'reconciled_identity') as
+        | { allOf?: Array<{ $ref?: string }>; nullable?: boolean }
+        | undefined;
+      expect(prop?.allOf?.[0]?.$ref).toBe('#/components/schemas/ReconciledIdentity');
+      expect(prop?.nullable).toBe(true);
+    });
+
+    // dj-site#725 also named `album_artist` and `matched_via` as missing from
+    // `Rotation`. Both are AlbumSearchResult search-only decorations that
+    // `getRotationFromDB`'s SELECT list never emits — adding them here would
+    // describe a field this endpoint does not serve.
+    it('does not add album_artist or matched_via — AlbumSearchResult decorations this endpoint never emits', () => {
+      expect(propertyOf('Rotation', 'album_artist')).toBeUndefined();
+      expect(propertyOf('Rotation', 'matched_via')).toBeUndefined();
     });
   });
 

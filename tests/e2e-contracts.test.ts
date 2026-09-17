@@ -162,20 +162,22 @@ describe('Cross-service contracts (E2E)', () => {
       if (!hasCredentials) skip();
 
       const resp = await client.get<
-        Array<{ id?: number | null; play_freq?: string | null }>
+        Array<{ id?: number | null; rotation_bin?: string | null }>
       >('/library/rotation');
       expect(resp.ok).toBe(true);
       expect(Array.isArray(resp.body)).toBe(true);
 
-      // Group by (album_id, rotation_bin). The legacy /library/rotation
-      // schema exposes album identity via `id` (the album id) and bin via
-      // `play_freq`. Each (album_id, bin) pair must appear at most once.
+      // Group by (album_id, rotation_bin): `id` is the album id, `rotation_bin`
+      // the bin. Each (album_id, bin) pair must appear at most once.
+      // The bin was read here as `play_freq` — a name the contract carried but
+      // this endpoint never emitted — so every row hit the `continue` below and
+      // the assertion could only ever pass vacuously. Read the wire name.
       // VIOLATION SYMPTOM: dj-site rotation dropdown shows the same album
       // multiple times in the same bin (WXYC/Backend-Service#694, #689).
       const seen = new Map<string, number>();
       for (const row of resp.body) {
-        if (row.id == null || row.play_freq == null) continue;
-        const key = `${row.id}|${row.play_freq}`;
+        if (row.id == null || row.rotation_bin == null) continue;
+        const key = `${row.id}|${row.rotation_bin}`;
         seen.set(key, (seen.get(key) ?? 0) + 1);
       }
 

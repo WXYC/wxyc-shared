@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 9.0.0
+  version: 10.0.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3614,10 +3614,35 @@ components:
           type: integer
         artist_name:
           type: string
+        alphabetical_name:
+          type: string
+          nullable: true
+          description: >
+            COALESCE(artists.alphabetical_name, rotation.artist_name) — the
+            library-linked artist's shelf-order name ("Beatles, The") on a
+            catalogued row, falling back to this row's own denormalized
+            artist_name snapshot on an uncatalogued one (album_id IS NULL has
+            no artists row to join). Nullable because that fallback itself
+            carries no NOT NULL. Derived, not stored: PATCH
+            /library/rotation/:id rejects the field outright rather than
+            silently no-op writing it — there is no rotation.alphabetical_name
+            column, so edit artists.alphabetical_name via PATCH
+            /library/artists/:id on a catalogued row, or artist_name on an
+            uncatalogued one.
         album_title:
           type: string
         record_label:
           type: string
+        label_id:
+          type: integer
+          nullable: true
+          description: >
+            library.label_id, the FK to the labels table for a catalogued
+            row's linked label. Nullable for two independent reasons: the
+            column itself carries no NOT NULL (a catalogued release can have
+            no resolved label), and an uncatalogued rotation row (album_id IS
+            NULL) has no library row to join at all. Distinct from
+            record_label, the free-text display snapshot.
         genre_name:
           type: string
         format_name:
@@ -3627,12 +3652,36 @@ components:
         add_date:
           type: string
           format: date
-        play_freq:
+        rotation_add_date:
+          type: string
+          format: date
+          description: >
+            rotation.add_date — when this rotation record itself was added,
+            distinct from add_date (the library release's own catalog add
+            date, absent on an uncatalogued row). Always present: rotation is
+            this query's driving table, so every returned row carries its own
+            rotation.add_date regardless of whether it ever linked to a
+            library row.
+        # Renamed from the contract's former play_freq, which never matched
+        # the wire: this endpoint has always emitted rotation_bin. The TYPE
+        # is unchanged (play_freq was already $ref RotationBin) — only the
+        # name moves. Not nullable: rotation is this query's driving table
+        # (FROM rotation LEFT JOIN library ...), never a LEFT JOIN target,
+        # and rotation.rotation_bin carries a database NOT NULL, write-gated
+        # by parseRotationBin on both writers.
+        rotation_bin:
           $ref: '#/components/schemas/RotationBin'
-        kill_date:
+        # Renamed from the contract's former kill_date, on the same grounds as
+        # rotation_bin above: this endpoint has always emitted
+        # rotation_kill_date. Shape unchanged. The rename note lives in a YAML
+        # comment rather than the description below because a description is
+        # rendered into every generated target's doc comment, and this repo's
+        # own contract history is not something a consumer needs to read.
+        rotation_kill_date:
           type: string
           format: date
           nullable: true
+          description: rotation.kill_date — null while the record is still active.
         plays:
           type: integer
         legacy_release_id:
@@ -3643,6 +3692,15 @@ components:
             AlbumSearchResult/BinLibraryDetails/AlbumInfoResponse): a
             library-unlinked rotation row has no library row at all, hence no
             legacy id.
+        reconciled_identity:
+          allOf:
+            - $ref: '#/components/schemas/ReconciledIdentity'
+          nullable: true
+          description: >
+            The library-linked artist's external identifiers
+            (toReconciledIdentity), or null both when the row is uncatalogued
+            (no artists row to join) and when a catalogued artist has
+            resolved none of the six IDs yet.
         card:
           allOf:
             - $ref: '#/components/schemas/RotationCard'
