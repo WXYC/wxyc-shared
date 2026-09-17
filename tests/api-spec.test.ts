@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('3.1.0');
+      expect(spec.info.version).toBe('4.0.0');
     });
 
     it('should have components section', () => {
@@ -2597,16 +2597,18 @@ describe('OpenAPI Specification', () => {
       expect(refsIn(spec.components.schemas.FlowsheetV2PaginatedResponse)).toContain('OnAirInfo');
     });
 
-    // V1 is not retired by this change: five other operations still $ref it,
-    // and repointing this GET orphans none of them. Asserted by counting $ref
-    // sites rather than by finding the name somewhere in `spec.paths` — the
-    // name also appears in two path DESCRIPTIONS, which would satisfy a text
-    // search no matter how many references were deleted.
+    // V1 is not retired: four write operations still $ref it, and repointing
+    // the read paths orphans none of them. Asserted by counting $ref sites
+    // rather than by finding the name somewhere in `spec.paths` — the name
+    // also appears in two path DESCRIPTIONS, which would satisfy a text search
+    // no matter how many references were deleted.
     //
-    // Not a claim that all five are accurate: `GET /flowsheet/latest` declares
-    // this schema and returns `transformToV2`, sending four keys it does not
-    // declare and declaring five it does not send. That is the same defect as
-    // this issue, at a third site, and out of scope here.
+    // All four now serve what they declare. They are the write responses
+    // (`POST` / `PATCH` / `DELETE /flowsheet`, `PATCH /flowsheet/play-order`),
+    // every one of them projected by `projectFlowsheetEntry` via
+    // `sendProjectedEntry`. The count was five until `GET /flowsheet/latest`
+    // moved to the V2 union — it was the one site declaring this schema while
+    // returning `transformToV2`.
     it('leaves FlowsheetEntryResponse referenced by the operations that declare it', () => {
       const sites = Object.values(spec.paths).flatMap((item) =>
         Object.values(item as Record<string, { responses?: unknown }>)
@@ -2614,7 +2616,46 @@ describe('OpenAPI Specification', () => {
           .filter((op) => refsIn(op.responses).has('FlowsheetEntryResponse'))
       );
       expect(spec.components.schemas.FlowsheetEntryResponse).toBeDefined();
-      expect(sites).toHaveLength(5);
+      expect(sites).toHaveLength(4);
+    });
+
+    // The last of the three read sites that declared V1 while serving V2
+    // (#485, #487, then this). A single entry, not an array — `getLatest`
+    // projects one row — so it $refs the union directly.
+    describe('GET /flowsheet/latest declares the shape it serves (#491)', () => {
+      function latestGet(): Record<string, { description?: string; content?: unknown }> {
+        const op = (spec.paths['/flowsheet/latest'] as { get?: { responses?: unknown } } | undefined)
+          ?.get;
+        if (!op) throw new Error('/flowsheet/latest is missing from api.yaml');
+        return (op.responses ?? {}) as Record<string, { description?: string; content?: unknown }>;
+      }
+
+      it('returns the V2 union directly, not an array and not the V1 row', () => {
+        const schema = refsIn(latestGet()['200']);
+        expect(schema.has('FlowsheetV2Entry')).toBe(true);
+        expect(schema.has('FlowsheetEntryResponse')).toBe(false);
+        // A single entry: an array here would make every consumer index into
+        // a one-element list that the handler never sends.
+        const media = (latestGet()['200'] as { content?: Record<string, { schema?: { type?: string } }> })
+          .content?.['application/json'];
+        expect(media?.schema?.type).toBeUndefined();
+      });
+
+      // No entry_type filter in the handler — it projects whichever row is
+      // newest — so a talkset or breakpoint being latest is ordinary, and the
+      // track variant alone would be wrong for it.
+      it('admits every variant, not just track', () => {
+        expect(refsIn(latestGet()['200']).has('FlowsheetV2TrackEntry')).toBe(false);
+      });
+
+      // The handler answers 204 on an empty flowsheet. Declaring only 200 left
+      // consumers to discover the empty case from a body that never arrives.
+      it('declares the 204 it answers on an empty flowsheet, with no content', () => {
+        const noContent = latestGet()['204'];
+        expect(noContent, '204 is undeclared').toBeDefined();
+        expect(noContent?.content).toBeUndefined();
+        expect(String(noContent?.description)).toMatch(/empty/i);
+      });
     });
   });
 
