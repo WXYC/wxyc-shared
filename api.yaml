@@ -9344,6 +9344,21 @@ paths:
                   - type: array
                     items:
                       $ref: '#/components/schemas/FlowsheetV2Entry'
+        '400':
+          description: >-
+            A parameter was rejected. The conditions differ per branch:
+            `shows_limit` not a positive integer; `start_id`/`end_id` not
+            integers, out of the `flowsheet.id` int4 range, inverted, or
+            spanning more rows than one request may return; `limit` not
+            positive or above the per-request cap; `page` negative or deep
+            enough that its offset exceeds the pagination envelope. The last of
+            those is the one a client meets in normal use — walking pages far
+            enough is a 400, not an empty page, and deep history belongs on the
+            `start_id`/`end_id` branch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '404':
           description: >-
             No entries matched — returned ONLY by the two array branches, which
@@ -9355,12 +9370,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required:
-                  - message
-                properties:
-                  message:
-                    type: string
+                $ref: '#/components/schemas/ApiErrorResponse'
 
     post:
       x-wxyc-service: backend-service

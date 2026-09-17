@@ -2380,10 +2380,24 @@ describe('OpenAPI Specification', () => {
       'FlowsheetV2MessageEntry',
     ];
 
-    // Counts `$ref`/mapping sites only: a reference is quote-terminated, a
-    // schema's own definition line is colon-terminated.
-    function refSites(member: string): number {
-      return specText.split(`${member}'`).length - 1;
+    // Schema names `$ref`-ed anywhere in a subtree. Structural, not textual:
+    // a description that names a schema is prose, and an assertion that cannot
+    // tell the two apart passes on the mention while the reference it exists to
+    // check is gone.
+    function refsIn(node: unknown, out = new Set<string>()): Set<string> {
+      if (Array.isArray(node)) {
+        for (const child of node) refsIn(child, out);
+        return out;
+      }
+      if (node === null || typeof node !== 'object') return out;
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        if (key === '$ref' && typeof value === 'string' && value.includes('/schemas/')) {
+          out.add(value.slice(value.lastIndexOf('/') + 1));
+        } else {
+          refsIn(value, out);
+        }
+      }
+      return out;
     }
 
     function flowsheetGetResponses(): Record<string, unknown> {
@@ -2404,7 +2418,7 @@ describe('OpenAPI Specification', () => {
     // schema for what it actually serves existed the whole time and was
     // referenced by nothing.
     it('no longer types the response as the flattened V1 row', () => {
-      expect(JSON.stringify(flowsheetGet200())).not.toContain('FlowsheetEntryResponse');
+      expect([...refsIn(flowsheetGet200())]).not.toContain('FlowsheetEntryResponse');
     });
 
     // One route, two response shapes, chosen by query parameter: `shows_limit`
@@ -2427,8 +2441,18 @@ describe('OpenAPI Specification', () => {
     // `[]`, so emptiness has two different statuses on one endpoint depending
     // on the query. Declared because a client that treats 404 as an error
     // breaks on a quiet day.
-    it('declares the 404 the array branches return on an empty result', () => {
-      expect(flowsheetGetResponses()['404']).toBeDefined();
+    // Both error statuses are real and were undeclared. They reuse the shared
+    // `ApiErrorResponse` rather than inlining `{message}`: an inline copy emits
+    // a duplicate anonymous struct in every generated language and silently
+    // drops the optional `code`/`details` the error middleware can attach.
+    it.each(['400', '404'])('declares %s against the shared error shape', (status) => {
+      const response = flowsheetGetResponses()[status] as
+        | { content?: Record<string, { schema?: { $ref?: string } }> }
+        | undefined;
+      expect(response).toBeDefined();
+      expect(response?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ApiErrorResponse'
+      );
     });
 
     // The union was pasted into two schemas. Nothing made the copies track each
@@ -2436,8 +2460,14 @@ describe('OpenAPI Specification', () => {
     // absent from the other, and no test fails. Each member name may now appear
     // exactly twice in the document — once as a `oneOf` arm and once in the
     // discriminator mapping — and both occurrences are inside FlowsheetV2Entry.
-    it.each(UNION_MEMBERS)('mentions %s exactly twice, both inside the one union', (member) => {
-      expect(refSites(member)).toBe(2);
+    it.each(UNION_MEMBERS)('refs %s from FlowsheetV2Entry and from nowhere else', (member) => {
+      const holders = Object.entries(spec.components.schemas)
+        .filter(([name, schema]) => name !== member && refsIn(schema).has(member))
+        .map(([name]) => name);
+      const pathHolders = Object.entries(spec.paths)
+        .filter(([, item]) => refsIn(item).has(member))
+        .map(([path]) => path);
+      expect([...holders, ...pathHolders]).toEqual(['FlowsheetV2Entry']);
     });
 
     it('points both call sites at the named union rather than inlining it', () => {
@@ -2467,17 +2497,28 @@ describe('OpenAPI Specification', () => {
     // exempted from the reachability guard for precisely this reason, and that
     // exemption group is now gone; this asserts the condition it stood for.
     it('leaves no schema in the V2 flowsheet response unreachable', () => {
-      const reachable = JSON.stringify(spec.paths);
-      expect(reachable).toContain('FlowsheetV2PaginatedResponse');
-      expect(JSON.stringify(spec.components.schemas.FlowsheetV2PaginatedResponse)).toContain('OnAirInfo');
+      expect(refsIn(spec.paths['/flowsheet'])).toContain('FlowsheetV2PaginatedResponse');
+      expect(refsIn(spec.components.schemas.FlowsheetV2PaginatedResponse)).toContain('OnAirInfo');
     });
 
-    // V1 is not retired by this change — four other operations still answer
-    // with it. Repointing the GET does not orphan it, and nothing here should
-    // be read as licence to delete it.
-    it('leaves FlowsheetEntryResponse referenced by the operations that do serve it', () => {
+    // V1 is not retired by this change: five other operations still $ref it,
+    // and repointing this GET orphans none of them. Asserted by counting $ref
+    // sites rather than by finding the name somewhere in `spec.paths` — the
+    // name also appears in two path DESCRIPTIONS, which would satisfy a text
+    // search no matter how many references were deleted.
+    //
+    // Not a claim that all five are accurate: `GET /flowsheet/latest` declares
+    // this schema and returns `transformToV2`, sending four keys it does not
+    // declare and declaring five it does not send. That is the same defect as
+    // this issue, at a third site, and out of scope here.
+    it('leaves FlowsheetEntryResponse referenced by the operations that declare it', () => {
+      const sites = Object.values(spec.paths).flatMap((item) =>
+        Object.values(item as Record<string, { responses?: unknown }>)
+          .filter((op) => op && typeof op === 'object' && 'responses' in op)
+          .filter((op) => refsIn(op.responses).has('FlowsheetEntryResponse'))
+      );
       expect(spec.components.schemas.FlowsheetEntryResponse).toBeDefined();
-      expect(JSON.stringify(spec.paths)).toContain('FlowsheetEntryResponse');
+      expect(sites).toHaveLength(5);
     });
   });
 
