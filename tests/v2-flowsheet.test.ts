@@ -31,8 +31,8 @@ import {
   isV2TalksetEntry,
   isV2BreakpointEntry,
   isV2MessageEntry,
-  type FlowsheetV2Entry,
 } from '../src/dtos/extensions.js';
+import type { FlowsheetV2Entry } from '../src/dtos/index.js';
 
 // =============================================================================
 // Test Data
