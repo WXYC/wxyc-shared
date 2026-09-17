@@ -55,6 +55,11 @@
 # today (wxyc-ios-64) hand-wrote a decoder precisely because the generated type
 # was wrong.
 #
+# Whitelisted, NOT waved through: this ships as the contract's first major,
+# 1.66.0 -> 2.0.0, so `info.version` carries the incompatibility the whitelist
+# line suppresses. A suppression plus a minor bump would have left nothing
+# anywhere saying the shape changed.
+#
 # Both Swift consumers pin older contracts (wxyc-ios-64 1.36.0, wxyc-dj-ios
 # 1.50.0), so they absorb this at their next pin bump. It must be called out in
 # that bump rather than discovered.
