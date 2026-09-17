@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('5.0.0');
+      expect(spec.info.version).toBe('6.0.0');
     });
 
     it('should have components section', () => {
@@ -820,6 +820,80 @@ describe('OpenAPI Specification', () => {
           propertyOf('FlowsheetEntryBase', 'show_id')
         );
       });
+    });
+
+    // `flowsheet.label_id` carries no NOT NULL, and null is the ordinary state
+    // of the column rather than a rare one: every track row in the production
+    // window sampled for the V2 half of this fix carried `label_id: null`. The
+    // V2 declaration was corrected then; the two V1 read declarations were left
+    // behind (#496), each naming a type that almost no row on the wire meets.
+    describe('label_id admits the unlinked label on the V1 read shapes (#496)', () => {
+      // Three independent declarations of one column: the v1 field block, the
+      // v1 song shape's own inline copy, and the v2 track variant. Enumerated
+      // rather than derived from one schema because the duplication is the
+      // defect — each copy can drift alone, and two of them did.
+      const READ_SITES = [
+        'FlowsheetEntryFields',
+        'FlowsheetSongEntry',
+        'FlowsheetV2TrackEntry',
+      ] as const;
+
+      it.each(READ_SITES)('%s declares label_id nullable', (schemaName) => {
+        const labelId = propertyOf(schemaName, 'label_id');
+        expect(labelId?.type).toBe('integer');
+        expect(labelId?.nullable).toBe(true);
+      });
+
+      // Structural rather than identity: these are three separate objects in
+      // the document, so the pin has to compare shapes. Comparing as one map
+      // keeps the failure legible — it names the site that drifted instead of
+      // reporting `true !== undefined` from whichever assertion ran first.
+      it('pins all three declarations to the same shape', () => {
+        const declared = Object.fromEntries(
+          READ_SITES.map((schemaName) => {
+            const labelId = propertyOf(schemaName, 'label_id');
+            return [schemaName, { type: labelId?.type, nullable: labelId?.nullable }];
+          })
+        );
+        expect(declared).toEqual(
+          Object.fromEntries(
+            READ_SITES.map((schemaName) => [schemaName, { type: 'integer', nullable: true }])
+          )
+        );
+      });
+
+      // Whether the key is present is a separate question from whether its
+      // value may be null, and none of the three has ever required it. Pinned
+      // so that revisiting it has to be a decision about all three at once.
+      it.each(READ_SITES)('%s leaves label_id optional', (schemaName) => {
+        expect(requiredKeysOf(schemaName)).not.toContain('label_id');
+      });
+
+      // `FlowsheetEntryResponse` is the only composer of the v1 field block any
+      // operation reaches — six of them, one being the SSE feed, where a
+      // non-optional decode fails a live connection rather than one page.
+      // Identity, not equality: it must resolve to the corrected declaration
+      // itself and not to a local override that happens to agree today.
+      it('FlowsheetEntryResponse resolves label_id to that declaration', () => {
+        expect(propertyOf('FlowsheetEntryResponse', 'label_id')).toBe(
+          propertyOf('FlowsheetEntryFields', 'label_id')
+        );
+      });
+
+      // Deliberately not widened. These two are request bodies, where omitting
+      // the field and sending an explicit null are different instructions: the
+      // update path keys on `!== undefined`, so a null clears the column while
+      // an absent key leaves it alone. Declaring them nullable would publish
+      // "you may clear this" as part of this fix rather than as the decision it
+      // is. Pinned so the question gets asked instead of assumed.
+      it.each(['FlowsheetCreateSongFreeform', 'FlowsheetUpdateRequest'])(
+        '%s keeps label_id non-nullable, being a request body',
+        (schemaName) => {
+          const labelId = propertyOf(schemaName, 'label_id');
+          expect(labelId?.type).toBe('integer');
+          expect(labelId?.nullable).toBeUndefined();
+        }
+      );
     });
   });
 
