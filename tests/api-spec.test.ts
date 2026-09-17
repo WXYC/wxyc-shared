@@ -6201,10 +6201,33 @@ describe('OpenAPI Specification', () => {
       //     updatedAt})`, keyed on the token, writing only the two timestamps,
       //     with no `token: generateId` anywhere in session.mjs. plugins/bearer
       //     is identical outright. The contract survives the bump.
+      //
+      // Re-verified 2026-09-16 for the 1.7.1→1.7.4 bump, and this one settles
+      // by identity rather than by argument: every mirrored runtime file is
+      // byte-identical between the two versions, confirmed by SHA-256 rather
+      // than by reading a diff. routes.mjs, schema.mjs, error-codes.mjs,
+      // index.mjs, api/rate-limiter/index.mjs and plugins/bearer/index.mjs all
+      // match. Nothing above needed updating, which is a finding, not a
+      // skipped step — checksums first, THEN the bump.
+      //
+      // Two deltas exist nearby and neither reaches this mirror:
+      //   - device-authorization/index.d.mts: types only. zod inference
+      //     plumbing — `-readonly` mapped-type stripping and renumbered infer
+      //     variables. The declared field union is still exactly
+      //     "scope" | "user_id" | "client_id".
+      //   - api/routes/session.mjs: cookie-cache handling. With
+      //     `session.cookieCache.enabled` false (the default), a stale
+      //     `session_data` cookie is now cleaned instead of decoded. Behavior
+      //     for whoever RUNS better-auth, like 1.7.1's `indexes:` delta — a
+      //     Backend-Service concern, not a wire shape this spec describes.
+      //
+      // 1.7.4 also widens the vitest peer range to admit ^5.0.0, which 1.7.1
+      // did not. That is what unblocks the vitest 5 dev-dependency bump; the
+      // two have to land in this order or `npm install` fails to resolve.
       const ba = JSON.parse(
         readFileSync(join(__dirname, '..', 'node_modules', 'better-auth', 'package.json'), 'utf-8')
       ) as { version: string };
-      expect(ba.version).toBe('1.7.1');
+      expect(ba.version).toBe('1.7.4');
     });
   });
   describe('Song like tallies (POST /likes/tally)', () => {
