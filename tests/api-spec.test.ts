@@ -50,12 +50,12 @@ describe('OpenAPI Specification', () => {
   });
 
   // Composed schemas in this spec are `allOf: [<identity block>, <field block>]`
-  // and either branch may be a `$ref` rather than an inline object —
-  // `FlowsheetEntryResponse` and `FlowsheetRangeEntry` both share their field
-  // block that way, so that the two can never drift apart. A walk that only
-  // reads inline `properties`/`required` off the immediate branches silently
-  // finds nothing on those, which reads as "the field isn't declared" rather
-  // than "the helper can't see it". These two follow `$ref` instead.
+  // and either branch may be a `$ref` rather than an inline object — every V2
+  // variant reaches its shared base that way, and `FlowsheetEntryResponse`
+  // reaches its field block that way. A walk that only reads inline
+  // `properties`/`required` off the immediate branches silently finds nothing
+  // on those, which reads as "the field isn't declared" rather than "the
+  // helper can't see it". These two follow `$ref` instead.
   function deref(node: unknown, seen = new Set<string>()): Record<string, unknown> | undefined {
     if (!node || typeof node !== 'object') return undefined;
     const schema = node as Record<string, unknown>;
@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('2.0.0');
+      expect(spec.info.version).toBe('3.0.0');
     });
 
     it('should have components section', () => {
@@ -630,45 +630,58 @@ describe('OpenAPI Specification', () => {
       it('envelopes shows and entries, both required', () => {
         expect(requiredKeysOf('FlowsheetRangeResponse').sort()).toEqual(['entries', 'shows']);
         expect(propertyOf('FlowsheetRangeResponse', 'entries')).toMatchObject({
-          items: { $ref: '#/components/schemas/FlowsheetRangeEntry' },
+          items: { $ref: '#/components/schemas/FlowsheetV2Entry' },
         });
         expect(propertyOf('FlowsheetRangeResponse', 'shows')).toMatchObject({
           items: { $ref: '#/components/schemas/FlowsheetRangeShow' },
         });
       });
 
+      // The handler projects through projectEntriesV2, so a marker row carries
+      // the marker's fields and not the track field set. The V1 row this
+      // endpoint used to declare asserted the opposite (#487): one flat shape
+      // with no entry_type, giving a talkset ~30 song fields it has never sent.
+      it('declares the V2 union, not the flattened V1 row', () => {
+        expect(spec.components.schemas.FlowsheetRangeEntry).toBeUndefined();
+        expect(spec.components.schemas.FlowsheetRangeEntryBase).toBeUndefined();
+        const union = spec.components.schemas.FlowsheetV2Entry as {
+          oneOf?: Array<{ $ref?: string }>;
+          discriminator?: { propertyName?: string; mapping?: Record<string, string> };
+        };
+        expect(union.discriminator?.propertyName).toBe('entry_type');
+        // Every variant the union offers is reachable through the mapping —
+        // an unmapped variant decodes as "unknown entry_type" on a client that
+        // switches on the discriminator, which is the marker rows' failure mode.
+        expect(Object.values(union.discriminator?.mapping ?? {}).sort()).toEqual(
+          (union.oneOf ?? []).map((branch) => branch.$ref).sort()
+        );
+      });
+
+      // iOS V2 decodes this endpoint and GET /flowsheet with one decoder
+      // (tubafrenzy-decommissioning plan §2.5, consumer #3). Referencing the
+      // same named union is what makes that structural: two inlined copies of
+      // one union drift the moment a variant is added to only one of them.
+      it('shares its entry union with GET /flowsheet, by reference', () => {
+        const rangeItems = propertyOf('FlowsheetRangeResponse', 'entries')?.items as
+          | { $ref?: string }
+          | undefined;
+        const paginatedItems = propertyOf('FlowsheetV2PaginatedResponse', 'entries')?.items as
+          | { $ref?: string }
+          | undefined;
+        expect(rangeItems?.$ref).toBe('#/components/schemas/FlowsheetV2Entry');
+        expect(paginatedItems?.$ref).toBe(rangeItems?.$ref);
+      });
+
       // 20 of 2,619,011 rows have no linked show and Phase 0 decided against a
-      // backfill, so the null reaches the wire. Both consumers that group by
-      // show are the likely defect site.
+      // backfill, so the null reaches the wire of any read that can touch a
+      // historical row. Consumers that group by show are the likely defect site.
       it('declares entries[].show_id nullable, present, and names the unattributed case', () => {
-        const showId = propertyOf('FlowsheetRangeEntry', 'show_id');
+        const showId = propertyOf('FlowsheetV2Base', 'show_id');
         expect(showId?.type).toBe('integer');
         expect(showId?.nullable).toBe(true);
         expect(String(showId?.description)).toMatch(/unattributed/i);
         // Nullable value, still-present key — the `--strict-nullable` idiom.
-        expect(requiredKeysOf('FlowsheetRangeEntry')).toContain('show_id');
-      });
-
-      // iOS V2 decodes this endpoint and GET /flowsheet with one decoder
-      // (tubafrenzy-decommissioning plan §2.5, consumer #3), so the two entry
-      // shapes may differ in show_id's nullability and in nothing else. Both
-      // compose FlowsheetEntryFields to make that structural; this pins it.
-      it('carries the exact field set of FlowsheetEntryResponse', () => {
-        function fieldNames(schemaName: string): string[] {
-          function walk(node: unknown): string[] {
-            const schema = deref(node);
-            if (!schema) return [];
-            return [
-              ...Object.keys((schema.properties as Record<string, unknown> | undefined) ?? {}),
-              ...((schema.allOf as unknown[] | undefined) ?? []).flatMap(walk),
-            ];
-          }
-          return [...new Set(walk(spec.components.schemas[schemaName]))].sort();
-        }
-        expect(fieldNames('FlowsheetRangeEntry')).toEqual(fieldNames('FlowsheetEntryResponse'));
-        expect(requiredKeysOf('FlowsheetRangeEntry').sort()).toEqual(
-          requiredKeysOf('FlowsheetEntryResponse').sort()
-        );
+        expect(requiredKeysOf('FlowsheetV2Base')).toContain('show_id');
       });
 
       // Public, unauthenticated surface: the show projection carries the DJ's
