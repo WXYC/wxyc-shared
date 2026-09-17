@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 3.1.0
+  version: 4.0.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -9447,14 +9447,35 @@ paths:
     get:
       x-wxyc-service: backend-service
       summary: Get the most recent flowsheet entry
+      description: >-
+        The newest flowsheet row, whatever its type. There is no `entry_type`
+        filter: the handler takes the head of the first page and projects it,
+        so a `talkset`, `breakpoint` or `show_start` being newest is ordinary
+        and a consumer that assumes a track will mis-decode the quiet parts of
+        a show.
+
+
+        An empty flowsheet answers `204`, not `200` with a null body and not
+        `404` — see that response.
       security: []
       responses:
         '200':
-          description: Latest flowsheet entry
+          description: >-
+            The latest entry, as one `FlowsheetV2Entry` — the same
+            discriminated union the flowsheet list endpoints serve,
+            discriminated on `entry_type`. A single object, not a
+            one-element array.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FlowsheetEntryResponse'
+                $ref: '#/components/schemas/FlowsheetV2Entry'
+        '204':
+          description: >-
+            The flowsheet is empty — no entry exists to return. A normal
+            state, not an error: it is what a fresh database answers, and
+            what the live station answers only if the flowsheet were ever
+            truncated. There is no body; clients must not attempt to parse
+            one.
 
   /flowsheet/join:
     post:
