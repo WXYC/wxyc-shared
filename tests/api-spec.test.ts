@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('4.0.0');
+      expect(spec.info.version).toBe('5.0.0');
     });
 
     it('should have components section', () => {
@@ -770,6 +770,55 @@ describe('OpenAPI Specification', () => {
       it('no longer claims the V2 flowsheet does not carry the flag', () => {
         const v1 = String(propertyOf('FlowsheetEntryFields', 'discogsUnavailable')?.description);
         expect(v1).not.toMatch(/not emitted there yet/i);
+      });
+    });
+
+    // `flowsheet.show_id` carries no NOT NULL and its FK is ON DELETE SET NULL,
+    // and the table's own docblock lists NULL `show_id` first among the shapes
+    // Backend-canonical writes must accept. The V1 identity block declared it
+    // non-nullable anyway (#332), which makes a Swift decoder with a
+    // non-optional Int throw rather than degrade on such a row.
+    describe('FlowsheetEntryBase.show_id admits the unattributed row (#332)', () => {
+      it('declares show_id nullable, and still required', () => {
+        const showId = propertyOf('FlowsheetEntryBase', 'show_id');
+        expect(showId?.type).toBe('integer');
+        expect(showId?.nullable).toBe(true);
+        expect(String(showId?.description)).toMatch(/unattributed/i);
+        // Nullable value, still-present key — the `--strict-nullable` idiom.
+        // Dropping it from `required` would be a different, wider break: the
+        // key would become omissible, which the projector never does.
+        expect(requiredKeysOf('FlowsheetEntryBase')).toContain('show_id');
+      });
+
+      // The V1 and V2 identity blocks describe the same column. They are
+      // separate schemas for historical reasons, not because the column
+      // differs, so a reader must not be able to conclude otherwise.
+      it('agrees with FlowsheetV2Base on the shape of that column', () => {
+        const v1 = propertyOf('FlowsheetEntryBase', 'show_id');
+        const v2 = propertyOf('FlowsheetV2Base', 'show_id');
+        expect({ type: v1?.type, nullable: v1?.nullable }).toEqual({
+          type: v2?.type,
+          nullable: v2?.nullable,
+        });
+        expect(requiredKeysOf('FlowsheetEntryBase')).toContain('show_id');
+        expect(requiredKeysOf('FlowsheetV2Base')).toContain('show_id');
+      });
+
+      // Every schema composing the base inherits the fix. Asserted per
+      // composer rather than on the base alone: a composer that stopped
+      // reaching the base — or overrode show_id locally — would silently keep
+      // the old shape while the base-only assertion above stayed green.
+      it.each([
+        'FlowsheetEntryResponse',
+        'FlowsheetSongEntry',
+        'FlowsheetShowBlockEntry',
+        'FlowsheetMessageEntry',
+        'FlowsheetBreakpointEntry',
+      ])('%s resolves show_id to the nullable declaration', (schemaName) => {
+        expect(propertyOf(schemaName, 'show_id')?.nullable).toBe(true);
+        expect(propertyOf(schemaName, 'show_id')).toBe(
+          propertyOf('FlowsheetEntryBase', 'show_id')
+        );
       });
     });
   });
