@@ -3606,14 +3606,37 @@ components:
       properties:
         id:
           type: integer
+          nullable: true
+          description: >
+            Linked `library.id`, or null on an uncatalogued row (album_id IS
+            NULL has no library row to join).
         code_letters:
           type: string
+          nullable: true
+          description: >
+            `artists.code_letters` via the library/artists join. Null on an
+            uncatalogued row for the same reason as `id`.
         code_artist_number:
           type: integer
+          nullable: true
+          description: >
+            `genre_artist_crossreference.artist_genre_code`. Null on an
+            uncatalogued row (no `library.artist_id` to join the
+            crossreference on).
         code_number:
           type: integer
+          nullable: true
+          description: >
+            `library.code_number`. Null on an uncatalogued row for the same
+            reason as `id`.
         artist_name:
           type: string
+          nullable: true
+          description: >
+            COALESCE(artists.artist_name, rotation.artist_name) — the same
+            expression and the same fallback as `alphabetical_name` below,
+            nullable for the identical reason: `rotation.artist_name`
+            carries no NOT NULL.
         alphabetical_name:
           type: string
           nullable: true
@@ -3631,8 +3654,21 @@ components:
             uncatalogued one.
         album_title:
           type: string
+          nullable: true
+          description: >
+            COALESCE(library.album_title, rotation.album_title). Nullable
+            for two independent reasons: `library.album_title` is NOT NULL
+            but the `library` join misses entirely on an uncatalogued row,
+            and its fallback `rotation.album_title` carries no NOT NULL of
+            its own.
         record_label:
           type: string
+          nullable: true
+          description: >
+            COALESCE(library.label, rotation.record_label). `library.label`
+            is already nullable in the database, and an uncatalogued row has
+            no `library` row to join at all; the fallback
+            `rotation.record_label` carries no NOT NULL either.
         label_id:
           type: integer
           nullable: true
@@ -3645,13 +3681,39 @@ components:
             record_label, the free-text display snapshot.
         genre_name:
           type: string
+          nullable: true
+          description: >
+            `genres.genre_name` via the library/genres join. Null on an
+            uncatalogued row for the same reason as `id`, and also on a
+            catalogued row whose release has no genre link.
         format_name:
           type: string
+          nullable: true
+          description: >
+            `format.format_name` via the library/format join. Null on an
+            uncatalogued row for the same reason as `id`, and also on a
+            catalogued row whose release has no format link.
         rotation_id:
           type: integer
         add_date:
           type: string
-          format: date
+          nullable: true
+          description: >
+            `library.add_date` — the catalog release's own add date. Null on
+            an uncatalogued row (album_id IS NULL has no library row to
+            join). No `format` is declared: `library.add_date` is a
+            `timestamptz`, and `getRotationFromDB` reads it via a raw
+            `db.execute` call — drizzle's postgres-js driver installs a
+            transparent (pass-through) parser for timestamp/date OIDs on
+            that path, so the wire carries Postgres' own text rendering
+            (`YYYY-MM-DD HH:MI:SS±TZ`, e.g. `2026-08-20 00:00:00+00`) rather
+            than a parsed-and-reformatted value. That satisfies neither RFC
+            3339 date-time (`T` separator, colon-delimited offset) nor an
+            RFC 3339 full-date (10 bytes), so no `format` is declared here —
+            see WXYC/Backend-Service#2349 for the identical defect already
+            tracked on `PlaylistSearchResult.play_date`; normalizing the
+            server's own serialization is that ticket's job, not this
+            contract's.
         rotation_add_date:
           type: string
           format: date
@@ -3684,6 +3746,10 @@ components:
           description: rotation.kill_date — null while the record is still active.
         plays:
           type: integer
+          nullable: true
+          description: >
+            `library.plays`. Null on an uncatalogued row for the same reason
+            as `id`.
         legacy_release_id:
           type: integer
           nullable: true
