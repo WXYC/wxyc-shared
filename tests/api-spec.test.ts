@@ -1327,6 +1327,157 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  describe('AlbumSearchResult.label admits the unlabeled release (#140)', () => {
+    it('declares label nullable, and still required', () => {
+      const label = propertyOf('AlbumSearchResult', 'label');
+      expect(label?.type).toBe('string');
+      expect(label?.nullable).toBe(true);
+      // Nullable value, still-present key -- the `--strict-nullable` idiom.
+      // `library.label` carries no NOT NULL, and GET /library projects the
+      // column straight through with no COALESCE, so a real row reaches the
+      // wire with `label: null`. GET /library/query coalesces it to `""`
+      // instead, in both of its mappers -- but the two operations share this
+      // one schema and OpenAPI cannot narrow a shared schema per operation,
+      // so the declaration admits the wider of the two shapes. Dropping it
+      // from `required` would be a different, wider break: no producer omits
+      // the key.
+      //
+      // Pinned as a closed set rather than one `toContain` per field: that
+      // also catches a key being ADDED to `required`, which containment
+      // checks cannot.
+      expect(requiredKeysOf('AlbumSearchResult').sort()).toEqual(
+        [
+          'id',
+          'add_date',
+          'album_title',
+          'artist_name',
+          'code_letters',
+          'code_number',
+          'code_artist_number',
+          'format_name',
+          'genre_name',
+          'label',
+        ].sort()
+      );
+    });
+
+    // The document contradicted itself before this: four other schemas
+    // describing the same `library.label` column already declared it
+    // nullable, so one column had two declared shapes and a consumer could
+    // believe either. Pinned to each other so they cannot drift apart again.
+    it.each(['AlbumDetail', 'LibraryCatalogItem', 'LibrarySearchItem', 'CatalogExportRow'])(
+      'agrees with %s on the shape of library.label',
+      (sibling) => {
+        const search = propertyOf('AlbumSearchResult', 'label');
+        const other = propertyOf(sibling, 'label');
+        expect({ type: other?.type, nullable: other?.nullable }).toEqual({
+          type: search?.type,
+          nullable: search?.nullable,
+        });
+      }
+    );
+
+    // `AlbumDetail` is the exact precedent: the same column, also on a read
+    // surface, required-and-nullable already. The three siblings above are
+    // nullable but optional -- `CatalogExportRow` omits its nullable keys
+    // from `required` deliberately. Both idioms are defensible; this one
+    // follows the schema whose `required` list is otherwise identical.
+    it('follows AlbumDetail in keeping the key required', () => {
+      expect(requiredKeysOf('AlbumDetail')).toContain('label');
+    });
+
+    // Every other field in that `required` list is sourced from a NOT NULL
+    // column. `id`, `code_number`, `album_title` and `add_date` come off
+    // `library` itself; `code_letters`, `artist_name`, `format_name`,
+    // `genre_name` and `code_artist_number` arrive through
+    // `library_artist_view`'s INNER JOINs onto artists, format, genres and
+    // genre_artist_crossreference, so a row that survives those joins cannot
+    // carry a null in any of them. Only `label` is a nullable column on the
+    // base table. One trap when re-auditing: Backend-Service has TWO
+    // `artist_name` columns with opposite nullability, and the wire field is
+    // the NOT NULL `artists.artist_name`, not the nullable denormalized
+    // `library.artist_name` that is only ever read in WHERE/ORDER BY.
+    // Table-tested together so a future widening pass has to overturn this
+    // decision once, in one place, rather than losing it one assertion at a
+    // time.
+    it.each([
+      'id',
+      'add_date',
+      'album_title',
+      'artist_name',
+      'code_letters',
+      'code_number',
+      'code_artist_number',
+      'format_name',
+      'genre_name',
+    ])('leaves %s non-nullable', (field) => {
+      const prop = propertyOf('AlbumSearchResult', field);
+      // Asserted separately because `undefined?.nullable` is `undefined`:
+      // without this the nullability check passes for a property that was
+      // deleted outright, which the closed-set `required` pin above would
+      // not catch either (`required` is a separate list, and a required key
+      // with no schema is a real break).
+      expect(prop).toBeDefined();
+      expect(prop?.nullable).toBeUndefined();
+    });
+  });
+
+  describe('on_streaming nullability (#127)', () => {
+    it.each(['AlbumSearchResult', 'LibraryCatalogItem'])(
+      '%s declares on_streaming nullable, matching its own "Null if unknown" wording',
+      (schemaName) => {
+        const prop = propertyOf(schemaName, 'on_streaming');
+        expect(prop?.type).toBe('boolean');
+        expect(prop?.nullable).toBe(true);
+        expect(String(prop?.description)).toMatch(/null if unknown/i);
+      }
+    );
+
+    // The document-wide sweep this fix is asked to do: no schema may expose
+    // `on_streaming` as non-nullable. Deliberately NOT keyed on the
+    // description saying "null" -- that filter would exempt the one
+    // declaration carrying no description at all (LibrarySearchItem's),
+    // letting it silently lose the flag. The property is tri-state
+    // everywhere it appears, so the flag is the invariant and the prose is
+    // only evidence for it.
+    //
+    // Walked over the parsed tree rather than the raw YAML text because
+    // `propertyOf` already follows inline `allOf` branches, which is where
+    // FlowsheetV2TrackEntry's declaration lives, so no special-casing is
+    // needed; a text scan would also couple this assertion to formatting,
+    // and these descriptions are byte-identical across two schemas -- the
+    // exact condition that produced the `&streaming-url-note-album` anchor
+    // elsewhere in this document, which a text scan would stop matching.
+    //
+    // The site list is pinned as a closed set so a new declaration fails
+    // naming the schema rather than reporting a bare count mismatch.
+    it('every schema declaring on_streaming declares it nullable', () => {
+      const sites = Object.keys(spec.components.schemas).filter((name) =>
+        propertyOf(name, 'on_streaming')
+      );
+      expect(sites.sort()).toEqual(
+        [
+          'AlbumDetail',
+          'AlbumSearchResult',
+          'CatalogExportRow',
+          'FlowsheetV2TrackEntry',
+          'LibraryCatalogItem',
+          'LibrarySearchItem',
+          'StreamingCheckResponse',
+        ].sort()
+      );
+      for (const name of sites) {
+        expect(propertyOf(name, 'on_streaming')?.nullable, name).toBe(true);
+      }
+      // Coverage check on the walk itself, not a second assertion of the
+      // invariant: a declaration written inline under `paths:` sits outside
+      // `components.schemas` and no name-keyed walk can reach it. Matching
+      // only the key line keeps this immune to how the block below it is
+      // formatted.
+      expect([...specText.matchAll(/^ *on_streaming:$/gm)]).toHaveLength(sites.length);
+    });
+  });
+
   // #373. Both remaining `legacy_release_id` descriptions justified staying
   // optional by citing "the live openapi-compliance deploy gate". That names a
   // detector, not a reason — and the detector does not hold up either way it

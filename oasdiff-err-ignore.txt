@@ -39,3 +39,36 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
+
+# wxyc-shared#140 / wxyc-shared#127 — `AlbumSearchResult` declared `label` and
+# `on_streaming` as non-nullable, and `LibraryCatalogItem` (reached from
+# `POST /api/v1/lookup` via its `library_item` property) declared
+# `on_streaming` the same way, even though `library.label` and
+# `library.on_streaming` both carry no NOT NULL and `GET /library`'s
+# producer (`serializeLibraryArtistViewEntry`) projects both columns
+# straight through with no COALESCE. Both `on_streaming` declarations
+# already said "Null if unknown" in their own description; the type just
+# forbade the value the prose promised.
+#
+# The two `get /library/query` entries need one extra note, because that
+# operation's mappers coalesce `label` to `''` and so cannot emit the null
+# today. `AlbumSearchResult` is one schema shared by both operations and
+# OpenAPI cannot narrow a shared schema per operation, so the declaration
+# has to admit the wider of the two producers. `on_streaming` is raw on
+# every producer, so it needs no such caveat.
+#
+# Response-side widening, so the contract takes a major (7.0.0 -> 8.0.0) —
+# the same shape as the wxyc-shared#298 `RotationEntry.album_id` fix
+# (6.0.0 -> 7.0.0), whose own suppressions were pruned from this file in
+# af5b161 once they landed on `main`. `AlbumSearchResult` and
+# `LibraryCatalogItem` are flat objects, not `allOf` branches, so oasdiff is
+# certain rather than downgrading to a warning — unlike wxyc-shared#332 and
+# wxyc-shared#496, whose properties sat inside an `allOf` branch and drew
+# warnings for that reason alone.
+#
+# PRUNE AFTER MERGE: diff-scoped, inert the moment this lands on main.
+post /api/v1/lookup the response property `results/items/library_item/on_streaming` became nullable for the status `200`
+get /library the response property `items/label` became nullable for the status `200`
+get /library the response property `items/on_streaming` became nullable for the status `200`
+get /library/query the response property `results/items/label` became nullable for the status `200`
+get /library/query the response property `results/items/on_streaming` became nullable for the status `200`

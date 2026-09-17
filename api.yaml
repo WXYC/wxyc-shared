@@ -2204,6 +2204,12 @@ components:
           type: string
         label:
           type: string
+          nullable: true
+          description: >
+            `library.label`. Nullable in the database; the key is always
+            present because the projection always selects it. `GET /library`
+            sends that null through, while `GET /library/query` currently
+            coalesces it to `""` — treat both as "no label on file".
         label_id:
           type: integer
         artist_id:
@@ -2264,6 +2270,7 @@ components:
           type: integer
         on_streaming:
           type: boolean
+          nullable: true
           description: True if this release is available on at least one streaming service. False means only available in the WXYC physical library. Null if unknown.
         album_artist:
           type: string
@@ -5664,6 +5671,7 @@ components:
             Empty string for a row-less result (`id == 0`).
         on_streaming:
           type: boolean
+          nullable: true
           description: True if this release is available on at least one streaming service. False means only available in the WXYC physical library. Null if unknown.
 
     DiscogsMatchResult:
