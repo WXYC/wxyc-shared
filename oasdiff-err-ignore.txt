@@ -40,57 +40,43 @@
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
 
-# wxyc-shared#140 / wxyc-shared#127 — `AlbumSearchResult` declared `label` and
-# `on_streaming` as non-nullable, and `LibraryCatalogItem` (reached from
-# `POST /api/v1/lookup` via its `library_item` property) declared
-# `on_streaming` the same way, even though `library.label` and
-# `library.on_streaming` both carry no NOT NULL and `GET /library`'s
-# producer (`serializeLibraryArtistViewEntry`) projects both columns
-# straight through with no COALESCE. Both `on_streaming` declarations
-# already said "Null if unknown" in their own description; the type just
-# forbade the value the prose promised.
+# wxyc-shared#228 — the `Rotation` schema declared eleven properties non-nullable
+# that `getRotationFromDB` has always been able to serve as null, and declared
+# `add_date` as a `format: date` the wire cannot satisfy.
 #
-# The two `get /library/query` entries need one extra note, because that
-# operation's mappers coalesce `label` to `''` and so cannot emit the null
-# today. `AlbumSearchResult` is one schema shared by both operations and
-# OpenAPI cannot narrow a shared schema per operation, so the declaration
-# has to admit the wider of the two producers. `on_streaming` is raw on
-# every producer, so it needs no such caveat.
+# Nullability. The query is `FROM rotation LEFT JOIN library / artists / format
+# / genres`, and roughly 151 active rotation rows carry `album_id IS NULL` — an
+# uncatalogued row has no `library` row to join, so every library-derived column
+# on it is SQL NULL. Backend's own row type in `library.service.ts` declares all
+# eleven `| null`; the contract said otherwise, which is the drift this PR
+# exists to close. `artist_name`, `album_title` and `record_label` are
+# additionally COALESCE fallbacks onto `rotation.*` snapshot columns that carry
+# no NOT NULL of their own.
 #
-# Response-side widening, so the contract takes a major (7.0.0 -> 8.0.0) —
-# the same shape as the wxyc-shared#298 `RotationEntry.album_id` fix
-# (6.0.0 -> 7.0.0), whose own suppressions were pruned from this file in
-# af5b161 once they landed on `main`. `AlbumSearchResult` and
-# `LibraryCatalogItem` are flat objects, not `allOf` branches, so oasdiff is
-# certain rather than downgrading to a warning — unlike wxyc-shared#332 and
-# wxyc-shared#496, whose properties sat inside an `allOf` branch and drew
-# warnings for that reason alone.
+# add_date's format. `library.add_date` is a `timestamptz`, and this endpoint
+# reads it through a raw `db.execute`, where drizzle's postgres-js driver
+# installs a pass-through parser for the timestamp/date OIDs. The value reaches
+# the client as Postgres' own rendering — `2026-08-20 00:00:00+00` — which is
+# neither an RFC 3339 date-time nor a 10-byte full-date. The declared `date`
+# format was therefore never true; removing it is a correction, not a widening.
+# Backend#2349 tracks normalizing the server's serialization, which is where the
+# fix belongs.
 #
-# PRUNE AFTER MERGE: diff-scoped, inert the moment this lands on main.
-post /api/v1/lookup the response property `results/items/library_item/on_streaming` became nullable for the status `200`
-get /library the response property `items/label` became nullable for the status `200`
-get /library the response property `items/on_streaming` became nullable for the status `200`
-get /library/query the response property `results/items/label` became nullable for the status `200`
-get /library/query the response property `results/items/on_streaming` became nullable for the status `200`
-
-# wxyc-shared#140 — same PR, same argument, for the two fields sitting one and
-# three lines from `label` in `AlbumSearchResult`: `library.label_id` and
-# `library.album_artist` both carry no NOT NULL either
-# (`shared/database/src/schema.ts`), `library_artist_view`'s latest definition
-# (migration 0166) selects both straight off the base `library` FROM table
-# with no COALESCE, and neither `/library/query` mapper
-# (`taggedRowToAlbumSearchResultRow` / `toAlbumSearchResultRow`) nor
-# `GET /library`'s serializer (`serializeLibraryArtistViewEntry`) coalesces
-# either field — both pass the row value through unchanged on both
-# operations, unlike `label`, which only `GET /library` leaves null.
-#
-# Neither field is in `AlbumSearchResult.required` (unlike `label`), so this
-# widens nullability only — no required-set change, no version-bump-relevant
-# shape decision beyond the same major bump `label`/`on_streaming` already
-# took above.
+# Both are corrections of declarations that never described the wire, so no
+# consumer can have been correctly relying on the shapes being removed. The
+# contract takes a major, which is the signal consumers actually receive; these
+# entries only let the diff land.
 #
 # PRUNE AFTER MERGE: diff-scoped, inert the moment this lands on main.
-get /library the response property `items/label_id` became nullable for the status `200`
-get /library the response property `items/album_artist` became nullable for the status `200`
-get /library/query the response property `results/items/label_id` became nullable for the status `200`
-get /library/query the response property `results/items/album_artist` became nullable for the status `200`
+get /library/rotation the response property `items/id` became nullable for the status `200`
+get /library/rotation the response property `items/code_letters` became nullable for the status `200`
+get /library/rotation the response property `items/code_artist_number` became nullable for the status `200`
+get /library/rotation the response property `items/code_number` became nullable for the status `200`
+get /library/rotation the response property `items/artist_name` became nullable for the status `200`
+get /library/rotation the response property `items/album_title` became nullable for the status `200`
+get /library/rotation the response property `items/record_label` became nullable for the status `200`
+get /library/rotation the response property `items/genre_name` became nullable for the status `200`
+get /library/rotation the response property `items/format_name` became nullable for the status `200`
+get /library/rotation the response property `items/plays` became nullable for the status `200`
+get /library/rotation the response property `items/add_date` became nullable for the status `200`
+get /library/rotation the `items/add_date` response's property `format` changed from `date` to `none` for status `200`

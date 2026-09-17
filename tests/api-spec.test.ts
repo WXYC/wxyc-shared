@@ -2795,17 +2795,33 @@ describe('OpenAPI Specification', () => {
 
     // The sibling `add_date` survives as its own property — the whole point of
     // introducing `rotation_add_date` under a separate name is that the two
-    // name different columns. Deliberately an existence-and-distinctness check
-    // rather than an equality pin on `{type: string, format: date}`: that
-    // declaration predates this change, it was never verified against the
-    // wire, and `library.add_date` is a `timestamptz` that three other schemas
-    // in this file already publish as `date-time`. Pinning the value here
-    // would dress an unexamined inheritance up as a decision and make
-    // correcting it look like a regression.
+    // name different columns. Bare existence-and-distinctness check; the
+    // shape assertion for `add_date` itself is the dedicated test below.
     it('leaves the sibling add_date in place as a distinct property', () => {
       const addDate = propertyOf('Rotation', 'add_date');
       expect(addDate).toBeDefined();
       expect(addDate).not.toBe(propertyOf('Rotation', 'rotation_add_date'));
+    });
+
+    // `library.add_date` is a `timestamptz`, and `getRotationFromDB` reads it
+    // via a raw `db.execute` — drizzle's postgres-js driver installs a
+    // transparent (pass-through) parser for timestamp/date OIDs on that path
+    // (node_modules/drizzle-orm/postgres-js/driver.cjs), so the wire carries
+    // Postgres' own text rendering, not a parsed/reformatted value. Verified
+    // locally against a bare Postgres instance with the session in UTC:
+    // `'2026-08-20'::date::timestamptz` renders as `2026-08-20 00:00:00+00`
+    // — a space separator and a colon-less offset, satisfying neither RFC
+    // 3339 date-time (`T` separator, `+00:00`-style offset) nor an RFC 3339
+    // full-date (10 bytes). Declaring either format here would be a claim
+    // the wire cannot back, so this declares none — see
+    // WXYC/Backend-Service#2349 for the identical defect already tracked on
+    // `PlaylistSearchResult.play_date`.
+    it('declares add_date a nullable string with no format — the wire is raw Postgres timestamptz text, not RFC 3339', () => {
+      const prop = propertyOf('Rotation', 'add_date');
+      expect(prop?.type).toBe('string');
+      expect(prop?.format).toBeUndefined();
+      expect(prop?.nullable).toBe(true);
+      expect(prop?.description).toMatch(/2349/);
     });
 
     it('adds reconciled_identity as a nullable reference to the shared ReconciledIdentity schema', () => {
@@ -2823,6 +2839,44 @@ describe('OpenAPI Specification', () => {
     it('does not add album_artist or matched_via — AlbumSearchResult decorations this endpoint never emits', () => {
       expect(propertyOf('Rotation', 'album_artist')).toBeUndefined();
       expect(propertyOf('Rotation', 'matched_via')).toBeUndefined();
+    });
+
+    // getRotationFromDB LEFT JOINs library/artists/format/genres/
+    // genre_artist_crossreference onto rotation, and ~151 of ~310 active
+    // rows carry album_id IS NULL (uncatalogued — no library row to join at
+    // all). Every column sourced from those tables reads as SQL NULL on
+    // such a row regardless of the underlying column's own NOT NULL — the
+    // same reasoning already applied to `alphabetical_name` and `label_id`
+    // above. `library.service.ts`'s own `Rotation` interface types all
+    // eleven `| null`, `id` included, matching what
+    // `e2e/types/generated-types.test.ts` already treats as null on an
+    // uncatalogued row. The contract shipped forbidding exactly that null;
+    // this declares what the interface already asserts.
+    it.each([
+      ['id', 'integer'],
+      ['code_letters', 'string'],
+      ['code_artist_number', 'integer'],
+      ['code_number', 'integer'],
+      ['artist_name', 'string'],
+      ['album_title', 'string'],
+      ['record_label', 'string'],
+      ['genre_name', 'string'],
+      ['format_name', 'string'],
+      ['plays', 'integer'],
+      ['add_date', 'string'],
+    ] as const)('declares %s a nullable %s, matching the LEFT JOIN', (field, type) => {
+      const prop = propertyOf('Rotation', field);
+      expect(prop?.type).toBe(type);
+      expect(prop?.nullable).toBe(true);
+    });
+
+    // House convention: `required` names keys that are always present;
+    // `nullable` names values that may be null. A field can be both. This
+    // guards the convention actually applied above — the eleven fields
+    // became nullable, not required-and-nullable, because `Rotation`
+    // never had a `required` list to begin with.
+    it('adds no required list to Rotation — every key stays optional', () => {
+      expect(requiredKeysOf('Rotation')).toEqual([]);
     });
   });
 
