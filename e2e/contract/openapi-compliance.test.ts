@@ -279,10 +279,18 @@ describe('OpenAPI Compliance', () => {
       // to extend past it; one day either side stays well inside the 8-day cap.
       const day = 24 * 60 * 60 * 1000;
       const anchor = Date.parse(addTime);
+      // An unparseable add_time would send `start=NaN&end=NaN`, which the
+      // endpoint rejects with 400 — failing this test with "expected 400 to be
+      // 200", naming neither the endpoint nor the contract violation upstream.
+      expect(Number.isFinite(anchor), `unparseable add_time: ${addTime}`).toBe(true);
       const response = await client.get<{ shows?: unknown[]; entries?: unknown[] }>(
         `/flowsheet/range?start=${anchor - day}&end=${anchor + day}`
       );
 
+      // Hard-asserted rather than skipped on `!ok`, unlike its siblings: the
+      // GET /flowsheet call above already established the backend is up, so a
+      // failure here is this endpoint's, not the stack's. The suite gates
+      // BS/LML prod promotion, where silently skipping that is the wrong call.
       expect(response.status).toBe(200);
       expect(Array.isArray(response.body.shows)).toBe(true);
       expect(Array.isArray(response.body.entries)).toBe(true);

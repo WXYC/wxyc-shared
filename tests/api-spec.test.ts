@@ -682,6 +682,23 @@ describe('OpenAPI Specification', () => {
         expect(String(showId?.description)).toMatch(/unattributed/i);
         // Nullable value, still-present key — the `--strict-nullable` idiom.
         expect(requiredKeysOf('FlowsheetV2Base')).toContain('show_id');
+
+        // The declaration is two hops from the endpoint — entries -> the union
+        // -> a variant -> the base — so asserting it on the base alone would
+        // still pass if a variant stopped composing the base and quietly
+        // dropped show_id from this endpoint's rows. Identity, not equality:
+        // each variant must reach THIS declaration, not a lookalike copy.
+        const union = spec.components.schemas.FlowsheetV2Entry as {
+          oneOf?: Array<{ $ref?: string }>;
+        };
+        expect(union.oneOf?.length).toBeGreaterThan(0);
+        for (const branch of union.oneOf ?? []) {
+          const variant = branch.$ref?.split('/').pop() as string;
+          expect(propertyOf(variant, 'show_id'), `${variant} must reach FlowsheetV2Base`).toBe(
+            showId
+          );
+          expect(requiredKeysOf(variant), variant).toContain('show_id');
+        }
       });
 
       // Public, unauthenticated surface: the show projection carries the DJ's
@@ -2483,8 +2500,12 @@ describe('OpenAPI Specification', () => {
       expect([...holders, ...pathHolders]).toEqual(['FlowsheetV2Entry']);
     });
 
-    it('points both call sites at the named union rather than inlining it', () => {
-      for (const schemaName of ['FlowsheetV2PaginatedResponse', 'ShowPlaylist']) {
+    it('points every schema call site at the named union rather than inlining it', () => {
+      for (const schemaName of [
+        'FlowsheetV2PaginatedResponse',
+        'ShowPlaylist',
+        'FlowsheetRangeResponse',
+      ]) {
         const entries = propertyOf(schemaName, 'entries') as
           | { type?: string; items?: { $ref?: string; oneOf?: unknown } }
           | undefined;
