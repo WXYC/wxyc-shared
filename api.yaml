@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 7.0.0
+  version: 8.0.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2234,7 +2234,22 @@ components:
           type: number
         # Optional rotation info
         rotation_bin:
-          $ref: '#/components/schemas/RotationBin'
+          allOf:
+            - $ref: '#/components/schemas/RotationBin'
+          nullable: true
+          description: >
+            Current-rotation bin, from the CURRENT_DATE-filtered LEFT JOIN
+            against `rotation`. Null whenever the release is not actively
+            rotating — never added, or added and since killed — which is most
+            of the catalog. That filtering happens server-side, so
+            `rotation_bin != null` is this endpoint's in-rotation test, unlike
+            CatalogExportRow's, which ships rotation raw and defers expiry to
+            the client. `card` below is NOT a substitute for that test: it
+            rides a further join through the nullable `rotation.card_id`, so a
+            release that is actively rotating but filed on no card carries a
+            bin and a null card. A present value is always exactly one of
+            H/M/L/S — `rotation.rotation_bin` is a NOT NULL Postgres enum, so
+            the null here comes from the absent join row, never the column.
         rotation_id:
           type: integer
         card:
