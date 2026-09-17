@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 3.0.0
+  version: 3.1.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -479,10 +479,10 @@ components:
             surfaces (see `Album.discogsUnavailable`), non-nullable to
             match them. Deliberately camelCase — unlike its snake_case
             siblings in this block — to match Backend's
-            `withDiscogsUnavailableCamelCase` serializer. Contract-first:
-            the V2 flowsheet album embed will carry this field once the
-            BS-emit piece (WXYC/Backend-Service#1908) lands; it is not
-            emitted there yet.
+            `withDiscogsUnavailableCamelCase` serializer. The V2 union
+            declares this field with the identical shape
+            (`FlowsheetV2TrackEntry.discogsUnavailable`); one writer emits
+            both surfaces, so the two declarations must not drift.
         discogsUnavailableNote:
           type: string
           nullable: true
@@ -1264,6 +1264,38 @@ components:
                 `headlining_artist_raw`, `venue` (name + city), `starts_on`,
                 `doors_at`, `status`, `price_min` / `price_max`, `ticket_url`,
                 and `image_url` off it.
+            label_id:
+              type: integer
+              nullable: true
+              description: >-
+                `labels.id` for `record_label`, or `null` when the row's label
+                was never linked to a catalog row — the state of the large
+                majority of rows, not an edge case. Passed straight through
+                from `flowsheet.label_id`, which carries no NOT NULL.
+            discogsUnavailable:
+              type: boolean
+              description: >-
+                MD-set "not on Discogs" marker for this track's resolved
+                release, the same flag `Album.discogsUnavailable` carries.
+                Deliberately camelCase among snake_case siblings, matching
+                Backend's `withDiscogsUnavailableCamelCase` serializer.
+
+
+                **Absent — never `null`, never `false`-by-default — when the
+                track resolved to no library row.** The key's absence is the
+                only "unknown"; do not read a missing key as "available on
+                Discogs". This is why the field is optional and NOT nullable:
+                a nullable declaration would offer a second spelling of
+                unknown that the wire never sends.
+            discogsUnavailableNote:
+              type: string
+              nullable: true
+              maxLength: 500
+              description: >-
+                Optional free-text reason for `discogsUnavailable`. Emitted
+                independently of the flag — a library row can carry the flag
+                with no note — so its presence implies nothing about the
+                flag's.
             critic_reviews:
               type: array
               items:

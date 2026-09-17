@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('3.0.0');
+      expect(spec.info.version).toBe('3.1.0');
     });
 
     it('should have components section', () => {
@@ -708,6 +708,68 @@ describe('OpenAPI Specification', () => {
         expect(propertyOf('FlowsheetRangeShow', 'dj_name')).toMatchObject({ type: 'string', nullable: true });
         expect(propertyOf('FlowsheetRangeShow', 'end_time')).toMatchObject({ nullable: true });
         expect(requiredKeysOf('FlowsheetRangeShow').sort()).toEqual(['id', 'start_time']);
+      });
+    });
+
+    // The V2 union is referenced from four sites, so a field the projector
+    // sends and the union omits is undeclared on every V2 read at once. These
+    // three were sent and undeclared (#490).
+    describe('FlowsheetV2TrackEntry declares what projectEntriesV2 sends (#490)', () => {
+      it('declares label_id nullable — the wire sends null for unlinked labels', () => {
+        // Not copied from FlowsheetEntryFields, which types this `integer` with
+        // no `nullable`: `flowsheet.label_id` has no NOT NULL and the projector
+        // passes it through, so a non-nullable declaration is wrong. Every
+        // track row in the sampled production window carried null.
+        expect(propertyOf('FlowsheetV2TrackEntry', 'label_id')).toMatchObject({
+          type: 'integer',
+          nullable: true,
+        });
+        expect(requiredKeysOf('FlowsheetV2TrackEntry')).not.toContain('label_id');
+      });
+
+      // Absent, never null or false, when the track resolved to no library row.
+      // Marking it nullable would invite a consumer to read `null` as "known to
+      // be available"; absence has to stay the only "unknown".
+      it('declares discogsUnavailable as a non-nullable optional boolean', () => {
+        const flag = propertyOf('FlowsheetV2TrackEntry', 'discogsUnavailable');
+        expect(flag?.type).toBe('boolean');
+        expect(flag?.nullable).toBeUndefined();
+        expect(requiredKeysOf('FlowsheetV2TrackEntry')).not.toContain('discogsUnavailable');
+      });
+
+      it('declares discogsUnavailableNote nullable, optional, and length-capped', () => {
+        expect(propertyOf('FlowsheetV2TrackEntry', 'discogsUnavailableNote')).toMatchObject({
+          type: 'string',
+          nullable: true,
+          maxLength: 500,
+        });
+        expect(requiredKeysOf('FlowsheetV2TrackEntry')).not.toContain('discogsUnavailableNote');
+      });
+
+      // One writer emits both surfaces from one row, so a shape that differs
+      // between them is a defect in one of the two by construction. Compared on
+      // the wire-visible facets only: the descriptions differ on purpose.
+      it.each(['discogsUnavailable', 'discogsUnavailableNote'])(
+        'declares %s identically to the V1 field block',
+        (field) => {
+          const facets = (schema: string) => {
+            const prop = propertyOf(schema, field) ?? {};
+            return {
+              type: prop.type,
+              nullable: prop.nullable,
+              maxLength: prop.maxLength,
+            };
+          };
+          expect(facets('FlowsheetV2TrackEntry')).toEqual(facets('FlowsheetEntryFields'));
+        }
+      );
+
+      // The V1 field block said this was "not emitted there yet" of the very
+      // surface that now emits it. A contract that documents its own absence
+      // has to stop saying so when the field arrives.
+      it('no longer claims the V2 flowsheet does not carry the flag', () => {
+        const v1 = String(propertyOf('FlowsheetEntryFields', 'discogsUnavailable')?.description);
+        expect(v1).not.toMatch(/not emitted there yet/i);
       });
     });
   });
