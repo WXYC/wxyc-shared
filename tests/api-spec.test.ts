@@ -101,6 +101,25 @@ describe('OpenAPI Specification', () => {
     return found;
   }
 
+  // Whether `schemaName` writes `prop` into its OWN YAML body — directly in
+  // `properties`, or inline inside one of its own `allOf` branches — rather
+  // than reaching it only by referencing another named schema that declares
+  // it. Unlike `propertyOf`/`declarationsOf`, this does NOT follow a `$ref`
+  // allOf branch: a schema that composes an already-declared schema that way
+  // adds no new physical line to the document, so counting it as a
+  // declaration site would double-count the one line it inherits from.
+  function declaresPropertyLocally(schemaName: string, prop: string): boolean {
+    function walk(node: unknown): boolean {
+      if (!node || typeof node !== 'object') return false;
+      const schema = node as Record<string, unknown>;
+      if (typeof schema.$ref === 'string') return false;
+      const properties = schema.properties as Record<string, unknown> | undefined;
+      if (properties?.[prop]) return true;
+      return ((schema.allOf as unknown[] | undefined) ?? []).some(walk);
+    }
+    return walk(spec.components.schemas[schemaName]);
+  }
+
   function requiredKeysOf(schemaName: string): string[] {
     function walk(node: unknown): string[] {
       const schema = deref(node);
@@ -1507,7 +1526,22 @@ describe('OpenAPI Specification', () => {
       // `components.schemas` and no name-keyed walk can reach it. Matching
       // only the key line keeps this immune to how the block below it is
       // formatted.
-      expect([...specText.matchAll(/^ *on_streaming:$/gm)]).toHaveLength(sites.length);
+      //
+      // Compared against LOCAL declarations, not `sites.length`. `sites` is
+      // built from `propertyOf`, which follows `allOf`'s `$ref` branches —
+      // so a schema that composes an on_streaming-bearing schema via
+      // `allOf: [$ref: ...]` (with no local copy of its own) inflates
+      // `sites` past the physical line count without adding a line, and
+      // `sites.length` would then legitimately disagree with the raw scan
+      // for a reason this assertion's own comment doesn't describe. Each
+      // schema counted here writes the property into its own YAML body
+      // (`declaresPropertyLocally`), so the count is 1:1 with physical
+      // `on_streaming:` lines regardless of how many other schema names
+      // later inherit it via composition.
+      const localSites = Object.keys(spec.components.schemas).filter((name) =>
+        declaresPropertyLocally(name, 'on_streaming')
+      );
+      expect([...specText.matchAll(/^ *on_streaming:$/gm)]).toHaveLength(localSites.length);
     });
   });
 
