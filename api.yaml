@@ -2212,6 +2212,14 @@ components:
             coalesces it to `""` — treat both as "no label on file".
         label_id:
           type: integer
+          nullable: true
+          description: >
+            `library.label_id`. Nullable in the database (no NOT NULL, no
+            FK-driven default) — the same shape as `label`, one line above.
+            `library_artist_view` selects it straight off the base `library`
+            row (no COALESCE), and neither `/library/query` mapper nor
+            `GET /library`'s serializer coalesces it, so a release with no
+            catalogued label reaches the wire with `label_id: null`.
         artist_id:
           type: integer
           description: >
@@ -2274,7 +2282,13 @@ components:
           description: True if this release is available on at least one streaming service. False means only available in the WXYC physical library. Null if unknown.
         album_artist:
           type: string
-          description: Credited album artist for compilations.
+          nullable: true
+          description: >
+            Credited album artist for compilations. `library.album_artist`
+            is nullable (most releases are not compilations); the view and
+            both `/library/query` mappers, plus `GET /library`'s serializer,
+            all pass it through unchanged, so a non-compilation row reaches
+            the wire with `album_artist: null`.
         date_lost:
           type: string
           format: date-time

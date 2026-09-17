@@ -72,3 +72,25 @@ get /library the response property `items/label` became nullable for the status 
 get /library the response property `items/on_streaming` became nullable for the status `200`
 get /library/query the response property `results/items/label` became nullable for the status `200`
 get /library/query the response property `results/items/on_streaming` became nullable for the status `200`
+
+# wxyc-shared#140 — same PR, same argument, for the two fields sitting one and
+# three lines from `label` in `AlbumSearchResult`: `library.label_id` and
+# `library.album_artist` both carry no NOT NULL either
+# (`shared/database/src/schema.ts`), `library_artist_view`'s latest definition
+# (migration 0166) selects both straight off the base `library` FROM table
+# with no COALESCE, and neither `/library/query` mapper
+# (`taggedRowToAlbumSearchResultRow` / `toAlbumSearchResultRow`) nor
+# `GET /library`'s serializer (`serializeLibraryArtistViewEntry`) coalesces
+# either field — both pass the row value through unchanged on both
+# operations, unlike `label`, which only `GET /library` leaves null.
+#
+# Neither field is in `AlbumSearchResult.required` (unlike `label`), so this
+# widens nullability only — no required-set change, no version-bump-relevant
+# shape decision beyond the same major bump `label`/`on_streaming` already
+# took above.
+#
+# PRUNE AFTER MERGE: diff-scoped, inert the moment this lands on main.
+get /library the response property `items/label_id` became nullable for the status `200`
+get /library the response property `items/album_artist` became nullable for the status `200`
+get /library/query the response property `results/items/label_id` became nullable for the status `200`
+get /library/query the response property `results/items/album_artist` became nullable for the status `200`
