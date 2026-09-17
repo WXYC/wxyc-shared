@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 5.0.0
+  version: 6.0.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -474,6 +474,16 @@ components:
             it covers.
         label_id:
           type: integer
+          nullable: true
+          description: >-
+            `labels.id` for `record_label`, or `null` when the row's label was
+            never linked to a catalog row — the state of the large majority of
+            rows, not an edge case. Passed straight through from
+            `flowsheet.label_id`, which carries no NOT NULL. Consumers must fall
+            back to the free-text `record_label` on null. Same column and same
+            contract as `FlowsheetV2TrackEntry.label_id`; the V1 and V2 field
+            sets are separate for historical reasons, not because the column
+            differs between them.
         rotation_id:
           type: integer
         rotation_bin:
@@ -748,7 +758,10 @@ components:
             $ref: '#/components/schemas/FlowsheetV2Entry'
 
     FlowsheetSongEntry:
-      description: Song entry in the flowsheet
+      description: >-
+        Song entry in the flowsheet. Not `$ref`'d by any operation in this
+        document — every v1 read path composes `FlowsheetEntryResponse`
+        instead — but published as a generated type, so it is kept accurate.
       allOf:
         - $ref: '#/components/schemas/FlowsheetEntryBase'
         - type: object
@@ -769,6 +782,14 @@ components:
               type: string
             label_id:
               type: integer
+              nullable: true
+              description: >-
+                Same column and same contract as
+                `FlowsheetEntryFields.label_id`: `labels.id` for `record_label`,
+                or `null` when the row's label was never linked to a catalog
+                row, which is the state of the large majority of rows. Declared
+                again here because this shape carries its own copy of the field
+                set rather than composing that block.
             request_flag:
               type: boolean
             segue:
