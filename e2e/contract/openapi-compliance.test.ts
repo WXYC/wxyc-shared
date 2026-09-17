@@ -204,11 +204,38 @@ describe('OpenAPI Compliance', () => {
   });
 
   describe('Flowsheet Endpoints', () => {
-    // Validates the default branch against the envelope, and each entry
-    // against the V2 variant its own `entry_type` selects. Validating every
-    // row against one flattened schema is what let the endpoint serve a shape
-    // the contract did not describe: a schema with no required fields and no
-    // discriminator accepts anything.
+    // Read the variant map off the contract's own discriminator rather than
+    // restating it here. A hand-copied map fails a renamed or newly added
+    // variant as "unmapped entry_type" — a defect in the test, reported as a
+    // defect in the wire. `tests/api-spec.test.ts` pins mapping and `oneOf`
+    // to each other, so this reads a table that is already checked.
+    function variantFor(entryType: string | undefined): string | undefined {
+      const union = schemas.FlowsheetV2Entry as {
+        discriminator?: { mapping?: Record<string, string> };
+      };
+      const ref = union?.discriminator?.mapping?.[entryType as string];
+      return ref?.split('/').pop();
+    }
+
+    // Every V2 row validates against the variant its own discriminator picks —
+    // not against one flattened schema. Validating every row against a schema
+    // with no required fields and no discriminator accepts anything, which is
+    // how both these endpoints came to serve a shape the contract did not
+    // describe.
+    function expectEntriesMatchTheirVariants(entries: unknown[]): void {
+      for (const entry of entries) {
+        const entryType = (entry as { entry_type?: string }).entry_type;
+        expect(entryType, 'every V2 entry carries its discriminator').toBeDefined();
+        const variant = variantFor(entryType);
+        expect(variant, `unmapped entry_type: ${entryType}`).toBeDefined();
+        const result = validateAgainstSchema(entry, variant as string, schemas);
+        if (!result.valid) {
+          console.log(`Validation errors (${entryType}):`, result.errors);
+        }
+        expect(result.valid).toBe(true);
+      }
+    }
+
     it('GET /flowsheet response matches FlowsheetV2PaginatedResponse schema', async () => {
       const response = await client.get<{ entries?: unknown[] }>('/flowsheet?limit=5');
 
@@ -228,28 +255,46 @@ describe('OpenAPI Compliance', () => {
       }
       expect(envelope.valid).toBe(true);
 
-      const variantOf: Record<string, string> = {
-        track: 'FlowsheetV2TrackEntry',
-        show_start: 'FlowsheetV2ShowStartEntry',
-        show_end: 'FlowsheetV2ShowEndEntry',
-        dj_join: 'FlowsheetV2DJJoinEntry',
-        dj_leave: 'FlowsheetV2DJLeaveEntry',
-        talkset: 'FlowsheetV2TalksetEntry',
-        breakpoint: 'FlowsheetV2BreakpointEntry',
-        message: 'FlowsheetV2MessageEntry',
-      };
+      expectEntriesMatchTheirVariants(response.body.entries ?? []);
+    });
 
-      for (const entry of response.body.entries ?? []) {
-        const entryType = (entry as { entry_type?: string }).entry_type;
-        expect(entryType, 'every V2 entry carries its discriminator').toBeDefined();
-        const variant = variantOf[entryType as string];
-        expect(variant, `unmapped entry_type: ${entryType}`).toBeDefined();
-        const result = validateAgainstSchema(entry, variant as string, schemas);
-        if (!result.valid) {
-          console.log('Validation errors:', result.errors);
-        }
-        expect(result.valid).toBe(true);
+    // Same union as GET /flowsheet above, reached through a different
+    // envelope. The window is derived from a row this endpoint's sibling just
+    // returned rather than hardcoded: an empty window is a legal 200 whose
+    // entry loop asserts nothing, so a fixed window that happens to miss the
+    // seed data would pass while checking no rows at all.
+    it('GET /flowsheet/range response matches FlowsheetRangeResponse schema', async () => {
+      const latest = await client.get<{ entries?: Array<{ add_time?: string }> }>('/flowsheet?limit=1');
+      if (!latest.ok) {
+        console.log('Skipping: Backend not available');
+        return;
       }
+      const addTime = latest.body.entries?.[0]?.add_time;
+      if (!addTime) {
+        console.log('Skipping: flowsheet has no entries to window around');
+        return;
+      }
+
+      // Half-open [start, end) on add_time, so the anchor row needs the window
+      // to extend past it; one day either side stays well inside the 8-day cap.
+      const day = 24 * 60 * 60 * 1000;
+      const anchor = Date.parse(addTime);
+      const response = await client.get<{ shows?: unknown[]; entries?: unknown[] }>(
+        `/flowsheet/range?start=${anchor - day}&end=${anchor + day}`
+      );
+
+      expect(response.status).toBe(200);
+      expect(Array.isArray(response.body.shows)).toBe(true);
+      expect(Array.isArray(response.body.entries)).toBe(true);
+      expect(response.body.entries?.length, 'window built around a known row').toBeGreaterThan(0);
+
+      const envelope = validateAgainstSchema(response.body, 'FlowsheetRangeResponse', schemas);
+      if (!envelope.valid) {
+        console.log('Validation errors:', envelope.errors);
+      }
+      expect(envelope.valid).toBe(true);
+
+      expectEntriesMatchTheirVariants(response.body.entries ?? []);
     });
 
     it('GET /flowsheet/latest response matches FlowsheetEntryResponse schema', async () => {
