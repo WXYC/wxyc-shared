@@ -8,6 +8,7 @@
  */
 
 import type {
+  FlowsheetV2Entry,
   FlowsheetEntryResponse,
   FlowsheetSongEntry,
   FlowsheetMessageEntry,
@@ -57,17 +58,6 @@ export type FlowsheetPostRequest =
   | FlowsheetCreateSongFromCatalog
   | FlowsheetCreateSongFreeform
   | FlowsheetCreateMessage;
-
-/** Union type for all V2 flowsheet entry types (discriminated by entry_type) */
-export type FlowsheetV2Entry =
-  | FlowsheetV2TrackEntry
-  | FlowsheetV2ShowStartEntry
-  | FlowsheetV2ShowEndEntry
-  | FlowsheetV2DJJoinEntry
-  | FlowsheetV2DJLeaveEntry
-  | FlowsheetV2TalksetEntry
-  | FlowsheetV2BreakpointEntry
-  | FlowsheetV2MessageEntry;
 
 
 // =============================================================================

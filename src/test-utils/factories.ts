@@ -19,14 +19,13 @@ import type {
   FlowsheetV2TalksetEntry,
   FlowsheetV2BreakpointEntry,
   FlowsheetV2MessageEntry,
+  FlowsheetV2Entry,
   RotationEntry,
   BinEntry,
   ScheduleShift,
   SongRequest,
   ParsedSongRequest,
 } from '../dtos/index.js';
-
-import type { FlowsheetV2Entry } from '../dtos/extensions.js';
 
 import {
   testArtist,

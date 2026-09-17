@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 1.66.0
+  version: 1.67.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1455,8 +1455,48 @@ components:
             message:
               type: string
 
+    FlowsheetV2Entry:
+      description: >-
+        One row of the V2 flowsheet projection — the discriminated union every
+        `projectEntriesV2` caller emits.
+
+
+        Declared once and referenced from all three of its sites
+        (`FlowsheetV2PaginatedResponse.entries`, `ShowPlaylist.entries`, and the
+        array branches of `GET /flowsheet`) rather than inlined per site. It was
+        previously pasted into two of them, which is how the copies come to
+        disagree: nothing makes an inlined `oneOf` track a variant added to its
+        twin. Add a variant here and to `entry_type`'s mapping, never to a call
+        site.
+      oneOf:
+        - $ref: '#/components/schemas/FlowsheetV2TrackEntry'
+        - $ref: '#/components/schemas/FlowsheetV2ShowStartEntry'
+        - $ref: '#/components/schemas/FlowsheetV2ShowEndEntry'
+        - $ref: '#/components/schemas/FlowsheetV2DJJoinEntry'
+        - $ref: '#/components/schemas/FlowsheetV2DJLeaveEntry'
+        - $ref: '#/components/schemas/FlowsheetV2TalksetEntry'
+        - $ref: '#/components/schemas/FlowsheetV2BreakpointEntry'
+        - $ref: '#/components/schemas/FlowsheetV2MessageEntry'
+      discriminator:
+        propertyName: entry_type
+        mapping:
+          track: '#/components/schemas/FlowsheetV2TrackEntry'
+          show_start: '#/components/schemas/FlowsheetV2ShowStartEntry'
+          show_end: '#/components/schemas/FlowsheetV2ShowEndEntry'
+          dj_join: '#/components/schemas/FlowsheetV2DJJoinEntry'
+          dj_leave: '#/components/schemas/FlowsheetV2DJLeaveEntry'
+          talkset: '#/components/schemas/FlowsheetV2TalksetEntry'
+          breakpoint: '#/components/schemas/FlowsheetV2BreakpointEntry'
+          message: '#/components/schemas/FlowsheetV2MessageEntry'
+
     FlowsheetV2PaginatedResponse:
       type: object
+      description: >-
+        The response of the default (paginated) branch of `GET /flowsheet` — the
+        branch a request carrying neither `shows_limit` nor `start_id`/`end_id`
+        selects, and the one the iOS app polls. The other two branches of that
+        endpoint answer with a bare `FlowsheetV2Entry` array and no envelope;
+        see the path for which query selects which.
       required:
         - entries
         - page
@@ -1467,26 +1507,7 @@ components:
         entries:
           type: array
           items:
-            oneOf:
-              - $ref: '#/components/schemas/FlowsheetV2TrackEntry'
-              - $ref: '#/components/schemas/FlowsheetV2ShowStartEntry'
-              - $ref: '#/components/schemas/FlowsheetV2ShowEndEntry'
-              - $ref: '#/components/schemas/FlowsheetV2DJJoinEntry'
-              - $ref: '#/components/schemas/FlowsheetV2DJLeaveEntry'
-              - $ref: '#/components/schemas/FlowsheetV2TalksetEntry'
-              - $ref: '#/components/schemas/FlowsheetV2BreakpointEntry'
-              - $ref: '#/components/schemas/FlowsheetV2MessageEntry'
-            discriminator:
-              propertyName: entry_type
-              mapping:
-                track: '#/components/schemas/FlowsheetV2TrackEntry'
-                show_start: '#/components/schemas/FlowsheetV2ShowStartEntry'
-                show_end: '#/components/schemas/FlowsheetV2ShowEndEntry'
-                dj_join: '#/components/schemas/FlowsheetV2DJJoinEntry'
-                dj_leave: '#/components/schemas/FlowsheetV2DJLeaveEntry'
-                talkset: '#/components/schemas/FlowsheetV2TalksetEntry'
-                breakpoint: '#/components/schemas/FlowsheetV2BreakpointEntry'
-                message: '#/components/schemas/FlowsheetV2MessageEntry'
+            $ref: '#/components/schemas/FlowsheetV2Entry'
         page:
           type: integer
         limit:
@@ -1900,26 +1921,7 @@ components:
         entries:
           type: array
           items:
-            oneOf:
-              - $ref: '#/components/schemas/FlowsheetV2TrackEntry'
-              - $ref: '#/components/schemas/FlowsheetV2ShowStartEntry'
-              - $ref: '#/components/schemas/FlowsheetV2ShowEndEntry'
-              - $ref: '#/components/schemas/FlowsheetV2DJJoinEntry'
-              - $ref: '#/components/schemas/FlowsheetV2DJLeaveEntry'
-              - $ref: '#/components/schemas/FlowsheetV2TalksetEntry'
-              - $ref: '#/components/schemas/FlowsheetV2BreakpointEntry'
-              - $ref: '#/components/schemas/FlowsheetV2MessageEntry'
-            discriminator:
-              propertyName: entry_type
-              mapping:
-                track: '#/components/schemas/FlowsheetV2TrackEntry'
-                show_start: '#/components/schemas/FlowsheetV2ShowStartEntry'
-                show_end: '#/components/schemas/FlowsheetV2ShowEndEntry'
-                dj_join: '#/components/schemas/FlowsheetV2DJJoinEntry'
-                dj_leave: '#/components/schemas/FlowsheetV2DJLeaveEntry'
-                talkset: '#/components/schemas/FlowsheetV2TalksetEntry'
-                breakpoint: '#/components/schemas/FlowsheetV2BreakpointEntry'
-                message: '#/components/schemas/FlowsheetV2MessageEntry'
+            $ref: '#/components/schemas/FlowsheetV2Entry'
           description: >-
             The V2 discriminated union, the same shape `GET /flowsheet` serves.
             The handler projects through `projectEntriesV2`; there is no V1
@@ -9262,42 +9264,103 @@ paths:
         from the handler mounted here, not from a `/v2` prefix. No `/v2` router
         exists. The `FlowsheetV2*` schemas under `components.schemas` are that
         wire shape and are the DTOs consumers import.
+
+        One route, three branches, selected by query parameter and tried in this
+        order — the first match wins, and a parameter belonging to a later
+        branch is ignored once an earlier one has matched:
+
+        1. `shows_limit` present -> entries of the N most recent shows.
+        2. `start_id` + `end_id` both present -> entries in that id range.
+        3. otherwise -> the default paginated branch.
+
+        The branches do not share a response shape; see the 200 response. The
+        precedence matters because `limit` is read by branch 3 only: sending
+        `shows_limit` and `limit` together silently drops `limit`.
       security: []
       parameters:
         - name: limit
           in: query
           schema:
             type: integer
-          description: Number of entries to return
+          description: >-
+            Entries per page. Default branch only — ignored when `shows_limit`
+            or an id range selects another branch. Defaults to 30; rejected
+            above the server's per-request cap.
         - name: shows_limit
           in: query
           schema:
             type: integer
-          description: Number of shows to return entries from
+          description: >-
+            Number of recent shows to return entries from. Selects the
+            shows branch, which answers with a bare array.
         - name: page
           in: query
           schema:
             type: integer
-          description: Page number for pagination
+          description: >-
+            Zero-based page number. Paginates the default branch, and also
+            pages the show window on the `shows_limit` branch. Deep pages are
+            rejected rather than served; the id-range branch is the supported
+            path for deep history.
         - name: start_id
           in: query
           schema:
             type: integer
-          description: First play_order id in range (must be provided with end_id)
+          description: >-
+            First play_order id in range (must be provided with `end_id`).
+            Selects the range branch, which answers with a bare array.
         - name: end_id
           in: query
           schema:
             type: integer
-          description: Last play_order id in range (must be provided with start_id)
+          description: >-
+            Last play_order id in range (must be provided with `start_id`).
+            Must not be less than `start_id`, and the span is capped.
       responses:
         '200':
-          description: List of flowsheet entries
+          description: >-
+            Flowsheet entries, in one of two shapes depending on which branch
+            the query selects. Both carry `FlowsheetV2Entry`; they differ in
+            whether it arrives wrapped.
+
+
+            `shows_limit`, or `start_id` + `end_id`, answers with a bare array.
+            Anything else — including no parameters at all — takes the default
+            paginated branch and answers with `FlowsheetV2PaginatedResponse`.
+            Only that branch carries `on_air`, so a client that renders the
+            on-air banner must poll the default branch; the array branches drop
+            the envelope, not just its pagination fields.
+
+
+            The two are disjoint by JSON type (object vs array), so no
+            discriminator is needed to tell them apart — but a generated client
+            gets a union here and must narrow it. Narrow on the branch you
+            requested, not by probing the payload.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/FlowsheetEntryResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/FlowsheetV2PaginatedResponse'
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/FlowsheetV2Entry'
+        '404':
+          description: >-
+            No entries matched — returned ONLY by the two array branches, which
+            404 on an empty result instead of answering `[]`. The default
+            paginated branch reports emptiness as a 200 with `entries: []`, so
+            the same "nothing found" condition has two different statuses on one
+            endpoint depending on the query. Legacy behaviour, preserved
+            deliberately.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - message
+                properties:
+                  message:
+                    type: string
 
     post:
       x-wxyc-service: backend-service

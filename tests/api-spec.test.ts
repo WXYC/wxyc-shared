@@ -132,7 +132,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('1.66.0');
+      expect(spec.info.version).toBe('1.67.0');
     });
 
     it('should have components section', () => {
@@ -2365,6 +2365,119 @@ describe('OpenAPI Specification', () => {
     it('stops recounting a non-nullable dj_name it no longer has a twin to contrast', () => {
       const description = (spec.components.schemas.ShowPlaylist as { description?: string }).description ?? '';
       expect(description).not.toMatch(/non-nullable/);
+    });
+  });
+
+  describe('GET /flowsheet declares the shape it serves (#485)', () => {
+    const UNION_MEMBERS = [
+      'FlowsheetV2TrackEntry',
+      'FlowsheetV2ShowStartEntry',
+      'FlowsheetV2ShowEndEntry',
+      'FlowsheetV2DJJoinEntry',
+      'FlowsheetV2DJLeaveEntry',
+      'FlowsheetV2TalksetEntry',
+      'FlowsheetV2BreakpointEntry',
+      'FlowsheetV2MessageEntry',
+    ];
+
+    // Counts `$ref`/mapping sites only: a reference is quote-terminated, a
+    // schema's own definition line is colon-terminated.
+    function refSites(member: string): number {
+      return specText.split(`${member}'`).length - 1;
+    }
+
+    function flowsheetGetResponses(): Record<string, unknown> {
+      const path = spec.paths['/flowsheet'] as { get?: { responses?: Record<string, unknown> } };
+      return path.get?.responses ?? {};
+    }
+
+    function flowsheetGet200(): Record<string, unknown> {
+      const ok = flowsheetGetResponses()['200'] as
+        | { content?: Record<string, { schema?: Record<string, unknown> }> }
+        | undefined;
+      return ok?.content?.['application/json']?.schema ?? {};
+    }
+
+    // The defect: the path declared `array<FlowsheetEntryResponse>` — the
+    // flattened V1 row, every field optional, no discriminator — while all
+    // three of the handler's branches project through `projectEntriesV2`. The
+    // schema for what it actually serves existed the whole time and was
+    // referenced by nothing.
+    it('no longer types the response as the flattened V1 row', () => {
+      expect(JSON.stringify(flowsheetGet200())).not.toContain('FlowsheetEntryResponse');
+    });
+
+    // One route, two response shapes, chosen by query parameter: `shows_limit`
+    // or an id range answers with a bare array, everything else with the
+    // pagination envelope. Declaring only the envelope would swap one lie for
+    // a narrower one, so the 200 is a oneOf over both.
+    it('declares both branch shapes, the envelope and the bare array', () => {
+      const branches = (flowsheetGet200().oneOf ?? []) as Array<{
+        $ref?: string;
+        type?: string;
+        items?: { $ref?: string };
+      }>;
+      expect(branches).toHaveLength(2);
+      expect(branches[0]?.$ref).toBe('#/components/schemas/FlowsheetV2PaginatedResponse');
+      expect(branches[1]?.type).toBe('array');
+      expect(branches[1]?.items?.$ref).toBe('#/components/schemas/FlowsheetV2Entry');
+    });
+
+    // The two array branches 404 on an empty result rather than answering
+    // `[]`, so emptiness has two different statuses on one endpoint depending
+    // on the query. Declared because a client that treats 404 as an error
+    // breaks on a quiet day.
+    it('declares the 404 the array branches return on an empty result', () => {
+      expect(flowsheetGetResponses()['404']).toBeDefined();
+    });
+
+    // The union was pasted into two schemas. Nothing made the copies track each
+    // other, which is the whole hazard: a ninth variant added to one is simply
+    // absent from the other, and no test fails. Each member name may now appear
+    // exactly twice in the document — once as a `oneOf` arm and once in the
+    // discriminator mapping — and both occurrences are inside FlowsheetV2Entry.
+    it.each(UNION_MEMBERS)('mentions %s exactly twice, both inside the one union', (member) => {
+      expect(refSites(member)).toBe(2);
+    });
+
+    it('points both call sites at the named union rather than inlining it', () => {
+      for (const schemaName of ['FlowsheetV2PaginatedResponse', 'ShowPlaylist']) {
+        const entries = propertyOf(schemaName, 'entries') as
+          | { type?: string; items?: { $ref?: string; oneOf?: unknown } }
+          | undefined;
+        expect(entries?.type, schemaName).toBe('array');
+        expect(entries?.items?.$ref, schemaName).toBe('#/components/schemas/FlowsheetV2Entry');
+        expect(entries?.items?.oneOf, schemaName).toBeUndefined();
+      }
+    });
+
+    // Three states, not two: an object names a live DJ, JSON `null` confirms
+    // automation, and an ABSENT key means the server could not resolve it and
+    // the client should show nothing rather than assert automation. Absence is
+    // only distinguishable from null while `on_air` stays out of `required` —
+    // the iOS decoder branches on exactly that difference.
+    it('keeps on_air out of required so absent stays distinct from null', () => {
+      expect(propertyKeysOf('FlowsheetV2PaginatedResponse')).toContain('on_air');
+      expect(requiredKeysOf('FlowsheetV2PaginatedResponse')).not.toContain('on_air');
+      expect(propertyOf('FlowsheetV2PaginatedResponse', 'on_air')?.nullable).toBe(true);
+    });
+
+    // Reaching the envelope from the path is what makes `OnAirInfo` reachable
+    // at all — it hangs off `on_air` and nothing else refers to it. Both were
+    // exempted from the reachability guard for precisely this reason, and that
+    // exemption group is now gone; this asserts the condition it stood for.
+    it('leaves no schema in the V2 flowsheet response unreachable', () => {
+      const reachable = JSON.stringify(spec.paths);
+      expect(reachable).toContain('FlowsheetV2PaginatedResponse');
+      expect(JSON.stringify(spec.components.schemas.FlowsheetV2PaginatedResponse)).toContain('OnAirInfo');
+    });
+
+    // V1 is not retired by this change — four other operations still answer
+    // with it. Repointing the GET does not orphan it, and nothing here should
+    // be read as licence to delete it.
+    it('leaves FlowsheetEntryResponse referenced by the operations that do serve it', () => {
+      expect(spec.components.schemas.FlowsheetEntryResponse).toBeDefined();
+      expect(JSON.stringify(spec.paths)).toContain('FlowsheetEntryResponse');
     });
   });
 
@@ -6045,27 +6158,6 @@ describe('OpenAPI Specification', () => {
     'StreamingSourceMatch',
     ];
 
-    // No importer, but the shape is real and served -- the PATH declares
-    // something looser, so the accurate schema sits unreferenced beside it.
-    // This group is expected to empty out, by fixing the path rather than by
-    // deleting the schema.
-    //
-    // `GET /flowsheet` declares `array<FlowsheetEntryResponse>`, the flattened
-    // V1 shape with every field optional. It does not serve that.
-    // `wxyc-ios-64` decodes the response as an object of `{entries, on_air}`
-    // and branches three ways on `on_air` -- absent, JSON null, or an object --
-    // which is `FlowsheetV2PaginatedResponse` carrying `OnAirInfo`, field for
-    // field. `ShowPlaylist` (reachable, `GET /flowsheet/playlist`) inlines the
-    // same eight-variant discriminated union and says so in its own
-    // description: "the same shape `GET /flowsheet` serves". So the named
-    // schema for that shape is referenced by nothing while a copy of it is
-    // pasted into a sibling, and `OnAirInfo` is reachable only through the
-    // orphan. Pointing the path at the named schema retires both entries and
-    // deletes the duplicate.
-    const PATH_DECLARES_A_LOOSER_SHAPE = [
-    'FlowsheetV2PaginatedResponse', 'OnAirInfo',
-    ];
-
     // No importer, and no path here to attach them to: these describe payloads
     // of endpoints this contract does not declare. `ReadinessResponse` is the
     // readiness half of a health pair whose other half (`HealthCheckResponse`)
@@ -6083,7 +6175,6 @@ describe('OpenAPI Specification', () => {
     const EXEMPT = new Set([
       ...WEBSOCKET_PROTOCOL,
       ...GENERATED_TYPE_VOCABULARY,
-      ...PATH_DECLARES_A_LOOSER_SHAPE,
       ...ENDPOINT_NOT_DECLARED_HERE,
     ]);
 
