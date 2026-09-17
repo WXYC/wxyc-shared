@@ -152,7 +152,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('7.0.0');
+      expect(spec.info.version).toBe('8.0.0');
     });
 
     it('should have components section', () => {
@@ -2141,6 +2141,84 @@ describe('OpenAPI Specification', () => {
         expect(albumId?.type).toBe('integer');
         expect(albumId?.nullable).toBeUndefined();
         expect(requiredKeysOf(schemaName)).toContain('album_id');
+      }
+    );
+  });
+
+  // #191: AlbumSearchResult.rotation_bin admits null. `library_artist_view`
+  // LEFT JOINs `rotation` — on album_id, filtered by kill_date, never by bin
+  // value — so the field is genuine SQL NULL for any release not currently
+  // rotating, which is most of the catalog. `library-search.service.ts` has
+  // typed this row's rotation_bin as `string | null` since the endpoint
+  // shipped (2026-05-13); the non-nullable `$ref RotationBin` this replaces
+  // misdescribed that wire shape, independent of any raw value ever observed.
+  //
+  // This is NOT an enum-widening, which is what #191 originally asked for on
+  // five read sites. That premise died. It rested on a fifth live value:
+  // Backend-Service migration 0041 added 'N' to `freq_enum` for "tubafrenzy's
+  // New rotation type" — a category error, since tubafrenzy's "New" is a
+  // flowsheet entry-type code for "not yet in rotation", the opposite of a
+  // rotation weight. Migration 0150 reclassified the 15 rows carrying it and
+  // dropped the member on 2026-08-17. `RotationBin [H,M,L,S]` is therefore
+  // byte-identical to the Postgres type today; `freqEnum` is derived from
+  // `ROTATION_BINS` so the two cannot drift apart again unnoticed; and the
+  // writers gate on `parseRotationBin` ahead of an insert the enum type would
+  // reject anyway. RotationEntry and RotationRowSummary echo
+  // `rotation.rotation_bin` straight out of that NOT NULL column with no LEFT
+  // JOIN, so they have no defect to fix — and widening them would trade live
+  // exhaustive-switch safety in Swift, Kotlin and TypeScript for insurance
+  // against a bug already fixed at its root. They keep the plain,
+  // non-nullable `$ref RotationBin` they always had.
+  describe('AlbumSearchResult.rotation_bin admits null via nullable RotationBin, not an enum-widening (#191)', () => {
+    type SchemaProp = {
+      nullable?: boolean;
+      $ref?: string;
+      allOf?: Array<{ $ref?: string }>;
+    };
+
+    // The single-branch `allOf` is not decoration: OpenAPI 3.0 IGNORES any
+    // sibling key next to a bare `$ref`, so `{$ref: RotationBin, nullable:
+    // true}` silently drops the nullability and generates the same type it
+    // did before. Asserting the wrapper — not just the flag — is what keeps a
+    // well-meaning simplification back to a bare `$ref` from passing.
+    it('wraps RotationBin in allOf + nullable — the idiom AlbumSearchResult.card already uses for its own absent-row nullability', () => {
+      const prop = propertyOf('AlbumSearchResult', 'rotation_bin') as SchemaProp | undefined;
+      expect(prop?.allOf?.[0]?.$ref).toBe('#/components/schemas/RotationBin');
+      expect(prop?.nullable).toBe(true);
+    });
+
+    // `nullable` and `required` are orthogonal here and the contract needs both
+    // read together: the key is absent from `required`, so the generated type is
+    // `RotationBin | null | undefined` and a consumer must handle absent as well
+    // as null. Pinned because `nullable: true` reads, wrongly, as if it had also
+    // made the key mandatory.
+    it('leaves rotation_bin out of required — the wire may omit the key as well as null it', () => {
+      expect(requiredKeysOf('AlbumSearchResult')).not.toContain('rotation_bin');
+    });
+
+    // The write surface is untouched: a DJ still assigns exactly one of the
+    // four real cohorts, and RotationCreateFields is the only schema an
+    // invalid assignment can be rejected from before it reaches Postgres.
+    it('RotationCreateFields keeps rotation_bin strict — the write surface still asserts one of the four assignable cohorts', () => {
+      const prop = propertyOf('RotationCreateFields', 'rotation_bin') as SchemaProp | undefined;
+      expect(prop?.$ref).toBe('#/components/schemas/RotationBin');
+      expect(prop?.allOf).toBeUndefined();
+      expect(requiredKeysOf('RotationCreateFields')).toContain('rotation_bin');
+    });
+
+    // RotationEntry and RotationRowSummary echo `rotation.rotation_bin`
+    // directly (no LEFT JOIN, NOT NULL column, validated at write time) —
+    // genuinely enum-safe, unlike AlbumSearchResult above. They stay on the
+    // plain, non-nullable enum: no change, and a guard against a future pass
+    // over this same ticket re-litigating and widening them anyway.
+    it.each(['RotationEntry', 'RotationRowSummary'] as const)(
+      '%s.rotation_bin stays the plain, non-nullable RotationBin enum — no live defect to fix here',
+      (schemaName) => {
+        const prop = propertyOf(schemaName, 'rotation_bin') as SchemaProp | undefined;
+        expect(prop?.$ref).toBe('#/components/schemas/RotationBin');
+        expect(prop?.allOf).toBeUndefined();
+        expect(prop?.nullable).toBeUndefined();
+        expect(requiredKeysOf(schemaName)).toContain('rotation_bin');
       }
     );
   });
