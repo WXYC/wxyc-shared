@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('8.0.0');
+      expect(spec.info.version).toBe('9.0.0');
     });
 
     it('should have components section', () => {
