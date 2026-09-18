@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 8.0.0
+  version: 9.0.0
   contact:
     name: WXYC
     url: https://wxyc.org
