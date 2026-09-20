@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.0.0
+  version: 10.1.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2057,6 +2057,17 @@ components:
           type: string
         code_number:
           type: integer
+        code_volume_letters:
+          type: string
+          nullable: true
+          maxLength: 4
+          description: >
+            Volume letters for the release call code
+            (`library.code_volume_letters`, varchar(4)). Writable on the
+            wire since BS#2564 (`AlbumCreateFields.code_number`'s create
+            counterpart); this raw-row schema carries it for the same
+            reason it already carries `code_number` — no joins, just the
+            `library` columns as inserted.
         genre_id:
           type: integer
         format_id:
@@ -2102,15 +2113,33 @@ components:
         Partial-update payload for `PATCH /library/{id}` (BS#1154). Mirrors
         Backend-Service's wire-level `UpdateAlbumRequest` type
         (apps/backend/controllers/library.controller.ts) exactly: only fields
-        present in the body are validated and written. The 8 legacy fields
+        present in the body are validated and written. The legacy fields
         are snake_case (matching AddAlbumRequest / the DB columns); the two
         BS#1281 discogs fields are camelCase, per the whitelist BS's
         `UPDATABLE_ALBUM_FIELDS` actually reads from `req.body`.
-        `artist_name` and `code_number` are deliberately absent — they are
-        server-derived (re-attribution side effects of an `artist_id`
-        change), never read from the client body. `lastDiscogsRecheckAt` is
-        also absent — it is server-write-only (the recheck cron writes it
-        directly).
+
+        `artist_name` is deliberately absent from THIS schema's properties
+        — on the album body it stays server-derived, a re-attribution side
+        effect of an `artist_id` change, never read from the client. That
+        claim is scoped to this endpoint: `artist_name` IS a writable field
+        on the separate `PATCH /library/artists/{id}` endpoint's body
+        (`UpdateArtistRequest`), which renames the artist row directly
+        rather than moving one release between artists. The two fields
+        share a name and nothing else; do not read one endpoint's rule as
+        describing the other.
+
+        `code_number` and `code_volume_letters`, by contrast, ARE writable
+        here as of BS#2564 (production image `backend/v0.1.920`,
+        2026-09-18) — an earlier version of this description grouped
+        `code_number` with `artist_name` as server-derived, which stopped
+        being true the same day it shipped. See their own descriptions
+        below; the write semantics differ from
+        `AlbumCreateFields.code_number` / `.code_volume_letters` because a
+        PATCH can also be re-filing the release under a different
+        `artist_id` in the same request.
+
+        `lastDiscogsRecheckAt` is also absent — it is server-write-only
+        (the recheck cron writes it directly).
       properties:
         album_title:
           type: string
@@ -2130,6 +2159,37 @@ components:
           nullable: true
         disc_quantity:
           type: integer
+        code_number:
+          type: integer
+          minimum: 1
+          maximum: 32767
+          description: >
+            Operator-chosen release call number (BS#2564; the PATCH half
+            of `AlbumCreateFields.code_number`, BS#2410). `library.code_number`
+            is a Postgres smallint, hence the 32767 ceiling. No
+            application-level collision check, same as the create side
+            (single-librarian decision, rotation-import plan D2); the
+            eventual DB uniqueness constraint and its 409 mapping are
+            tracked at WXYC/Backend-Service#2033. Alongside an `artist_id`
+            move in the same request, a value that DIFFERS from the stored
+            one is honored verbatim as the destination shelf; a value that
+            merely echoes the stored one expresses no choice and still
+            auto-regenerates when the destination artist already owns that
+            number.
+        code_volume_letters:
+          type: string
+          nullable: true
+          maxLength: 4
+          description: >
+            Volume letters for the release call code
+            (`library.code_volume_letters`, varchar(4)). An empty string
+            or an explicit `null` clears it to NULL — `null` is accepted
+            here (unlike `AlbumCreateFields.code_volume_letters`, which has
+            nothing to clear on a create) because omitting the key already
+            means "leave unchanged" on a PATCH, so clearing needs a
+            distinct spelling, and `AlbumDetail.code_volume_letters` is
+            `nullable: true`, so a client round-tripping a GET body into a
+            PATCH must be able to send back the `null` it just received.
         discogsUnavailable:
           type: boolean
         discogsUnavailableNote:
@@ -3033,6 +3093,15 @@ components:
             Joined from `genre_artist_crossreference.artist_genre_code` — the
             artist's number *within* this release's genre, so the same artist
             has a different one per genre. Part of the call number, not an id.
+        code_volume_letters:
+          type: string
+          nullable: true
+          maxLength: 4
+          description: >
+            `library.code_volume_letters`, varchar(4). Writable via
+            `UpdateAlbumRequest.code_volume_letters` since BS#2564;
+            see that field's description for the null-clearing rule this
+            nullability exists to support.
         format_name:
           type: string
           description: Joined from `format.format_name`.
@@ -3918,6 +3987,719 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ArtistSearchMatch'
+
+    # ===================
+    # Artist Card (classic librarian) — WXYC/wxyc-shared#503
+    # ===================
+
+    ArtistCard:
+      type: object
+      description: >
+        The classic-librarian artist-card field set (`artist_id`, not
+        `id` — a different shape from `Artist`, the raw `POST
+        /library/artists` insert row above). Not returned directly by
+        either artist-card endpoint: both `GET /library/artists/{id}` and
+        its `PATCH` 200 answer `ArtistCardWithDependentCounts`, which
+        embeds this shape via `allOf`.
+      required:
+        - artist_id
+        - artist_name
+        - alphabetical_name
+        - genre_id
+        - code_letters
+        - code_artist_number
+      properties:
+        artist_id:
+          type: integer
+        artist_name:
+          type: string
+        alphabetical_name:
+          type: string
+        genre_id:
+          type: integer
+        code_letters:
+          type: string
+        code_artist_number:
+          type: integer
+
+    ArtistCardWithDependentCounts:
+      description: >
+        `ArtistCard` plus the dependent counts behind `DELETE
+        /library/artists/{id}`'s refusal (WXYC/Backend-Service#2562, the
+        counts shipped ahead of the delete itself as #2597). Returned by
+        BOTH `GET /library/artists/{id}` and the `PATCH` 200 on the same
+        path — the two endpoints deliberately agree, so a client that
+        PATCHes can refresh its delete-control state from the PATCH body
+        instead of re-GETting.
+      allOf:
+        - $ref: '#/components/schemas/ArtistCard'
+        - type: object
+          required:
+            - release_count
+            - cross_reference_source_count
+            - cross_reference_target_count
+            - library_cross_reference_count
+            - compilation_credit_count
+          properties:
+            release_count:
+              type: integer
+              description: >
+                Catalog releases filed to this artist (`library.artist_id`).
+                A non-zero count is the primary `DELETE
+                /library/artists/{id}` refusal — move or delete the
+                releases first.
+            cross_reference_source_count:
+              type: integer
+              description: >
+                Legacy artist-to-artist cross-references naming this
+                artist as the source (tubafrenzy's
+                `LIBRARY_CODE_CROSS_REFERENCE`). A non-zero count refuses
+                the delete.
+            cross_reference_target_count:
+              type: integer
+              description: >
+                The same legacy cross-reference collection, naming this
+                artist as the target. A non-zero count refuses the delete.
+            library_cross_reference_count:
+              type: integer
+              description: >
+                Legacy release cross-references pointing at this artist
+                (tubafrenzy's `RELEASE_CROSS_REFERENCE`). A non-zero count
+                refuses the delete.
+            compilation_credit_count:
+              type: integer
+              description: >
+                Compilation-track credits attributed to this artist
+                (`compilation_track_artist.track_artist_id`).
+                Informational only — never a delete refusal. The FK is
+                `ON DELETE SET NULL` (the `concerts.headlining_artist_id`
+                precedent): a delete drops the credit's canonicalization
+                link rather than being blocked by it.
+
+    UpdateArtistRequest:
+      type: object
+      minProperties: 1
+      description: >
+        Partial-update payload for `PATCH /library/artists/{id}`
+        (WXYC/Backend-Service#2156, `artist_name` restored by BS#2563).
+        Two writable fields, either or both; a body with neither is a
+        400. `genre_id`, `code_letters`, and `code_artist_number` are
+        real fields on the `/wxycdb` artist-card form but have no write
+        path on this endpoint — sending one is a 400 naming why, not
+        silently dropped. Do not confuse this `artist_name` with
+        `UpdateAlbumRequest`'s absent one: this endpoint renames the
+        artist row directly; the album PATCH never accepts `artist_name`
+        at all, on any artist.
+      properties:
+        artist_name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >
+            Trimmed and NFC-normalized before storage, then measured in
+            code points against the `varchar(128)` column. Checked
+            against a folded-name collision probe
+            (case/diacritic/Unicode-form insensitive) across every genre
+            the artist is filed in; a hit is a 409
+            (`ArtistNameConflictError`). Cascades:
+            `library.artist_name` is rewritten on every release the
+            artist holds, and `library.artwork_lookup_attempted_at` is
+            cleared on those rows. `flowsheet.artist_name` is
+            deliberately NOT rewritten — it is a historical on-air
+            snapshot.
+        alphabetical_name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >
+            The filing name that governs shelf order. Trimmed and
+            NFC-normalized before storage, then measured in code points
+            against the `varchar(128)` column.
+
+    ArtistNameConflictError:
+      type: object
+      description: >
+        `PATCH /library/artists/{id}`'s 409: the requested `artist_name`
+        folds equal to a DIFFERENT artist already filed in one of this
+        artist's genres. Advisory rather than authoritative — no unique
+        constraint backs the folded name, so a concurrent write can still
+        produce the collision.
+      required:
+        - message
+        - reason
+        - artist
+      properties:
+        message:
+          type: string
+        reason:
+          type: string
+          enum: ['artist_name_conflict']
+        artist:
+          type: object
+          description: >
+            The conflicting artist, so a client can offer merging into it
+            rather than reporting a bare failure.
+          required:
+            - artist_id
+            - artist_name
+            - code_letters
+          properties:
+            artist_id:
+              type: integer
+            artist_name:
+              type: string
+            code_letters:
+              type: string
+
+    ArtistDeleteRefusal:
+      description: >
+        `DELETE /library/artists/{id}`'s 409. **WXYC/Backend-Service#2562
+        is in flight (open) as of this declaration** — this schema is the
+        published contract per this repo's schema-first rule (declared
+        before or alongside the private TS type), authored from the
+        issue's spec, not from code that may not exist yet. Reproduces
+        one of the four retired `/wxycdb` `ArtistAdminServlet` refusals.
+        The refusal-predicate counts ARE the refusal, so the body carries
+        the artist's full dependent-count card (the same shape `GET`/
+        `PATCH` return) rather than a bare message, letting a client
+        refresh its delete-control state from this response instead of a
+        follow-up GET.
+      allOf:
+        - $ref: '#/components/schemas/ArtistCardWithDependentCounts'
+        - type: object
+          required:
+            - message
+            - reason
+          properties:
+            message:
+              type: string
+            reason:
+              type: string
+              enum:
+                - artist_has_releases
+                - artist_crossreference_source
+                - artist_crossreference_target
+                - artist_library_crossreference
+              description: >
+                Which of the four `/wxycdb` refusals fired, checked in
+                that order. `compilation_credit_count` never appears as a
+                `reason` value — that dependent is informational only
+                (see its own description on
+                `ArtistCardWithDependentCounts`).
+
+    ArtistByCodeMatch:
+      type: object
+      description: >
+        One row of `GET /library/artists/by-code`. Deliberately NOT
+        `ArtistSearchMatch`, which is one field wider and reads
+        `genre_artist_crossreference` joined to `genres`; this lookup
+        projects `(artist_id, artist_name, code_letters)` and never joins
+        `genres`, echoing the already-validated `genre_id`/`code_number`
+        back onto each row rather than reading a per-row fact.
+      required:
+        - id
+        - artist_name
+        - code_letters
+        - code_number
+        - genre_id
+      properties:
+        id:
+          type: integer
+        artist_name:
+          type: string
+        code_letters:
+          type: string
+        code_number:
+          type: integer
+          description: >
+            Mode-dependent. Fully specified (`code_number` given on the
+            request), this is an ECHO of the request value, identical on
+            every row — NOT the row's own `artist_genre_code` the way the
+            same-named field on `ArtistSearchMatch` is. Browsing
+            (`code_number` omitted on the request), it is the row's real
+            `artist_genre_code` and varies across the list.
+        genre_id:
+          type: integer
+          description: Echo of the request's `genre_id`, identical on every row.
+
+    ArtistByCodeResponse:
+      type: object
+      required:
+        - artists
+      properties:
+        artists:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistByCodeMatch'
+
+    ArtistByCodeError:
+      type: object
+      description: >
+        `GET /library/artists/by-code`'s 404. Two distinct outcomes, told
+        apart by `reason`, never by `message` text: `genre_not_found` (no
+        genre has that `genre_id`) vs. `code_not_assigned` (the genre
+        exists and no artist is filed under that exact code — NOT a
+        guarantee that creating an artist under the code is safe; the
+        column has no case-fold constraint and neither writer
+        canonicalizes it the same way).
+      required:
+        - message
+        - reason
+      properties:
+        message:
+          type: string
+        reason:
+          type: string
+          enum: ['genre_not_found', 'code_not_assigned']
+
+    ArtistRelease:
+      type: object
+      description: One row of `GET /library/artists/{id}/releases`, in shelf order.
+      required:
+        - id
+        - last_modified
+        - format_name
+        - genre_id
+        - code_letters
+        - code_artist_number
+        - code_number
+        - album_title
+      properties:
+        id:
+          type: integer
+        last_modified:
+          type: string
+          format: date-time
+        format_name:
+          type: string
+        genre_id:
+          type: integer
+        code_letters:
+          type: string
+        code_artist_number:
+          type: integer
+        code_number:
+          type: integer
+        code_volume_letters:
+          type: string
+          nullable: true
+        album_title:
+          type: string
+        alternate_artist_name:
+          type: string
+          nullable: true
+
+    ArtistReleasesPage:
+      type: object
+      description: >
+        One page of `GET /library/artists/{id}/releases`, in shelf order
+        (`code_number`, then `code_volume_letters`, then `id`).
+      required:
+        - artist_id
+        - releases
+        - total
+        - page
+        - totalPages
+      properties:
+        artist_id:
+          type: integer
+        releases:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistRelease'
+        total:
+          type: integer
+        page:
+          type: integer
+        totalPages:
+          type: integer
+
+    NextCodeNumberResponse:
+      type: object
+      required:
+        - next_code_number
+      properties:
+        next_code_number:
+          type: integer
+          description: >
+            Shared shape for `GET /library/artists/peek-code` (next
+            ARTIST code number in a `(genre_id, code_letters)` bucket)
+            and `GET /library/artists/{id}/next-release-number` (next
+            RELEASE code number for one artist's shelf, within one
+            genre). Pure read, no side effects, in both cases.
+
+    # ===================
+    # Catalog Delete / Restore (classic librarian) — WXYC/wxyc-shared#503
+    # ===================
+
+    LockUnavailableRefusal:
+      type: object
+      description: >
+        503 shared by `DELETE /library/{id}`, `DELETE
+        /library/artists/{id}`, and `POST
+        /library/deleted/{batchId}/restore`: the operation stood down
+        rather than wait on rows a live writer holds. Retryable, and says
+        nothing about whether the target is deletable/restorable —
+        deliberately not a 409, which on these endpoints means "refused
+        on the merits". Each transaction sets a `lock_timeout` below
+        Postgres's deadlock-detection threshold on purpose, so that when
+        a librarian's write contends with a DJ's play insert, it is the
+        librarian's write that yields.
+      required:
+        - message
+        - reason
+      properties:
+        message:
+          type: string
+          example: 'Could not delete: the release is being written to right now. Try again in a moment.'
+        reason:
+          type: string
+          enum: ['lock_unavailable']
+
+    DigitalAssetReference:
+      type: object
+      description: >
+        One live `digital_asset` row blocking `DELETE /library/{id}` —
+        rip evidence / S3-backed audio-archive metadata with no
+        `onDelete` and nothing that casually re-enters it. A row with
+        `status: rejected` never appears here: the delete snapshots and
+        removes those instead of refusing over them.
+      required:
+        - id
+        - provenance
+        - disc_number
+        - status
+      properties:
+        id:
+          type: integer
+        provenance:
+          type: string
+          description: >
+            Open vocabulary, not a closed enum. `rotation_upload` and
+            `cd_rip` are the values in use today.
+          example: rotation_upload
+        disc_number:
+          type: integer
+        status:
+          type: string
+          description: >
+            Open vocabulary, not a closed enum. `needs_review`, `bound`
+            and `rejected` are in use today; the CD-rip phase adds
+            `pulled`, `ripped` and `exception`.
+          example: needs_review
+
+    ReleaseDeleteRefusal:
+      type: object
+      description: >
+        `DELETE /library/{id}`'s 409 (BS#2112). Refused on the merits —
+        the release has a LIVE `digital_asset` row (any status but
+        `rejected`). Deliberately NOT this document's `ApiErrorResponse`
+        shape: the specifics are the substance of the refusal, telling
+        the librarian what the delete would have damaged.
+      required:
+        - message
+        - reason
+        - asset_count
+        - assets
+      properties:
+        message:
+          type: string
+          example: 'Cannot delete: release has 2 digital assets on record (ids: 41, 42)'
+        reason:
+          type: string
+          enum: ['digital_asset_references']
+        asset_count:
+          type: integer
+          description: Number of LIVE `digital_asset` rows blocking this delete (`assets.length`).
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/DigitalAssetReference'
+
+    FlowsheetPlayCounts:
+      type: object
+      description: >
+        `GET /library/{id}/flowsheet-play-counts`'s 200
+        (WXYC/Backend-Service#2592). Answers "what would deleting this
+        release damage?" ahead of `DELETE /library/{id}`, which cannot
+        answer that on its own response — BS#2565 removed that delete's
+        prior 409-on-flowsheet-plays refusal, so plays are affected
+        silently unless read here first.
+
+        **The three counts are disjoint by construction and deliberately
+        NOT summable.** They partition one row set — every flowsheet play
+        naming this release, each counted in exactly one of `direct` /
+        `rotation_linked` / `legacy_linked` — but a total would misstate
+        what the delete actually does: the `legacy_linked` arm STRANDS
+        its plays permanently rather than unlinking them (the
+        delete-denylist guarantees no future release will ever carry
+        that legacy id again), while `direct` and `rotation_linked` are
+        merely unlinked. Summing collapses "permanently orphaned" into
+        the same number as "loses a link," which is precisely the
+        distinction a librarian needs before deleting. Render the three
+        arms separately; never render their sum.
+
+        Advisory, not a lock: this is a standalone pre-delete read that
+        takes no lock, so any of the three counts may move, in either
+        direction, before a subsequent `DELETE /library/{id}` actually
+        runs (`jobs/legacy-linkage-resolve` re-links this same data
+        every 30 minutes; ordinary catalog editing can re-link or
+        un-link a play's `album_id`/`rotation_id` by hand at any time).
+      required:
+        - direct
+        - rotation_linked
+        - legacy_linked
+      properties:
+        direct:
+          type: integer
+          description: >
+            Plays linked via `flowsheet.album_id`; unlinked (not
+            deleted) by the delete.
+        rotation_linked:
+          type: integer
+          description: >
+            Plays reachable only via `flowsheet.rotation_id` ->
+            `rotation.album_id`; unlinked by the delete's rotation
+            cascade. Excludes any play already counted in `direct`.
+        legacy_linked:
+          type: integer
+          description: >
+            Plays naming the release only by a bare
+            `flowsheet.legacy_release_id`, awaiting
+            `jobs/legacy-linkage-resolve`. Deleting STRANDS whatever is
+            still in this arm at delete time permanently rather than
+            unlinking it — see the schema description above for why
+            this is exactly the count that must never be folded into a
+            total.
+
+    CatalogDeleteActor:
+      type: object
+      description: >
+        Attribution for a catalog delete. Carries no email — `GET
+        /library/deleted` is not a listed permitted read site for a PII
+        email (see this file's `docs/pii.md`-equivalent discipline on
+        the Backend side), so callers resolve `user_id` through roster
+        admin instead.
+      properties:
+        user_id:
+          type: string
+          nullable: true
+        role:
+          type: string
+          nullable: true
+
+    CatalogDeleteEntity:
+      type: object
+      description: >
+        One captured entity in a delete batch — the artist or release
+        itself, or a resolved dependent, in FK order (parent before any
+        child that references it).
+      properties:
+        entity_kind:
+          type: string
+        table:
+          type: string
+        row:
+          type: object
+          nullable: true
+          description: The deleted parent row itself, every non-generated column.
+        children:
+          type: object
+          additionalProperties:
+            type: integer
+          description: >
+            Child table name -> COUNT of rows that referenced the
+            deleted parent, never the rows themselves. The archive's
+            own storage holds the full unprojected child rows so a
+            restore has every column it needs, but this listing is read
+            by any `catalog: ['write']` principal, not by whoever has a
+            legitimate need to see e.g. another DJ's bin contents or
+            review text.
+
+    CatalogDeleteBatch:
+      type: object
+      description: >
+        One page row of `GET /library/deleted` (WXYC/Backend-Service#2561,
+        merged) — every row `captureCatalogDeleteSnapshot` wrote under
+        one `batch_id`. `DELETE /library/artists/{id}`
+        (WXYC/Backend-Service#2562) is the first call site that groups
+        more than one entity under a batch, once it ships; `entities`
+        orders parent before child (artist before the library rows that
+        reference it).
+      required:
+        - batch_id
+        - captured_at
+        - actor
+        - entities
+        - unrecoverable
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+        captured_at:
+          type: string
+          format: date-time
+        actor:
+          $ref: '#/components/schemas/CatalogDeleteActor'
+        entities:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogDeleteEntity'
+        unrecoverable:
+          type: array
+          items:
+            type: string
+          description: >
+            Names five dependents no envelope ever captures, and a
+            restore therefore cannot bring back: `album_metadata`,
+            `library_identity`, `library_identity_source`,
+            `uncovered_release_search_markers` (all rebuilt by their
+            own jobs) and `album_review_submissions` (`ON DELETE SET
+            NULL` — the row survives unlinked). The same list on every
+            batch, not a per-batch computation.
+
+    DeletedArchivePage:
+      type: object
+      description: >
+        `GET /library/deleted`'s 200. An empty archive is a 200 with
+        `total: 0`, not a 404.
+      required:
+        - results
+        - total
+        - page
+        - totalPages
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogDeleteBatch'
+        total:
+          type: integer
+        page:
+          type: integer
+        totalPages:
+          type: integer
+
+    RestoredEntity:
+      type: object
+      description: >
+        One top-level entity `POST /library/deleted/{batchId}/restore`
+        re-inserted, in FK order (parent before any child that
+        references it). Carries the row's ORIGINAL id: a restore
+        reinserts the captured row verbatim rather than minting a new
+        primary key.
+      required:
+        - entity_kind
+        - table
+        - id
+      properties:
+        entity_kind:
+          type: string
+        table:
+          type: string
+        id:
+          type: integer
+
+    RestoreBatchResponse:
+      type: object
+      description: >
+        `POST /library/deleted/{batchId}/restore`'s 200
+        (WXYC/Backend-Service#2585, in flight — this schema is the
+        published contract, authored from the issue's spec ahead of the
+        implementation). The parent row and every captured child row
+        were re-inserted inside one transaction.
+      required:
+        - batch_id
+        - entities
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+        entities:
+          type: array
+          items:
+            $ref: '#/components/schemas/RestoredEntity'
+        code_conflict_resolution_applied:
+          type: string
+          nullable: true
+          enum: ['reassign_next_code']
+          description: >
+            Present only when the original call-code slot — the
+            genre-scoped tuple `(artist_id, genre_id, code_number,
+            upper(coalesce(code_volume_letters, '')))`, never the
+            genre-blind `(artist_id, code_number)` pair — was already
+            occupied and the caller's `code_conflict_resolution` chose
+            to take the next free code rather than decline. `null` when
+            the original slot was free and nothing needed resolving.
+        reassigned_code:
+          type: object
+          nullable: true
+          description: >
+            The call-code fields actually written, present only
+            alongside `code_conflict_resolution_applied:
+            'reassign_next_code'`. The archive record keeps the
+            ORIGINAL code either way — this is what the restored row
+            carries now, not a correction to history.
+          properties:
+            code_number:
+              type: integer
+            code_volume_letters:
+              type: string
+              nullable: true
+
+    RestoreCodeConflictRefusal:
+      type: object
+      description: >
+        `POST /library/deleted/{batchId}/restore`'s 409. The original
+        call-code slot is occupied and the request did not resolve it —
+        either `code_conflict_resolution` was omitted, or it was
+        `'decline'`. Never relocated silently and never refused silently
+        (decision 2026-09-17, mockup screen 6 in
+        `plans/classic-md-interface/mockups/delete-and-restore.html`):
+        this body names the occupying slot and the next free code so a
+        client can offer the choice, then retry with
+        `code_conflict_resolution` set.
+      required:
+        - message
+        - reason
+        - occupied_slot
+      properties:
+        message:
+          type: string
+        reason:
+          type: string
+          enum: ['code_conflict', 'restore_declined']
+          description: >
+            `code_conflict` — the slot is taken and no resolution (or an
+            ambiguous one) was supplied. `restore_declined` — the caller
+            explicitly chose `code_conflict_resolution: 'decline'`.
+        occupied_slot:
+          type: object
+          required:
+            - genre_id
+            - code_letters
+            - code_number
+          properties:
+            genre_id:
+              type: integer
+            code_letters:
+              type: string
+            code_number:
+              type: integer
+            code_volume_letters:
+              type: string
+              nullable: true
+        next_free_code:
+          type: object
+          nullable: true
+          description: >
+            The code the `reassign_next_code` resolution would take, in
+            the same genre/letters sequence. Absent when `reason:
+            restore_declined` — no future call number matters to a
+            declined restore.
+          properties:
+            code_number:
+              type: integer
 
     # ===================
     # DJ Types
@@ -11396,6 +12178,440 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
 
+  /library/artists/peek-code:
+    get:
+      x-wxyc-service: backend-service
+      summary: Peek the next artist code number for a genre and call letters
+      description: >
+        Previews the artist `code_number`
+        (`genre_artist_crossreference.artist_genre_code`) `POST
+        /library/artists` would assign — bucket MAX + 1, starting at 1
+        for an empty bucket, in the `(code_letters, genre_id)` bucket.
+        Pure read, no side effects. Shares `NextCodeNumberResponse` with
+        the release-number sibling below `/library/artists/{id}/`; see
+        that schema for why the two are one shape.
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: code_letters
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: genre_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Next available artist code number
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NextCodeNumberResponse'
+        '400':
+          description: Missing or invalid code_letters or genre_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/artists/by-code:
+    get:
+      x-wxyc-service: backend-service
+      summary: Resolve a library code to its owners, or browse a whole call-letters bucket
+      description: >
+        Two modes, selected by whether `code_number` is present.
+
+        Fully specified (`code_number` given) resolves `genre_id` +
+        `code_letters` + `code_number` to every artist filed under that
+        code — the triple is not unique (the Various-Artists shelf files
+        many distinct buckets, e.g. `Soundtracks - A`, `Soundtracks - B`,
+        under one `V/A` code), so the response is always a list, ordered
+        by `artist_name` then `id`.
+
+        Browse (`code_number` omitted) returns every artist filed under
+        the `(genre_id, code_letters)` bucket, ordered by `code_number`
+        then `artist_name` then `id` — the shelf order a librarian reads
+        to check an assigned number or spot a gap. Only an ABSENT
+        `code_number` browses: a present-but-empty `?code_number=` is
+        still a 400, because `Number('')` is `0` and `0` is a legitimate
+        V/A filing.
+
+        `code_letters` must be 1-4 characters from A-Z, 0-9, or `/` (the
+        `artists.code_letters` column domain); it is trimmed and
+        upper-cased before matching — but the column itself carries no
+        case-fold constraint and neither writer canonicalizes it the
+        same way, so a `404 code_not_assigned` here is NOT a guarantee
+        that creating an artist under the code is safe.
+
+        Deliberately NOT the same row shape as `GET /library/artists/search`
+        (`ArtistSearchMatch`), which is one field wider and reads a real
+        per-row `genre_artist_crossreference` join; this lookup never
+        joins `genres` and echoes the request's `genre_id` /
+        `code_number` back onto each row instead. See `ArtistByCodeMatch`.
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: genre_id
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2147483647
+        - name: code_letters
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^\s*[A-Za-z0-9/]{1,4}\s*$'
+        - name: code_number
+          in: query
+          required: false
+          description: >
+            Accepts 0 — the Various-Artists filings are stored with an
+            artist genre code of 0. OMIT it to browse the whole
+            `(genre_id, code_letters)` bucket instead. Sending it empty
+            (`?code_number=`) is a 400, not a browse.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 2147483647
+        - name: limit
+          in: query
+          required: false
+          description: >
+            Window size for the browse; the default is also the
+            ceiling. Validated on both modes, read only by the browse.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 500
+        - name: offset
+          in: query
+          required: false
+          description: Rows to skip in the browse order. Same both-modes validation as `limit`.
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: >
+            Fully-specified: the artists that own this code. Browse:
+            every artist in the bucket — an EMPTY LIST when the genre
+            exists but no artist is filed under those call letters,
+            deliberately not the `code_not_assigned` 404 the
+            fully-specified mode returns.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistByCodeResponse'
+        '400':
+          description: >
+            Invalid or missing genre_id or code_letters; an invalid (as
+            opposed to absent) code_number; or a malformed limit or
+            offset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: >
+            `genre_not_found` (both modes) or `code_not_assigned`
+            (fully-specified mode only) — see `ArtistByCodeError`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistByCodeError'
+
+  /library/artists/{id}:
+    get:
+      x-wxyc-service: backend-service
+      summary: Get an artist's card (BS#2156)
+      description: >
+        The artist-card field set, plus the delete-refusal dependent
+        counts (BS#2597) — see `ArtistCardWithDependentCounts`.
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: The artist card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistCardWithDependentCounts'
+        '400':
+          description: Invalid artist id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Artist not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+    patch:
+      x-wxyc-service: backend-service
+      summary: Update an artist's name or alphabetical_name (BS#2156, BS#2563)
+      description: >
+        Two writable fields, `artist_name` and `alphabetical_name`; send
+        either or both. `genre_id`, `code_letters`, and
+        `code_artist_number` are real fields on the `/wxycdb` artist-card
+        form but have no write path here — sending one is a 400 naming
+        why. See `UpdateArtistRequest` for the exact wire shape and the
+        rename's cascade behavior.
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateArtistRequest'
+      responses:
+        '200':
+          description: >
+            The refreshed artist card, in the same
+            `ArtistCardWithDependentCounts` shape the `GET` on this path
+            returns — the dependent counts are recomputed and included
+            here too, so a client can refresh its delete-control state
+            from the PATCH body without a follow-up GET. Also the
+            answer to a no-op edit (a field resubmitted at its current
+            value), which writes nothing but still answers with the
+            current counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistCardWithDependentCounts'
+        '400':
+          description: >
+            Invalid artist id, missing/non-object body, a `genre_id` /
+            `code_letters` / `code_artist_number` field with no write
+            path on this endpoint, no updatable fields provided, or an
+            `artist_name` / `alphabetical_name` that is non-string,
+            empty, or over 128 characters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Artist not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            The requested `artist_name` folds equal to a DIFFERENT
+            artist already filed in one of this artist's genres — see
+            `ArtistNameConflictError`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistNameConflictError'
+
+    delete:
+      x-wxyc-service: backend-service
+      summary: Delete an artist, refusing on any of four dependents (WXYC/Backend-Service#2562)
+      description: >
+        **WXYC/Backend-Service#2562 is in flight (open) as of this
+        declaration — this is the published contract per the
+        schema-first rule (declared before or alongside the private TS
+        type), authored from the issue's spec, not from code that may
+        not exist yet.**
+
+        Reproduces the retired `/wxycdb` `ArtistAdminServlet`'s four
+        refusals, checked in order: the artist still holds catalog
+        releases (`library.artist_id`), or is named as source or target
+        of a legacy `artist_crossreference`, or is referenced by an
+        `artist_library_crossreference` row. A `compilation_track_artist`
+        credit is NOT a refusal — that FK is `ON DELETE SET NULL` (the
+        `concerts.headlining_artist_id` precedent), so a delete drops
+        the attribution's canonicalization link rather than being
+        blocked by it. Deletes every `genre_artist_crossreference` row
+        for the artist — a multi-genre artist has one per genre
+        membership, not one row total. Captures a snapshot of the artist
+        and its resolved dependents in the same transaction
+        (WXYC/Backend-Service#2560), recoverable via `POST
+        /library/deleted/{batchId}/restore`. Mirrors `DELETE
+        /library/{id}`'s advisory-lock transaction shape and
+        four-outcome taxonomy (204 / 409 refused-on-the-merits / 503
+        retryable stand-down / 404).
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted; no body
+        '400':
+          description: Invalid artist id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Artist not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: Refused on the merits — see `ArtistDeleteRefusal`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistDeleteRefusal'
+        '503':
+          description: >
+            Stood down rather than wait on rows a live writer holds. See
+            `LockUnavailableRefusal`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockUnavailableRefusal'
+
+  /library/artists/{id}/releases:
+    get:
+      x-wxyc-service: backend-service
+      summary: List an artist's releases (BS#2156)
+      description: >
+        Offset-paginated in the same `page`/`limit` shape as `GET
+        /library/query`. Rows carry the full physical call number
+        (`code_letters` + `code_artist_number` + `code_number` +
+        `code_volume_letters`); `code_artist_number` is genre-scoped,
+        hence the per-row `genre_id`. Ordered by shelf order —
+        `code_number`, then `code_volume_letters`, then `id` as a total
+        order.
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          required: false
+          description: Zero-based page index.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: One page of the artist's releases, in shelf order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistReleasesPage'
+        '400':
+          description: Invalid artist id, page, or limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Artist not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/artists/{id}/next-release-number:
+    get:
+      x-wxyc-service: backend-service
+      summary: Peek the next release call number for an artist, in one genre (BS#2502, BS#2587)
+      description: >
+        Previews the release `code_number` a `POST /library` would
+        assign this artist within `genre_id`'s shelf —
+        MAX(`code_number`) + 1 scoped to `(artist_id, genre_id)`, and 1
+        when that shelf has no releases. Pure read, no side effects.
+
+        **`genre_id` is REQUIRED (WXYC/Backend-Service#2587, in flight —
+        this is the published contract, not yet the shipped behavior;
+        today's deployed endpoint is genre-blind and takes no query
+        parameter at all).** Call numbers are genre-scoped — an artist
+        filed under two genres has two shelves with independent
+        numbering — so a genre-blind peek can propose a number from the
+        wrong shelf (concretely: an artist with Rock releases numbered
+        1-50 and Electronic releases numbered 1-3 would get `51`
+        proposed for a new Electronic disc). Omitting `genre_id` is a
+        400; there is no genre-blind fallback by design.
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: genre_id
+          in: query
+          required: true
+          description: >
+            REQUIRED. The genre shelf to peek — normally the genre the
+            release is about to be filed under. Omitting it is a 400.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: The next release call number for the artist, on that genre's shelf
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NextCodeNumberResponse'
+        '400':
+          description: Malformed artist id, or missing/invalid genre_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Artist not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
   /library/formats:
     get:
       x-wxyc-service: backend-service
@@ -11646,6 +12862,289 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+
+    delete:
+      x-wxyc-service: backend-service
+      summary: Hard-delete a library release (BS#2112)
+      description: >
+        Irreversible. BS#2565 removed the prior 409 refusal that fired
+        when the release carried flowsheet plays — the delete now
+        proceeds regardless, and reports nothing about them on this
+        response. Those plays are still affected, just not reported
+        here: a play linked directly (`flowsheet.album_id`) or via its
+        rotation entry (`flowsheet.rotation_id` -> `rotation.album_id`)
+        just loses its link; a play linked only by a bare
+        `flowsheet.legacy_release_id` awaiting the linkage-resolve cron
+        is stranded permanently, since the delete-denylist means no
+        future library row will ever carry that legacy id for the
+        resolver to join to. `GET /library/{id}/flowsheet-play-counts`
+        is the pre-delete read that surfaces this to the librarian
+        before the delete — call it first, since by the time this delete
+        returns the confirmation screen has already been read.
+
+        Dependent rows are resolved in the same transaction as the
+        delete, and the release's `legacy_release_id` is recorded in a
+        delete-denylist so the library ETL cannot re-import it from
+        tubafrenzy. The denylist row also records the authenticated
+        subject that issued the delete. The captured snapshot is
+        recoverable via `POST /library/deleted/{batchId}/restore`
+        (WXYC/Backend-Service#2585) and listable via `GET
+        /library/deleted` (WXYC/Backend-Service#2561).
+      tags:
+        - Library
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted; no body
+        '400':
+          description: Invalid album ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: Refused on the merits — see `ReleaseDeleteRefusal`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseDeleteRefusal'
+        '503':
+          description: >
+            Stood down rather than wait on rows a live writer holds. See
+            `LockUnavailableRefusal`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockUnavailableRefusal'
+
+  /library/{id}/flowsheet-play-counts:
+    get:
+      x-wxyc-service: backend-service
+      summary: "Pre-delete read: the release's flowsheet plays, by arm (BS#2592)"
+      description: >
+        Answers "what would deleting this release damage?" for the
+        confirmation screen `DELETE /library/{id}` cannot answer on its
+        own response. See `FlowsheetPlayCounts` for why the three arms
+        are disjoint and must never be summed. Gated `catalog:['read']`,
+        not `catalog:['write']`: the DELETE it precedes is write-gated
+        because it ACTS, while this only counts — a caller who learns a
+        number still has to clear the DELETE's own bar to use it.
+      tags:
+        - Library
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: The release's flowsheet plays, by arm — see `FlowsheetPlayCounts`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlowsheetPlayCounts'
+        '404':
+          description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/deleted:
+    get:
+      x-wxyc-service: backend-service
+      summary: List the catalog-delete archive (WXYC/Backend-Service#2561)
+      description: >
+        The read half of the `catalog_delete_snapshot` archive `DELETE
+        /library/{id}` (and, once it ships, `DELETE
+        /library/artists/{id}`) writes to. Newest batch first. Gated
+        `catalog:['write']` — the same bar as the deletes that write
+        these rows, not the `catalog:['read']` most of this router's
+        catalog listings use: a batch's `entities[].row` is the deleted
+        card's own content, and `actor` names who deleted it, which is
+        audit data rather than a DJ-facing read. See
+        `CatalogDeleteBatch` for the per-batch shape, including the
+        projected-not-raw `children` counts and the fixed
+        `unrecoverable` dependent list.
+      tags:
+        - Library
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Zero-based page index.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: search
+          in: query
+          required: false
+          description: >
+            Plain substring match (case-insensitive) over the captured
+            entity's name fields (`album_title`, `artist_name`,
+            `alternate_artist_name`) — NOT the field-scoped `artist:`/
+            `album:` syntax `GET /library/query`'s `q` parses. Omitted
+            or blank means no filter.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: >
+            One page of delete batches. An empty archive is a 200 with
+            `total: 0`, not a 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedArchivePage'
+        '400':
+          description: Invalid page, limit, or search
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/deleted/{batchId}/restore:
+    post:
+      x-wxyc-service: backend-service
+      summary: Restore a captured delete batch (WXYC/Backend-Service#2585)
+      description: >
+        **WXYC/Backend-Service#2585 is in flight (open) as of this
+        declaration — this is the published contract per the
+        schema-first rule, authored from the issue's spec ahead of the
+        implementation. Field names below are this contract's choice,
+        not a transcription of shipped code.**
+
+        Batch-scoped, not row-scoped: an artist and its releases were
+        deleted together and must come back together, or the releases
+        return orphaned under an artist id that no longer exists.
+        Replays the captured subtree in FK order, parent first, in one
+        transaction — a resolution that cannot be applied rolls the
+        whole batch back. Five dependents are deliberately never
+        synthesized on restore (the same `unrecoverable` list `GET
+        /library/deleted` reports): `album_metadata`,
+        `library_identity`, `library_identity_source`,
+        `uncovered_release_search_markers` (all four rebuilt by their
+        own jobs) and `album_review_submissions` (`ON DELETE SET NULL`
+        — the row survived the delete unlinked, so there is nothing to
+        replay, and its PII-bearing `reviewer_raw` column is never read
+        by this endpoint).
+
+        Restoring into a taken call code ASKS rather than silently
+        relocating or silently refusing — decided 2026-09-17, mockup
+        screen 6 in
+        `plans/classic-md-interface/mockups/delete-and-restore.html`,
+        and the ordinary path rather than an edge case, since retention
+        is permanent and a card deleted long ago usually finds its slot
+        occupied. "Taken" is evaluated against the full genre-scoped
+        slot tuple `(artist_id, genre_id, code_number,
+        upper(coalesce(code_volume_letters, '')))` — the same key
+        `jobs/library-call-number-dedup` merges on — never the
+        genre-blind `(artist_id, code_number)` pair, which production
+        measurement found gives roughly 11x too many false collisions.
+        See `RestoreCodeConflictRefusal` for the conflict shape and
+        `code_conflict_resolution` below for the two-armed resolution.
+      tags:
+        - Library
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        description: >
+          Optional on the first attempt. Supply
+          `code_conflict_resolution` up front to pre-commit to an
+          answer, or omit it and let a 409 name the occupied slot and
+          the next free code, then retry with it set.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code_conflict_resolution:
+                  type: string
+                  enum: ['reassign_next_code', 'decline']
+                  description: >
+                    Resolution for a taken original call-code slot.
+                    `reassign_next_code` takes the next free code in
+                    that genre/letters sequence and writes it onto the
+                    restored row — the archive record keeps the
+                    original code regardless. `decline` aborts the
+                    whole batch restore rather than relocating or
+                    partially restoring it. Irrelevant, and ignored,
+                    when the original slot turns out to still be free.
+      responses:
+        '200':
+          description: Batch restored — see `RestoreBatchResponse`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreBatchResponse'
+        '400':
+          description: Invalid batchId, or an unrecognized code_conflict_resolution value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No delete batch with that batchId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            The original call-code slot is occupied and unresolved, or
+            the caller explicitly declined — see
+            `RestoreCodeConflictRefusal`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreCodeConflictRefusal'
+        '503':
+          description: >
+            Stood down rather than wait on rows a live writer holds,
+            mirroring the delete paths. See `LockUnavailableRefusal`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockUnavailableRefusal'
 
   /library/{id}/missing:
     patch:
