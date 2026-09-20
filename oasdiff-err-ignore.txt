@@ -39,3 +39,15 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
+
+# wxyc-shared#512: the handler has enforced genre_id >= 1 via
+# parseCodeQueryInt(..., 1) for as long as it has parsed the value; the
+# sibling /library/artists/by-code's genre_id already declares this same
+# bound. This is a correction that brings the contract in line with what the
+# server has always done, not a new narrowing decision.
+get /library/artists/{id}/next-release-number for the `query` request parameter `genre_id`, the min was set to `1.00`
+
+# wxyc-shared#512: RestoreUnrestorableKindRefusal is a new member of the 409
+# oneOf, alongside the two the handler already served — additive, not a
+# narrowing of anything a client already decoded successfully.
+post /library/deleted/{batchId}/restore added `#/components/schemas/RestoreUnrestorableKindRefusal` to the response body `oneOf` list for the response status `409`

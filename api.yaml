@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.1.1
+  version: 10.2.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4571,10 +4571,20 @@ components:
         - actor
         - entities
         - unrecoverable
+        - restorable
       properties:
         batch_id:
           type: string
           format: uuid
+        restorable:
+          type: boolean
+          description: >
+            Whether this batch's `entity_kind` has a restore plan at all
+            (WXYC/Backend-Service#2616) — an `artist` batch reads `false`
+            today, since no replay exists for it. This says the kind is
+            plannable, not that a restore of this specific batch will
+            succeed: a restorable kind can still fail on a corrupt
+            envelope.
         captured_at:
           type: string
           format: date-time
@@ -4854,6 +4864,28 @@ components:
             type: integer
           description: >
             The captured `entity_id`s already present in the catalog.
+
+    RestoreUnrestorableKindRefusal:
+      type: object
+      description: >
+        `POST /library/deleted/{batchId}/restore`'s 409 when the batch
+        holds an `entity_kind` with no restore plan (WXYC/Backend-Service#2616)
+        — an `artist` batch today. Permanent, not retryable: `GET
+        /library/deleted`'s `restorable` field already read `false` for
+        this same batch, off the same restore-plan set, so a client
+        never has to press the button to learn this.
+      required:
+        - message
+        - reason
+        - entity_kind
+      properties:
+        message:
+          type: string
+        reason:
+          type: string
+          enum: ['unrestorable_kind']
+        entity_kind:
+          type: string
 
     # ===================
     # DJ Types
@@ -12753,6 +12785,7 @@ paths:
             release is about to be filed under. Omitting it is a 400.
           schema:
             type: integer
+            minimum: 1
       responses:
         '200':
           description: The next release call number for the artist, on that genre's shelf
@@ -13019,6 +13052,16 @@ paths:
                 $ref: '#/components/schemas/AlbumDetail'
         '404':
           description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            `library_slot_conflict`: the PATCH changes `genre_id`, and
+            the resulting `(artist_id, genre_id, code_number,
+            code_volume_letters)` slot is already occupied by another
+            release. Only a genre CHANGE triggers this check.
           content:
             application/json:
               schema:
@@ -13331,19 +13374,24 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: >
-            Two different refusals, told apart by `reason`.
+            Three different refusals, told apart by `reason`.
             `restore_declined` — the caller sent `resolution: 'decline'`
             over a taken slot, so the batch was aborted and nothing was
             written. `already_restored` — the batch is already back in
             the catalog, the ordinary answer to a double-click or a
             retry. The second must NOT be handled as a code conflict:
-            there is no decision left to ask for.
+            there is no decision left to ask for. `unrestorable_kind` —
+            the batch holds an `entity_kind` with no restore plan (an
+            `artist` batch today); permanent, not retryable, and
+            `GET /library/deleted`'s `restorable` field already said so
+            for the same batch.
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: '#/components/schemas/RestoreDeclinedRefusal'
                   - $ref: '#/components/schemas/RestoreAlreadyRestoredRefusal'
+                  - $ref: '#/components/schemas/RestoreUnrestorableKindRefusal'
         '503':
           description: >
             Stood down rather than wait on rows a live writer holds,

@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.1.1');
+      expect(spec.info.version).toBe('10.2.0');
     });
 
     it('should have components section', () => {
@@ -7193,14 +7193,16 @@ describe('OpenAPI Specification', () => {
         ]);
       });
 
-      // Two different 409s. Handling `already_restored` as a code conflict
-      // prompts for a call-number decision on a batch that is already fully
-      // back in the catalog, which is what a lenient decoder does when the
-      // reason is outside a declared enum.
-      it('declares both 409 refusals, so already_restored is not read as a code conflict', () => {
+      // Three different 409s (wxyc-shared#512 added the third). Handling
+      // `already_restored` as a code conflict prompts for a call-number
+      // decision on a batch that is already fully back in the catalog,
+      // which is what a lenient decoder does when the reason is outside a
+      // declared enum.
+      it('declares all three 409 refusals, so already_restored is not read as a code conflict', () => {
         expect(oneOfNames(responseSchema(restorePath, 'post', '409')).sort()).toEqual([
           'RestoreAlreadyRestoredRefusal',
           'RestoreDeclinedRefusal',
+          'RestoreUnrestorableKindRefusal',
         ]);
       });
 
@@ -7504,6 +7506,62 @@ describe('OpenAPI Specification', () => {
           unknown
         >;
         expect(Object.keys(responses).sort()).toEqual(['200', '400', '404']);
+      });
+    });
+
+    // WXYC/wxyc-shared#512: four wire elements the handlers already serve
+    // that the contract omitted -- verified against the merged
+    // Backend-Service handlers, not this ticket's prose.
+    describe('CatalogDeleteBatch.restorable (wxyc-shared#512)', () => {
+      // `restorable` is computed from the batch's entity_kind, so it means
+      // "this kind has a restore plan," not "this row will restore" -- a
+      // restorable kind can still fail on a corrupt envelope. Pinning the
+      // required-ness AND the plan-existence wording, not restore-success
+      // wording, both matter: reverting either one is a real regression.
+      it('requires restorable as a boolean, described as plan-existence rather than restore success', () => {
+        expect(requiredKeysOf('CatalogDeleteBatch')).toContain('restorable');
+        expect(propertyOf('CatalogDeleteBatch', 'restorable')?.type).toBe('boolean');
+
+        const description = String(propertyOf('CatalogDeleteBatch', 'restorable')?.description);
+        expect(description).toMatch(/restore plan/i);
+        expect(description).not.toMatch(/this row will restore/i);
+      });
+    });
+
+    describe('RestoreUnrestorableKindRefusal (wxyc-shared#512)', () => {
+      // The handler sends exactly one reason literal for this branch --
+      // a wider enum would accept refusals the endpoint never emits.
+      it('requires message, reason and entity_kind, with reason pinned to the single literal the handler sends', () => {
+        expect(requiredKeysOf('RestoreUnrestorableKindRefusal').sort()).toEqual(
+          ['entity_kind', 'message', 'reason'].sort()
+        );
+        expect(propertyOf('RestoreUnrestorableKindRefusal', 'reason')?.enum).toEqual(['unrestorable_kind']);
+      });
+    });
+
+    describe('PATCH /library/{id} (wxyc-shared#512)', () => {
+      // The handler throws WxycError(..., 409, { code: 'library_slot_conflict' }),
+      // and toApiErrorResponse() projects that as { message, code } -- the
+      // existing ApiErrorResponse shape, so this is a response addition,
+      // not a new schema.
+      it('declares a 409 referencing the existing ApiErrorResponse', () => {
+        const schemaRef = responseSchema('/library/{id}', 'patch', '409');
+        expect(schemaRef.$ref).toBe('#/components/schemas/ApiErrorResponse');
+      });
+    });
+
+    describe('GET /library/artists/{id}/next-release-number genre_id (wxyc-shared#512)', () => {
+      // The handler validates via parseCodeQueryInt(..., 1); the sibling
+      // /library/artists/by-code's genre_id already declares this same
+      // bound, so this is consistency with a sibling parameter.
+      it('declares minimum: 1 on genre_id, matching the handler bound', () => {
+        const parameters = operation('/library/artists/{id}/next-release-number', 'get').parameters as Array<
+          Record<string, unknown>
+        >;
+        const genre = parameters.find((parameter) => parameter.name === 'genre_id');
+        if (!genre) throw new Error('no genre_id parameter found');
+        const schemaOf = genre.schema as Record<string, unknown>;
+        expect(schemaOf.minimum).toBe(1);
       });
     });
   });
