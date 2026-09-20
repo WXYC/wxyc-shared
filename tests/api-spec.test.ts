@@ -7111,4 +7111,200 @@ describe('OpenAPI Specification', () => {
       expect(vanished).toEqual([]);
     });
   });
+  // Every assertion here pins a declaration against the handler that serves
+  // it, because six of them were wrong at once and every one failed the same
+  // way: silently, in a generated client, on a screen a librarian was using to
+  // make an irreversible decision. Nothing in this suite covered the new
+  // operations, so a spec authored from an issue body rather than from the
+  // shipped code could not be contradicted by a test.
+  describe('Catalog delete / restore declarations match the handlers (wxyc-shared#503)', () => {
+    const restorePath = '/library/deleted/{batchId}/restore';
+
+    // These THROW on absence rather than asserting it, because
+    // `expect(...).toBeDefined()` does not narrow the type for the caller --
+    // it satisfies the runtime and leaves every subsequent access a
+    // strict-null error. A throw is also the right failure: a missing
+    // operation makes every assertion below it meaningless, so naming the
+    // path once beats a cascade of undefined-property failures.
+    function operation(path: string, method: string): Record<string, unknown> {
+      const item = (spec.paths as Record<string, Record<string, unknown> | undefined>)[path];
+      if (!item) throw new Error(`api.yaml declares no path ${path}`);
+      const op = item[method] as Record<string, unknown> | undefined;
+      if (!op) throw new Error(`api.yaml declares no ${method.toUpperCase()} on ${path}`);
+      return op;
+    }
+
+    function responseSchema(path: string, method: string, status: string): Record<string, unknown> {
+      const responses = operation(path, method).responses as Record<
+        string,
+        Record<string, unknown> | undefined
+      >;
+      const response = responses[status];
+      if (!response) throw new Error(`${method.toUpperCase()} ${path} declares no ${status}`);
+      const content = response.content as Record<string, Record<string, unknown> | undefined> | undefined;
+      const json = content?.['application/json'];
+      if (!json) throw new Error(`${method.toUpperCase()} ${path} ${status} declares no JSON body`);
+      return json.schema as Record<string, unknown>;
+    }
+
+    /** The schema names a `oneOf` response branches over, in declaration order. */
+    function oneOfNames(schema: Record<string, unknown>): string[] {
+      const branches = (schema.oneOf as Array<{ $ref?: string }> | undefined) ?? [];
+      return branches.map((branch) => (branch.$ref ?? '').split('/').pop() ?? '');
+    }
+
+    describe('POST /library/deleted/{batchId}/restore', () => {
+      // The field name is the whole contract for this request. Declared as
+      // `code_conflict_resolution`, every generated client sent a key the
+      // handler does not read, so `resolution` came back undefined and the
+      // answer was the same 400 an empty body gets -- an unreachable endpoint
+      // whose only working spelling was undocumented.
+      it('names the resolution field `resolution`, with the handler’s two values', () => {
+        const body = operation(restorePath, 'post').requestBody as Record<string, unknown>;
+        const content = body.content as Record<string, Record<string, unknown> | undefined>;
+        const json = content['application/json'];
+        if (!json) throw new Error('the restore requestBody declares no JSON body');
+        const schema = json.schema as Record<string, unknown>;
+        const properties = schema.properties as Record<string, Record<string, unknown> | undefined>;
+
+        expect(Object.keys(properties)).toEqual(['resolution']);
+        expect(properties.resolution?.enum).toEqual(['next_free_code', 'decline']);
+      });
+
+      // A 400, not a 409: the request is incomplete rather than in conflict
+      // with server state, and the same batch succeeds the moment `resolution`
+      // is supplied. The branch must be typed -- collapsing it to the bare
+      // error shape discards `conflicts` and leaves the screen nothing to ask
+      // the question from.
+      it('declares the slot-conflict refusal on the 400, alongside the malformed-request shape', () => {
+        expect(oneOfNames(responseSchema(restorePath, 'post', '400'))).toEqual([
+          'RestoreResolutionRequiredRefusal',
+          'ApiErrorResponse',
+        ]);
+      });
+
+      // Two different 409s. Handling `already_restored` as a code conflict
+      // prompts for a call-number decision on a batch that is already fully
+      // back in the catalog, which is what a lenient decoder does when the
+      // reason is outside a declared enum.
+      it('declares both 409 refusals, so already_restored is not read as a code conflict', () => {
+        expect(oneOfNames(responseSchema(restorePath, 'post', '409')).sort()).toEqual([
+          'RestoreAlreadyRestoredRefusal',
+          'RestoreDeclinedRefusal',
+        ]);
+      });
+
+      it('declares the 503 stand-down and the 404, and no other statuses', () => {
+        const responses = operation(restorePath, 'post').responses as Record<string, unknown>;
+        expect(Object.keys(responses).sort()).toEqual(['200', '400', '404', '409', '503']);
+      });
+    });
+
+    describe('RestoredEntity', () => {
+      // Declared `id`; the wire sends `entity_id`. Every generated client that
+      // is non-optional by default -- Swift Codable, kotlinx.serialization --
+      // throws on the missing required key, so a restore that SUCCEEDED
+      // surfaced as a decode error.
+      it('requires the keys the handler emits, and never a bare `id`', () => {
+        expect(requiredKeysOf('RestoredEntity').sort()).toEqual(
+          ['children', 'entity_id', 'entity_kind', 'relocated_code_number', 'table'].sort()
+        );
+        expect(propertyKeysOf('RestoredEntity')).not.toContain('id');
+      });
+
+      // The relocation answer is per entity, because only the entities whose
+      // own slot was taken move.
+      it('carries the relocation result as a nullable per-entity code number', () => {
+        const relocated = propertyOf('RestoredEntity', 'relocated_code_number');
+        expect(relocated?.type).toBe('integer');
+        expect(relocated?.nullable).toBe(true);
+      });
+    });
+
+    describe('RestoreBatchResponse', () => {
+      // Both were authored from the issue body and neither is ever emitted, so
+      // a consumer reading `reassigned_code` got null while the real value sat
+      // in an undeclared field on each entity.
+      it('declares no batch-level resolution fields the handler never sends', () => {
+        const keys = propertyKeysOf('RestoreBatchResponse');
+        expect(keys.sort()).toEqual(['batch_id', 'entities']);
+        expect(keys).not.toContain('code_conflict_resolution_applied');
+        expect(keys).not.toContain('reassigned_code');
+      });
+    });
+
+    describe('RestoreSlotConflict', () => {
+      it('requires exactly the seven fields the handler puts on each conflict', () => {
+        expect(requiredKeysOf('RestoreSlotConflict').sort()).toEqual(
+          [
+            'artist_id',
+            'code_number',
+            'code_volume_letters',
+            'entity_id',
+            'genre_id',
+            'next_free_code_number',
+            'occupied_by_library_id',
+          ].sort()
+        );
+      });
+
+      // Deliberately absent: the shelf letters belong to the artist, not the
+      // release, so a conflict row has no `code_letters` to carry. The earlier
+      // declaration required one, which no reply could satisfy.
+      it('carries no code_letters', () => {
+        expect(propertyKeysOf('RestoreSlotConflict')).not.toContain('code_letters');
+      });
+    });
+
+    describe('ArtistDeleteRefusal', () => {
+      // Declared as the full five-count dependent card via allOf; the handler
+      // answers three fields. A client generated from the old declaration
+      // required artist_id, artist_name, alphabetical_name, genre_id,
+      // code_letters, code_artist_number and five *_count fields on a body
+      // carrying none of them -- so the decode failed outright and `count`,
+      // the one number the refusal exists to communicate, was untyped.
+      it('declares the three fields the handler answers with, not the dependent-count card', () => {
+        expect(requiredKeysOf('ArtistDeleteRefusal').sort()).toEqual(['count', 'message', 'reason']);
+        expect(propertyKeysOf('ArtistDeleteRefusal').sort()).toEqual(['count', 'message', 'reason']);
+      });
+
+      it('keeps the four refusal reasons, and only those', () => {
+        expect(propertyOf('ArtistDeleteRefusal', 'reason')?.enum).toEqual([
+          'artist_has_releases',
+          'artist_crossreference_source',
+          'artist_crossreference_target',
+          'artist_library_crossreference',
+        ]);
+      });
+    });
+
+    describe('GET /library/artists/{id}/next-release-number', () => {
+      // A genre-blind peek proposes a number from the wrong shelf, and the
+      // librarian writes it on a card. The parameter is required because the
+      // handler 400s without it.
+      it('requires genre_id as a query parameter', () => {
+        const parameters = operation('/library/artists/{id}/next-release-number', 'get')
+          .parameters as Array<Record<string, unknown>>;
+        const genre = parameters.find((parameter) => parameter.name === 'genre_id');
+
+        expect(genre).toBeDefined();
+        expect(genre?.in).toBe('query');
+        expect(genre?.required).toBe(true);
+      });
+    });
+
+    describe('GET /library/{id}/flowsheet-play-counts', () => {
+      // `type: integer` on the path parameter is wider than int4, so the
+      // handler 400s on a value it permits. Undeclared, the delete
+      // confirmation screen -- the one caller -- surfaces that as an
+      // unexpected-response error rather than a bad request.
+      it('declares the 400 its id parser can raise', () => {
+        const responses = operation('/library/{id}/flowsheet-play-counts', 'get').responses as Record<
+          string,
+          unknown
+        >;
+        expect(Object.keys(responses).sort()).toEqual(['200', '400', '404']);
+      });
+    });
+  });
 });
