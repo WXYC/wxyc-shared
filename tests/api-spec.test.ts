@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.1.0');
+      expect(spec.info.version).toBe('10.1.1');
     });
 
     it('should have components section', () => {
@@ -7290,6 +7290,72 @@ describe('OpenAPI Specification', () => {
         expect(genre).toBeDefined();
         expect(genre?.in).toBe('query');
         expect(genre?.required).toBe(true);
+      });
+
+      // WXYC/Backend-Service#2599 is a PR number, not a fact about the
+      // deployed handler -- it can merge, get renumbered, or be superseded,
+      // and the sentence would still read as shipped. The description must
+      // describe the pending scoping by its observable effect (an
+      // unscoped server ignores genre_id) rather than by citing a PR that
+      // has not merged (wxyc-shared#510).
+      it('does not claim the genre scoping shipped as a specific PR', () => {
+        const description = String(operation('/library/artists/{id}/next-release-number', 'get').description);
+        expect(description).not.toMatch(/shipped as WXYC\/Backend-Service#2599/);
+        expect(description).toMatch(/ignores? `?genre_id`?/i);
+      });
+    });
+
+    describe('CatalogDeleteBatch (wxyc-shared#510)', () => {
+      // The artist delete has shipped and never groups more than one entity
+      // -- it refuses outright with a 409 artist_has_releases rather than
+      // capturing the artist alongside any release it holds. The old prose
+      // described the delete as not yet shipped and as the future call site
+      // that groups multiple entities, both false once #2562 shipped.
+      it('does not describe the artist delete as unshipped or batch-grouping', () => {
+        const description = String(
+          (spec.components.schemas.CatalogDeleteBatch as { description?: string }).description
+        );
+        expect(description).not.toMatch(/once it ships/);
+        expect(description).not.toMatch(/is the first call site that\s+groups\s+more than one entity/);
+      });
+
+      // Pin the thing a consumer acts on: `unrecoverable` is declared per
+      // entity_kind, not as a constant, and both table lists are spelled
+      // out so a librarian reading the archive screen sees the right five
+      // names for the batch they're looking at. Tamper-verified: reverting
+      // this description to "The same list on every batch, not a per-batch
+      // computation." makes this test fail.
+      it('declares unrecoverable as depending on entity_kind, with both table lists named', () => {
+        const description = String(propertyOf('CatalogDeleteBatch', 'unrecoverable')?.description);
+
+        expect(description).toMatch(/depends on the batch's `entity_kind`/);
+        expect(description).not.toMatch(/same list on every batch/);
+
+        for (const table of [
+          'album_metadata',
+          'library_identity',
+          'library_identity_source',
+          'uncovered_release_search_markers',
+          'album_review_submissions',
+        ]) {
+          expect(description).toContain(table);
+        }
+        for (const table of [
+          'artist_search_alias',
+          'artist_similar_artists',
+          'artist_station_plays',
+          'concerts',
+          'concert_performers',
+        ]) {
+          expect(description).toContain(table);
+        }
+      });
+    });
+
+    describe('GET /library/deleted (wxyc-shared#510)', () => {
+      it('does not hedge the artist delete as unshipped', () => {
+        const description = String(operation('/library/deleted', 'get').description);
+        expect(description).not.toMatch(/once it ships/);
       });
     });
 

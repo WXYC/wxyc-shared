@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.1.0
+  version: 10.1.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4556,10 +4556,13 @@ components:
       description: >
         One page row of `GET /library/deleted` (WXYC/Backend-Service#2561,
         merged) — every row `captureCatalogDeleteSnapshot` wrote under
-        one `batch_id`. `DELETE /library/artists/{id}`
-        (WXYC/Backend-Service#2562) is the first call site that groups
-        more than one entity under a batch, once it ships; `entities`
-        orders parent before child (artist before the library rows that
+        one `batch_id`. Every batch holds exactly one entity today: the
+        release delete captures one release, and `DELETE
+        /library/artists/{id}` (WXYC/Backend-Service#2562, shipped)
+        refuses outright with a 409 `artist_has_releases` rather than
+        capturing the artist alongside any release it holds. `entities`
+        orders parent before child for the future call site that does
+        group more than one (artist before the library rows that
         reference it).
       required:
         - batch_id
@@ -4585,13 +4588,20 @@ components:
           items:
             type: string
           description: >
-            Names five dependents no envelope ever captures, and a
-            restore therefore cannot bring back: `album_metadata`,
-            `library_identity`, `library_identity_source`,
-            `uncovered_release_search_markers` (all rebuilt by their
-            own jobs) and `album_review_submissions` (`ON DELETE SET
-            NULL` — the row survives unlinked). The same list on every
-            batch, not a per-batch computation.
+            Names the dependents no envelope ever captures, and a
+            restore therefore cannot bring back. **It depends on the
+            batch's `entity_kind`** — a release and an artist lose
+            entirely different tables, so this is not a constant.
+
+            For a `library` batch: `album_metadata`, `library_identity`,
+            `library_identity_source`, `uncovered_release_search_markers`
+            (all four rebuilt by their own jobs) and
+            `album_review_submissions` (`ON DELETE SET NULL` — the row
+            survives unlinked).
+
+            For an `artist` batch: `artist_search_alias`,
+            `artist_similar_artists`, `artist_station_plays`, `concerts`
+            and `concert_performers`.
 
     DeletedArchivePage:
       type: object
@@ -12720,21 +12730,23 @@ paths:
 
 
         **Deploy order matters here, and getting it wrong is silent.**
-        The genre scoping is WXYC/Backend-Service#2587 (shipped as
-        WXYC/Backend-Service#2599). A server from before that change
-        accepts the request, IGNORES `genre_id`, and answers 200 with an
-        artist-wide MAX+1 — so a client cannot tell a genre-scoped answer
-        from a genre-blind one by inspecting the response, and the number
-        it shows gets written onto a physical card that is then filed in
-        the wrong place. There is no version field on the wire to check.
+        The genre scoping is WXYC/Backend-Service#2587, pending. Until
+        the handler passes `genre_id` through to its number generator, a
+        deployed server accepts the request, IGNORES `genre_id`, and
+        answers 200 with an artist-wide MAX+1 — so a client cannot tell a
+        genre-scoped answer from a genre-blind one by inspecting the
+        response, and the number it shows gets written onto a physical
+        card that is then filed in the wrong place. There is no version
+        field on the wire to check.
 
 
         A client must therefore treat this operation's genre scoping as
-        guaranteed only against a Backend at or past that change, and the
-        contract version it pins is the signal — not the 200 body. The
-        safe rollout is client-first: sending `genre_id` to an older
-        server is harmless (ignored), whereas deploying the required
-        parameter ahead of the clients 400s every peek.
+        guaranteed only once a deployed Backend's number generator
+        actually reads `genre_id`, and the contract version it pins is
+        the signal — not the 200 body. The safe rollout is client-first:
+        sending `genre_id` to a server that still ignores it is harmless,
+        whereas deploying the required parameter ahead of the clients
+        400s every peek.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
         - BearerAuth: []
@@ -13148,16 +13160,15 @@ paths:
       summary: List the catalog-delete archive (WXYC/Backend-Service#2561)
       description: >
         The read half of the `catalog_delete_snapshot` archive `DELETE
-        /library/{id}` (and, once it ships, `DELETE
-        /library/artists/{id}`) writes to. Newest batch first. Gated
-        `catalog:['write']` — the same bar as the deletes that write
-        these rows, not the `catalog:['read']` most of this router's
-        catalog listings use: a batch's `entities[].row` is the deleted
-        card's own content, and `actor` names who deleted it, which is
-        audit data rather than a DJ-facing read. See
-        `CatalogDeleteBatch` for the per-batch shape, including the
-        projected-not-raw `children` counts and the fixed
-        `unrecoverable` dependent list.
+        /library/{id}` and `DELETE /library/artists/{id}` write to.
+        Newest batch first. Gated `catalog:['write']` — the same bar as
+        the deletes that write these rows, not the `catalog:['read']`
+        most of this router's catalog listings use: a batch's
+        `entities[].row` is the deleted card's own content, and `actor`
+        names who deleted it, which is audit data rather than a
+        DJ-facing read. See `CatalogDeleteBatch` for the per-batch shape,
+        including the projected-not-raw `children` counts and the
+        per-`entity_kind` `unrecoverable` dependent list.
       tags:
         - Library
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
