@@ -4561,9 +4561,10 @@ components:
         /library/artists/{id}` (WXYC/Backend-Service#2562, shipped)
         refuses outright with a 409 `artist_has_releases` rather than
         capturing the artist alongside any release it holds. `entities`
-        orders parent before child for the future call site that does
-        group more than one (artist before the library rows that
-        reference it).
+        is always ordered parent before child (an artist before any
+        library row that references it), the same ordering every batch
+        in this archive keeps, even though no writer today produces more
+        than one entity for it to order.
       required:
         - batch_id
         - captured_at
@@ -4588,20 +4589,18 @@ components:
           items:
             type: string
           description: >
-            Names the dependents no envelope ever captures, and a
-            restore therefore cannot bring back. **It depends on the
-            batch's `entity_kind`** — a release and an artist lose
-            entirely different tables, so this is not a constant.
+            Names the dependents no envelope ever captures, so a restore
+            cannot bring them back. It depends on what kind of entity
+            the batch holds (`entities[].entity_kind`) — a release and
+            an artist lose different tables, not one constant list.
 
             For a `library` batch: `album_metadata`, `library_identity`,
-            `library_identity_source`, `uncovered_release_search_markers`
-            (all four rebuilt by their own jobs) and
-            `album_review_submissions` (`ON DELETE SET NULL` — the row
-            survives unlinked).
+            `library_identity_source`, `uncovered_release_search_markers`,
+            `album_review_submissions`.
 
             For an `artist` batch: `artist_search_alias`,
-            `artist_similar_artists`, `artist_station_plays`, `concerts`
-            and `concert_performers`.
+            `artist_similar_artists`, `artist_station_plays`, `concerts`,
+            `concert_performers`.
 
     DeletedArchivePage:
       type: object
@@ -12591,12 +12590,6 @@ paths:
       x-wxyc-service: backend-service
       summary: Delete an artist, refusing on any of four dependents (WXYC/Backend-Service#2562)
       description: >
-        **WXYC/Backend-Service#2562 is in flight (open) as of this
-        declaration — this is the published contract per the
-        schema-first rule (declared before or alongside the private TS
-        type), authored from the issue's spec, not from code that may
-        not exist yet.**
-
         Reproduces the retired `/wxycdb` `ArtistAdminServlet`'s four
         refusals, checked in order: the artist still holds catalog
         releases (`library.artist_id`), or is named as source or target
@@ -12609,9 +12602,9 @@ paths:
         for the artist — a multi-genre artist has one per genre
         membership, not one row total. Captures a snapshot of the artist
         and its resolved dependents in the same transaction
-        (WXYC/Backend-Service#2560), recoverable via `POST
-        /library/deleted/{batchId}/restore`. Mirrors `DELETE
-        /library/{id}`'s advisory-lock transaction shape and
+        (WXYC/Backend-Service#2560), but the batch is not restorable
+        through `POST /library/deleted/{batchId}/restore`. Mirrors
+        `DELETE /library/{id}`'s advisory-lock transaction shape and
         four-outcome taxonomy (204 / 409 refused-on-the-merits / 503
         retryable stand-down / 404).
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
@@ -12713,7 +12706,7 @@ paths:
   /library/artists/{id}/next-release-number:
     get:
       x-wxyc-service: backend-service
-      summary: Peek the next release call number for an artist, in one genre (BS#2502, BS#2587)
+      summary: Peek the next release call number for an artist
       description: >
         Previews the release `code_number` a `POST /library` would
         assign this artist within `genre_id`'s shelf —
@@ -12729,24 +12722,20 @@ paths:
         genre-blind fallback by design.
 
 
-        **Deploy order matters here, and getting it wrong is silent.**
-        The genre scoping is WXYC/Backend-Service#2587, pending. Until
-        the handler passes `genre_id` through to its number generator, a
-        deployed server accepts the request, IGNORES `genre_id`, and
-        answers 200 with an artist-wide MAX+1 — so a client cannot tell a
-        genre-scoped answer from a genre-blind one by inspecting the
-        response, and the number it shows gets written onto a physical
-        card that is then filed in the wrong place. There is no version
-        field on the wire to check.
-
-
-        A client must therefore treat this operation's genre scoping as
-        guaranteed only once a deployed Backend's number generator
-        actually reads `genre_id`, and the contract version it pins is
-        the signal — not the 200 body. The safe rollout is client-first:
-        sending `genre_id` to a server that still ignores it is harmless,
-        whereas deploying the required parameter ahead of the clients
-        400s every peek.
+        **A 200 does not prove the number was genre-scoped.** A client
+        cannot tell from the response body alone whether that number was
+        chosen within one genre's shelf or across every genre the artist
+        is filed under, and the contract version it pins does not settle
+        that either, since a deploy can lag a contract publish. A
+        generator not yet scoped by genre computes an artist-wide MAX+1
+        regardless of what a client sends, and may accept the request
+        even when `genre_id` is missing rather than answering the
+        declared 400. Sending `genre_id` costs nothing either way — it
+        cannot break the request, and it cannot make a genre-blind
+        generator answer correctly — so send it always, and never read a
+        200 as proof of scoping. Deploy client-first: requiring
+        `genre_id` on the server before every client sends it would 400
+        every peek from an unupdated client.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
         - BearerAuth: []

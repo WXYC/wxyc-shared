@@ -7147,6 +7147,16 @@ describe('OpenAPI Specification', () => {
       return json.schema as Record<string, unknown>;
     }
 
+    // Matches `operation`'s throw-on-absence shape: a missing schema makes
+    // every assertion below it meaningless, so naming it once beats a
+    // cascade of undefined-property failures. Reaches a schema's OWN
+    // description (not a property's, which `propertyOf` already covers).
+    function schema(name: string): Record<string, unknown> {
+      const found = (spec.components.schemas as Record<string, Record<string, unknown> | undefined>)[name];
+      if (!found) throw new Error(`api.yaml declares no schema ${name}`);
+      return found;
+    }
+
     /** The schema names a `oneOf` response branches over, in declaration order. */
     function oneOfNames(schema: Record<string, unknown>): string[] {
       const branches = (schema.oneOf as Array<{ $ref?: string }> | undefined) ?? [];
@@ -7278,10 +7288,17 @@ describe('OpenAPI Specification', () => {
       });
     });
 
-    describe('GET /library/artists/{id}/next-release-number', () => {
+    describe('GET /library/artists/{id}/next-release-number (wxyc-shared#511)', () => {
+      function description(): string {
+        return String(operation('/library/artists/{id}/next-release-number', 'get').description);
+      }
+
       // A genre-blind peek proposes a number from the wrong shelf, and the
-      // librarian writes it on a card. The parameter is required because the
-      // handler 400s without it.
+      // librarian writes it on a card. The contract declares the parameter
+      // required independent of whether any GIVEN deployed handler's number
+      // generator actually reads it yet -- see the description's own
+      // caveat below, which is exactly the gap between "declared" and
+      // "deployed" this parameter lives in.
       it('requires genre_id as a query parameter', () => {
         const parameters = operation('/library/artists/{id}/next-release-number', 'get')
           .parameters as Array<Record<string, unknown>>;
@@ -7292,44 +7309,159 @@ describe('OpenAPI Specification', () => {
         expect(genre?.required).toBe(true);
       });
 
-      // WXYC/Backend-Service#2599 is a PR number, not a fact about the
-      // deployed handler -- it can merge, get renumbered, or be superseded,
-      // and the sentence would still read as shipped. The description must
-      // describe the pending scoping by its observable effect (an
-      // unscoped server ignores genre_id) rather than by citing a PR that
-      // has not merged (wxyc-shared#510).
-      it('does not claim the genre scoping shipped as a specific PR', () => {
-        const description = String(operation('/library/artists/{id}/next-release-number', 'get').description);
-        expect(description).not.toMatch(/shipped as WXYC\/Backend-Service#2599/);
-        expect(description).toMatch(/ignores? `?genre_id`?/i);
+      // Neither a ticket number nor a status word ("pending"/"shipped"/"in
+      // flight") survives a merge, a renumbering, or deploy timing that
+      // diverges from contract publication -- the old sentence cited
+      // WXYC/Backend-Service#2587 as "pending", which goes false the
+      // instant that PR lands and the description is never revisited. The
+      // only fact worth telling a client is what it can and cannot
+      // conclude from the 200 body itself, which is true whether or not
+      // the Backend change has shipped (wxyc-shared#511).
+      it('states the observable effect only, with no ticket or status word', () => {
+        expect(description()).toMatch(
+          /cannot tell from the response body alone whether that number was chosen within one genre's shelf or across every genre/i
+        );
+        expect(description()).not.toMatch(/WXYC\/Backend-Service#\d+/);
+        expect(description()).not.toMatch(/\b(pending|shipped|in flight)\b/i);
+      });
+
+      // Two DIFFERENT ways a not-yet-scoped generator can diverge from the
+      // declared contract: it can compute artist-wide instead of
+      // genre-scoped (a supplied genre_id is ignored), and separately it
+      // can accept the request even when genre_id is missing instead of
+      // answering the declared 400 (the parameter's presence is never
+      // checked). The prior wording disclosed only the first.
+      it('discloses both ways a deployed generator can diverge from the declared contract', () => {
+        expect(description()).toMatch(/artist-wide MAX\+1/);
+        expect(description()).toMatch(/even when `?genre_id`? is missing/i);
+      });
+
+      // "Harmless" was true only for the REQUEST, not for the number a DJ
+      // then writes on a physical card -- asserting it bare, right after
+      // explaining why a wrong number is the actual danger, reads as a
+      // safety guarantee the sentence does not back up.
+      it('does not call sending genre_id "harmless" outright', () => {
+        expect(description()).not.toMatch(/\bis harmless\b/i);
+      });
+
+      // The prior conclusion ("the contract version it pins is the
+      // signal") was reachable only from a condition phrased as a
+      // CONTRACT fact ("guaranteed only against a Backend at or past
+      // that change"). Once the condition became a DEPLOYED-RUNTIME fact
+      // ("once a deployed Backend's number generator actually reads
+      // genre_id"), that conclusion no longer follows -- deploy timing is
+      // independent of contract publication, which is the whole point of
+      // this description's caveat. The fix drops the claim rather than
+      // re-deriving it from a condition it can't support.
+      it('does not claim the contract version settles what the deployed generator does', () => {
+        expect(description()).not.toMatch(/contract version it pins is the signal/i);
+      });
+
+      it('does not name the genre scoping as accomplished fact in the summary', () => {
+        const summary = String(operation('/library/artists/{id}/next-release-number', 'get').summary);
+        expect(summary).not.toMatch(/BS#\d+|WXYC\/Backend-Service#\d+/);
       });
     });
 
-    describe('CatalogDeleteBatch (wxyc-shared#510)', () => {
+    describe('DELETE /library/artists/{id} (wxyc-shared#511)', () => {
+      function description(): string {
+        return String(operation('/library/artists/{id}', 'delete').description);
+      }
+
+      // BS#2562 closed 2026-09-20. The description said the opposite of
+      // WXYC/Backend-Service#2562's own shipped status at :4561 in the same
+      // file -- one declaration asserting the artist delete both shipped
+      // and might not exist yet is the self-contradiction class this
+      // correction exists to remove, not just staleness.
+      it('does not describe WXYC/Backend-Service#2562 as in flight or as authored ahead of the code', () => {
+        expect(description()).not.toMatch(/in flight \(open\)/);
+        expect(description()).not.toMatch(/not from code that may not exist yet/);
+      });
+
+      // RESTORE_PLAN (apps/backend/services/library.service.ts) has no
+      // `artists` entry, so an artist batch has no restore plan --
+      // `POST /library/deleted/{batchId}/restore` cannot bring one back.
+      // Worded as the observable (not restorable), with no status code and
+      // no ticket, because a Backend change replacing today's opaque
+      // failure with a named refusal is in review right now and this
+      // sentence must stay true on both sides of that change landing.
+      it('does not claim an artist batch is recoverable via restore', () => {
+        expect(description()).not.toMatch(/recoverable via/i);
+        expect(description()).toMatch(/not restorable/i);
+
+        // Scoped to the sentence carrying "not restorable" -- the
+        // description legitimately carries status codes elsewhere (the
+        // four-outcome taxonomy at its end), so a whole-description check
+        // would false-positive on the 409/503/404 that already appear
+        // there. `.find` can return undefined regardless of the sentence
+        // actually being present (per the `toMatch` above), so this
+        // throws on absence rather than asserting it, matching this
+        // block's own idiom.
+        const sentences = description().split(/(?<=\.)\s+/);
+        const restorabilitySentence = sentences.find((sentence) => /not restorable/i.test(sentence));
+        if (!restorabilitySentence) throw new Error('no "not restorable" sentence found');
+        expect(restorabilitySentence).not.toMatch(/\b40\d\b|\b50\d\b/);
+      });
+    });
+
+    describe('CatalogDeleteBatch (wxyc-shared#510, #511)', () => {
       // The artist delete has shipped and never groups more than one entity
       // -- it refuses outright with a 409 artist_has_releases rather than
       // capturing the artist alongside any release it holds. The old prose
       // described the delete as not yet shipped and as the future call site
-      // that groups multiple entities, both false once #2562 shipped.
-      it('does not describe the artist delete as unshipped or batch-grouping', () => {
-        const description = String(
-          (spec.components.schemas.CatalogDeleteBatch as { description?: string }).description
-        );
+      // that groups multiple entities, both false once #2562 shipped. No
+      // future call site is on the roadmap either (both capture sites
+      // capture exactly one entity, per RESTORE_PLAN's own docstring), so
+      // the ordering guarantee must stand on its own rather than promising
+      // one.
+      it('does not describe the artist delete as unshipped, batch-grouping, or awaiting a future call site', () => {
+        const description = String(schema('CatalogDeleteBatch').description);
         expect(description).not.toMatch(/once it ships/);
         expect(description).not.toMatch(/is the first call site that\s+groups\s+more than one entity/);
+        expect(description).not.toMatch(/future call site/);
+      });
+
+      // `CatalogDeleteBatch` itself has no `entity_kind` property -- it
+      // lives on `entities[].entity_kind` -- so telling a consumer the
+      // value "depends on the batch's entity_kind" points at a field they
+      // cannot see on this object. Pin the corrected pointer as well as the
+      // old wrong one's absence.
+      it('points the entity_kind dependency at entities[], not at a property CatalogDeleteBatch lacks', () => {
+        const description = String(propertyOf('CatalogDeleteBatch', 'unrecoverable')?.description);
+        expect(description).not.toMatch(/depends on the batch's `entity_kind`/);
+        expect(description).toMatch(/entities\[\]\.entity_kind/);
       });
 
       // Pin the thing a consumer acts on: `unrecoverable` is declared per
       // entity_kind, not as a constant, and both table lists are spelled
       // out so a librarian reading the archive screen sees the right five
-      // names for the batch they're looking at. Tamper-verified: reverting
-      // this description to "The same list on every batch, not a per-batch
-      // computation." makes this test fail.
-      it('declares unrecoverable as depending on entity_kind, with both table lists named', () => {
+      // names for the batch they're looking at.
+      //
+      // Both loops are PARAGRAPH-scoped, not description-wide: each table
+      // must appear in its OWN kind's paragraph and be ABSENT from the
+      // other's, so swapping the two paragraphs wholesale (the library
+      // list presented as the artist one and vice versa) fails this test
+      // instead of staying green. `library_identity` is checked
+      // backtick-anchored (`` `library_identity` ``, not a bare substring)
+      // so it cannot be satisfied by `library_identity_source` sitting in
+      // the same paragraph.
+      //
+      // Tamper-verified: reverting the depends-on-entity_kind sentence to
+      // "The same list on every batch, not a per-batch computation," and
+      // swapping the two paragraphs' contents both make this suite fail.
+      it('declares unrecoverable as depending on entity_kind, with each table list named in its own paragraph', () => {
         const description = String(propertyOf('CatalogDeleteBatch', 'unrecoverable')?.description);
-
-        expect(description).toMatch(/depends on the batch's `entity_kind`/);
         expect(description).not.toMatch(/same list on every batch/);
+
+        const libraryMarker = 'For a `library` batch:';
+        const artistMarker = 'For an `artist` batch:';
+        const libraryAt = description.indexOf(libraryMarker);
+        const artistAt = description.indexOf(artistMarker);
+        expect(libraryAt).toBeGreaterThanOrEqual(0);
+        expect(artistAt).toBeGreaterThan(libraryAt);
+
+        const libraryParagraph = description.slice(libraryAt, artistAt);
+        const artistParagraph = description.slice(artistAt);
 
         for (const table of [
           'album_metadata',
@@ -7338,7 +7470,8 @@ describe('OpenAPI Specification', () => {
           'uncovered_release_search_markers',
           'album_review_submissions',
         ]) {
-          expect(description).toContain(table);
+          expect(libraryParagraph).toContain(`\`${table}\``);
+          expect(artistParagraph).not.toContain(`\`${table}\``);
         }
         for (const table of [
           'artist_search_alias',
@@ -7347,7 +7480,8 @@ describe('OpenAPI Specification', () => {
           'concerts',
           'concert_performers',
         ]) {
-          expect(description).toContain(table);
+          expect(artistParagraph).toContain(`\`${table}\``);
+          expect(libraryParagraph).not.toContain(`\`${table}\``);
         }
       });
     });
