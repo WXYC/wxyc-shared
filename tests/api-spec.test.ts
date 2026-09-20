@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.0.0');
+      expect(spec.info.version).toBe('10.1.0');
     });
 
     it('should have components section', () => {
@@ -991,6 +991,8 @@ describe('OpenAPI Specification', () => {
       nullable?: boolean;
       format?: string;
       maxLength?: number;
+      minimum?: number;
+      maximum?: number;
       default?: unknown;
     };
     type Schema = {
@@ -1026,7 +1028,7 @@ describe('OpenAPI Specification', () => {
       expect(schema.required ?? []).not.toContain('lastDiscogsRecheckAt');
     });
 
-    it('defines UpdateAlbumRequest matching BS wire format exactly: 10 fields, all optional, no `required` list', () => {
+    it('defines UpdateAlbumRequest matching BS wire format exactly: 12 fields, all optional, no `required` list', () => {
       const schema = spec.components.schemas.UpdateAlbumRequest as Schema;
       expect(schema).toBeDefined();
       expect(schema.required ?? []).toEqual([]);
@@ -1040,6 +1042,8 @@ describe('OpenAPI Specification', () => {
           'artist_id',
           'alternate_artist_name',
           'disc_quantity',
+          'code_number',
+          'code_volume_letters',
           'discogsUnavailable',
           'discogsUnavailableNote',
         ].sort(),
@@ -1077,10 +1081,20 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties?.lastDiscogsRecheckAt).toBeUndefined();
     });
 
-    it('UpdateAlbumRequest omits artist_name and code_number (server-derived; UPDATABLE_ALBUM_FIELDS never reads them from the body)', () => {
+    it('UpdateAlbumRequest omits artist_name (server-derived on the ALBUM body; UPDATABLE_ALBUM_FIELDS never reads it from this body)', () => {
       const schema = spec.components.schemas.UpdateAlbumRequest as Schema;
       expect(schema.properties?.artist_name).toBeUndefined();
-      expect(schema.properties?.code_number).toBeUndefined();
+    });
+
+    it('UpdateAlbumRequest carries code_number and code_volume_letters as writable (BS#2564)', () => {
+      const schema = spec.components.schemas.UpdateAlbumRequest as Schema;
+      const props = schema.properties ?? {};
+      expect(props.code_number?.type).toBe('integer');
+      expect(props.code_number?.minimum).toBe(1);
+      expect(props.code_number?.maximum).toBe(32767);
+      expect(props.code_volume_letters?.type).toBe('string');
+      expect(props.code_volume_letters?.nullable).toBe(true);
+      expect(props.code_volume_letters?.maxLength).toBe(4);
     });
 
     it('declares PATCH /library/{id} under BearerAuth, referencing UpdateAlbumRequest and returning AlbumSearchResult', () => {
