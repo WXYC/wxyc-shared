@@ -2063,11 +2063,19 @@ components:
           maxLength: 4
           description: >
             Volume letters for the release call code
-            (`library.code_volume_letters`, varchar(4)). Writable on the
-            wire since BS#2564 (`AlbumCreateFields.code_number`'s create
-            counterpart); this raw-row schema carries it for the same
-            reason it already carries `code_number` — no joins, just the
-            `library` columns as inserted.
+            (`library.code_volume_letters`, varchar(4)).
+
+
+            **Present here for longer than it has been writable, and the
+            two facts are separate.** This is a raw-row schema — no
+            joins, just the `library` columns as they were inserted — so
+            the column has ridden along in this payload since it existed,
+            because the create returns the whole row. Writability arrived
+            per verb: `AlbumCreateFields.code_volume_letters` on the
+            create wire (BS#2410) and
+            `UpdateAlbumRequest.code_volume_letters` on the PATCH wire
+            (BS#2564). A client written against an older contract version
+            still RECEIVES this field; what it could not do is send it.
         genre_id:
           type: integer
         format_id:
@@ -4152,40 +4160,54 @@ components:
               type: string
 
     ArtistDeleteRefusal:
+      type: object
       description: >
-        `DELETE /library/artists/{id}`'s 409. **WXYC/Backend-Service#2562
-        is in flight (open) as of this declaration** — this schema is the
-        published contract per this repo's schema-first rule (declared
-        before or alongside the private TS type), authored from the
-        issue's spec, not from code that may not exist yet. Reproduces
-        one of the four retired `/wxycdb` `ArtistAdminServlet` refusals.
-        The refusal-predicate counts ARE the refusal, so the body carries
-        the artist's full dependent-count card (the same shape `GET`/
-        `PATCH` return) rather than a bare message, letting a client
-        refresh its delete-control state from this response instead of a
-        follow-up GET.
-      allOf:
-        - $ref: '#/components/schemas/ArtistCardWithDependentCounts'
-        - type: object
-          required:
-            - message
-            - reason
-          properties:
-            message:
-              type: string
-            reason:
-              type: string
-              enum:
-                - artist_has_releases
-                - artist_crossreference_source
-                - artist_crossreference_target
-                - artist_library_crossreference
-              description: >
-                Which of the four `/wxycdb` refusals fired, checked in
-                that order. `compilation_credit_count` never appears as a
-                `reason` value — that dependent is informational only
-                (see its own description on
-                `ArtistCardWithDependentCounts`).
+        `DELETE /library/artists/{id}`'s 409 (WXYC/Backend-Service#2562),
+        reproducing one of the four retired `/wxycdb`
+        `ArtistAdminServlet` refusals.
+
+
+        **Three fields, not the dependent-count card.** `reason` says
+        which predicate fired and `count` is how many rows it found —
+        the only number the refusal has to communicate, since the
+        librarian's next move is to clear those rows. A client that wants
+        the full card refreshes it with `GET /library/artists/{id}`,
+        which is the read that owns that shape; duplicating it here would
+        oblige the refusal path to assemble a five-count card on the way
+        out of a transaction that has already decided to refuse.
+
+
+        Refusals are checked in the `reason` enum's order and the FIRST
+        one to fire answers, so `count` describes that predicate alone —
+        an artist holding both releases and cross-references reports only
+        its release count, and a client must not present it as a total.
+      required:
+        - message
+        - reason
+        - count
+      properties:
+        message:
+          type: string
+        reason:
+          type: string
+          enum:
+            - artist_has_releases
+            - artist_crossreference_source
+            - artist_crossreference_target
+            - artist_library_crossreference
+          description: >
+            Which of the four `/wxycdb` refusals fired, checked in that
+            order. `compilation_credit_count` never appears here — that
+            dependent is informational only and never refuses a delete
+            (see its own description on
+            `ArtistCardWithDependentCounts`).
+        count:
+          type: integer
+          description: >
+            How many rows the refusing predicate found: releases on file,
+            cross-references in the naming direction, or release
+            cross-references. Scoped to the one predicate named by
+            `reason`, never a sum across them.
 
     ArtistByCodeMatch:
       type: object
@@ -4342,9 +4364,22 @@ components:
         nothing about whether the target is deletable/restorable —
         deliberately not a 409, which on these endpoints means "refused
         on the merits". Each transaction sets a `lock_timeout` below
-        Postgres's deadlock-detection threshold on purpose, so that when
-        a librarian's write contends with a DJ's play insert, it is the
-        librarian's write that yields.
+        Postgres's deadlock-detection threshold on purpose, so it is
+        always the librarian's write that stands down rather than the
+        side that wins a deadlock arbitration.
+
+
+        **What it stands down TO differs by endpoint.** `DELETE
+        /library/{id}` really does contend with a DJ's play insert —
+        `flowsheet.album_id` references `library.id`, so the insert takes
+        `FOR KEY SHARE` on the row being deleted. `DELETE
+        /library/artists/{id}` cannot: `flowsheet` stores `artist_name`
+        as text and has no FK to `artists`, so its contenders are the
+        catalog ETL jobs and a concurrent artist edit. Standing down is
+        still right — a librarian retries a click in a second, where a
+        job that loses a row may skip it until its next run — but a 503
+        from the artist delete is not evidence that a DJ was logging a
+        play.
       required:
         - message
         - reason
@@ -4585,29 +4620,68 @@ components:
       description: >
         One top-level entity `POST /library/deleted/{batchId}/restore`
         re-inserted, in FK order (parent before any child that
-        references it). Carries the row's ORIGINAL id: a restore
-        reinserts the captured row verbatim rather than minting a new
-        primary key.
+        references it). The row comes back under its ORIGINAL primary
+        key — a restore reinserts the captured row rather than minting a
+        new id — which is why `entity_id` is the same value the archive
+        listing reported for it.
       required:
         - entity_kind
         - table
-        - id
+        - entity_id
+        - relocated_code_number
+        - children
       properties:
         entity_kind:
           type: string
+          description: >
+            The archive row's queryable label, matching
+            `CatalogDeleteEntity.entity_kind`.
         table:
           type: string
-        id:
+          description: >
+            The table the row was re-inserted into. This, not
+            `entity_kind`, is what names the rows.
+        entity_id:
           type: integer
+          description: >
+            The restored row's primary key — the captured id, unchanged.
+        relocated_code_number:
+          type: integer
+          nullable: true
+          description: >
+            The call number the card actually came back under, and
+            non-null ONLY when the `next_free_code` resolution ran
+            because the original slot was taken. `null` means the
+            original slot was free and the captured `code_number` was
+            re-used as-is. The archive record keeps the ORIGINAL code
+            either way: this is what the live row carries now, not a
+            correction to history.
+        children:
+          type: object
+          additionalProperties:
+            type: integer
+          description: >
+            Child table name to the number of rows replayed under this
+            entity, mirroring `CatalogDeleteEntity.children` from the
+            listing. A table with no captured rows is present with `0`
+            rather than omitted, the same absent-versus-empty
+            distinction the capture itself keeps.
 
     RestoreBatchResponse:
       type: object
       description: >
         `POST /library/deleted/{batchId}/restore`'s 200
-        (WXYC/Backend-Service#2585, in flight — this schema is the
-        published contract, authored from the issue's spec ahead of the
-        implementation). The parent row and every captured child row
-        were re-inserted inside one transaction.
+        (WXYC/Backend-Service#2585). The parent row and every captured
+        child row were re-inserted inside one transaction.
+
+
+        **The relocation result is per entity, not per batch.** Whether
+        the `next_free_code` resolution had to run is reported on each
+        entity's `relocated_code_number`, because the answer can differ
+        between entities of one batch: only the entities whose own slot
+        was taken move. There is no batch-level "resolution applied"
+        field — read `entities[].relocated_code_number` and treat any
+        non-null value as "this card came back somewhere else".
       required:
         - batch_id
         - entities
@@ -4619,87 +4693,158 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RestoredEntity'
-        code_conflict_resolution_applied:
-          type: string
-          nullable: true
-          enum: ['reassign_next_code']
-          description: >
-            Present only when the original call-code slot — the
-            genre-scoped tuple `(artist_id, genre_id, code_number,
-            upper(coalesce(code_volume_letters, '')))`, never the
-            genre-blind `(artist_id, code_number)` pair — was already
-            occupied and the caller's `code_conflict_resolution` chose
-            to take the next free code rather than decline. `null` when
-            the original slot was free and nothing needed resolving.
-        reassigned_code:
-          type: object
-          nullable: true
-          description: >
-            The call-code fields actually written, present only
-            alongside `code_conflict_resolution_applied:
-            'reassign_next_code'`. The archive record keeps the
-            ORIGINAL code either way — this is what the restored row
-            carries now, not a correction to history.
-          properties:
-            code_number:
-              type: integer
-            code_volume_letters:
-              type: string
-              nullable: true
 
-    RestoreCodeConflictRefusal:
+    RestoreSlotConflict:
       type: object
       description: >
-        `POST /library/deleted/{batchId}/restore`'s 409. The original
-        call-code slot is occupied and the request did not resolve it —
-        either `code_conflict_resolution` was omitted, or it was
-        `'decline'`. Never relocated silently and never refused silently
-        (decision 2026-09-17, mockup screen 6 in
+        One captured entity whose original call-number slot is held by a
+        different release at restore time. The slot is the genre-scoped
+        tuple `(artist_id, genre_id, code_number,
+        upper(coalesce(code_volume_letters, '')))` — never the
+        genre-blind `(artist_id, code_number)` pair, which reports
+        collisions between releases filed in different genre sections.
+
+
+        Carries no `code_letters`: the shelf letters belong to the
+        artist, not to the release, so a client that needs them for
+        display reads them from the artist the `artist_id` names.
+      required:
+        - entity_id
+        - artist_id
+        - genre_id
+        - code_number
+        - code_volume_letters
+        - occupied_by_library_id
+        - next_free_code_number
+      properties:
+        entity_id:
+          type: integer
+          description: >
+            The archive row's `entity_id` — the `library.id` the card
+            held when it was deleted, and the id it would come back
+            under.
+        artist_id:
+          type: integer
+        genre_id:
+          type: integer
+        code_number:
+          type: integer
+          description: >
+            The card's ORIGINAL call number, still on the archive record
+            whichever arm the caller picks.
+        code_volume_letters:
+          type: string
+          nullable: true
+        occupied_by_library_id:
+          type: integer
+          description: >
+            `library.id` of the release holding that slot right now — the
+            one fact that lets a librarian go look at what is in the way.
+        next_free_code_number:
+          type: integer
+          description: >
+            The call number the `next_free_code` resolution would file
+            this card under instead.
+
+    RestoreResolutionRequiredRefusal:
+      type: object
+      description: >
+        `POST /library/deleted/{batchId}/restore`'s **400** when at least
+        one captured card's original call-code slot is occupied and the
+        request supplied no `resolution`. Never relocated silently and
+        never refused silently (decision 2026-09-17, mockup screen 6 in
         `plans/classic-md-interface/mockups/delete-and-restore.html`):
-        this body names the occupying slot and the next free code so a
-        client can offer the choice, then retry with
-        `code_conflict_resolution` set.
+        this body names every conflict so a client can offer the choice,
+        then retry with `resolution` set.
+
+
+        **A 400 rather than a 409**, unlike the other refusals on this
+        path, because the request is incomplete rather than in conflict
+        with server state: the same batch restores successfully the
+        moment `resolution` is supplied. Type this branch — a client that
+        falls back to the bare `ApiErrorResponse` shape here discards
+        `conflicts` and has nothing to render the question from.
       required:
         - message
         - reason
-        - occupied_slot
+        - conflicts
       properties:
         message:
           type: string
         reason:
           type: string
-          enum: ['code_conflict', 'restore_declined']
+          enum: ['resolution_required']
+        conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/RestoreSlotConflict'
+
+    RestoreDeclinedRefusal:
+      type: object
+      description: >
+        `POST /library/deleted/{batchId}/restore`'s 409 when the caller
+        sent `resolution: 'decline'` on a batch whose slot is taken. The
+        whole batch is aborted rather than relocated or partially
+        restored, and nothing was written — the card stays in the
+        archive and can be restored later.
+
+
+        `conflicts` is repeated here, identical to the 400's, so a client
+        that declined can still show which slot it declined over without
+        holding the earlier response.
+      required:
+        - message
+        - reason
+        - conflicts
+      properties:
+        message:
+          type: string
+        reason:
+          type: string
+          enum: ['restore_declined']
+        conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/RestoreSlotConflict'
+
+    RestoreAlreadyRestoredRefusal:
+      type: object
+      description: >
+        `POST /library/deleted/{batchId}/restore`'s 409 when the batch is
+        already back in the catalog. This is the ordinary answer to a
+        double-click or a retry after a timeout, not an error state: the
+        rows are present, so there is nothing to do and nothing was
+        written.
+
+
+        Detected two ways, which is why it can fire even when the row
+        does not carry its original id any more: the restore probes the
+        captured primary key AND the captured `legacy_release_id`, so a
+        release that came back through a library-etl pass under a new
+        `library.id` still reports as present rather than being inserted
+        a second time.
+
+
+        Distinct from the code-conflict branch and must not be handled as
+        one — prompting for a call-number decision on a batch that is
+        already fully restored is the failure mode a lenient decoder
+        produces here.
+      required:
+        - message
+        - reason
+        - entity_ids
+      properties:
+        message:
+          type: string
+        reason:
+          type: string
+          enum: ['already_restored']
+        entity_ids:
+          type: array
+          items:
+            type: integer
           description: >
-            `code_conflict` — the slot is taken and no resolution (or an
-            ambiguous one) was supplied. `restore_declined` — the caller
-            explicitly chose `code_conflict_resolution: 'decline'`.
-        occupied_slot:
-          type: object
-          required:
-            - genre_id
-            - code_letters
-            - code_number
-          properties:
-            genre_id:
-              type: integer
-            code_letters:
-              type: string
-            code_number:
-              type: integer
-            code_volume_letters:
-              type: string
-              nullable: true
-        next_free_code:
-          type: object
-          nullable: true
-          description: >
-            The code the `reassign_next_code` resolution would take, in
-            the same genre/letters sequence. Absent when `reason:
-            restore_declined` — no future call number matters to a
-            declined restore.
-          properties:
-            code_number:
-              type: integer
+            The captured `entity_id`s already present in the catalog.
 
     # ===================
     # DJ Types
@@ -12565,16 +12710,31 @@ paths:
         MAX(`code_number`) + 1 scoped to `(artist_id, genre_id)`, and 1
         when that shelf has no releases. Pure read, no side effects.
 
-        **`genre_id` is REQUIRED (WXYC/Backend-Service#2587, in flight —
-        this is the published contract, not yet the shipped behavior;
-        today's deployed endpoint is genre-blind and takes no query
-        parameter at all).** Call numbers are genre-scoped — an artist
-        filed under two genres has two shelves with independent
+        **`genre_id` is REQUIRED.** Call numbers are genre-scoped — an
+        artist filed under two genres has two shelves with independent
         numbering — so a genre-blind peek can propose a number from the
-        wrong shelf (concretely: an artist with Rock releases numbered
-        1-50 and Electronic releases numbered 1-3 would get `51`
-        proposed for a new Electronic disc). Omitting `genre_id` is a
-        400; there is no genre-blind fallback by design.
+        wrong shelf: an artist with Rock releases numbered 1-50 and
+        Electronic releases numbered 1-3 gets `51` proposed for a new
+        Electronic disc. Omitting `genre_id` is a 400; there is no
+        genre-blind fallback by design.
+
+
+        **Deploy order matters here, and getting it wrong is silent.**
+        The genre scoping is WXYC/Backend-Service#2587 (shipped as
+        WXYC/Backend-Service#2599). A server from before that change
+        accepts the request, IGNORES `genre_id`, and answers 200 with an
+        artist-wide MAX+1 — so a client cannot tell a genre-scoped answer
+        from a genre-blind one by inspecting the response, and the number
+        it shows gets written onto a physical card that is then filed in
+        the wrong place. There is no version field on the wire to check.
+
+
+        A client must therefore treat this operation's genre scoping as
+        guaranteed only against a Backend at or past that change, and the
+        contract version it pins is the signal — not the 200 body. The
+        safe rollout is client-first: sending `genre_id` to an older
+        server is harmless (ignored), whereas deploying the required
+        parameter ahead of the clients 400s every peek.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
         - BearerAuth: []
@@ -12961,6 +13121,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FlowsheetPlayCounts'
+        '400':
+          description: >
+            Malformed album id. `type: integer` on the path parameter is
+            wider than the column: the handler refuses a value outside
+            int4 or one whose decimal spelling is non-canonical, so
+            `/library/2147483648/flowsheet-play-counts` is a 400 rather
+            than the 404 a client might expect from an id that cannot
+            exist. Declared because the delete flow depends on this read,
+            and an undeclared status surfaces there as an unexpected-response
+            error instead of a bad-request message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '404':
           description: Album not found
           content:
@@ -13038,26 +13212,40 @@ paths:
       x-wxyc-service: backend-service
       summary: Restore a captured delete batch (WXYC/Backend-Service#2585)
       description: >
-        **WXYC/Backend-Service#2585 is in flight (open) as of this
-        declaration — this is the published contract per the
-        schema-first rule, authored from the issue's spec ahead of the
-        implementation. Field names below are this contract's choice,
-        not a transcription of shipped code.**
+        WXYC/Backend-Service#2585. Restores a `catalog_delete_snapshot`
+        batch: the parent row plus every captured child, re-inserted
+        under their ORIGINAL primary keys inside one transaction.
 
-        Batch-scoped, not row-scoped: an artist and its releases were
-        deleted together and must come back together, or the releases
-        return orphaned under an artist id that no longer exists.
-        Replays the captured subtree in FK order, parent first, in one
-        transaction — a resolution that cannot be applied rolls the
-        whole batch back. Five dependents are deliberately never
-        synthesized on restore (the same `unrecoverable` list `GET
-        /library/deleted` reports): `album_metadata`,
+
+        **`library` batches only, today.** A batch holds exactly one
+        entity — the release delete captures one release, and the artist
+        delete refuses outright on any release the artist holds, so no
+        writer can produce a batch with both — and the restore has a
+        replay plan for the `library` table alone. Restoring an `artist`
+        batch is not yet supported: an artist's slot is
+        `genre_artist_crossreference.artist_genre_code` rather than a
+        library call number, so it needs its own conflict probe. The
+        request is still batch-scoped rather than row-scoped because the
+        unit that was captured is the unit that has to come back;
+        partially replaying a subtree would leave children orphaned.
+
+
+        Dependents a restore never synthesizes are the ones `GET
+        /library/deleted` reports as `unrecoverable` for that batch's
+        `entity_kind`, and the two lists differ — see that operation.
+        For a `library` batch they are `album_metadata`,
         `library_identity`, `library_identity_source`,
-        `uncovered_release_search_markers` (all four rebuilt by their
-        own jobs) and `album_review_submissions` (`ON DELETE SET NULL`
-        — the row survived the delete unlinked, so there is nothing to
-        replay, and its PII-bearing `reviewer_raw` column is never read
-        by this endpoint).
+        `uncovered_release_search_markers` (all four rebuilt by their own
+        jobs) and `album_review_submissions` (`ON DELETE SET NULL` — the
+        row survived the delete unlinked, so there is nothing to replay,
+        and its PII-bearing `reviewer_raw` column is never read here).
+
+
+        **Two things a restore does not put back**, and a client
+        presenting it as undone should say so: archived flowsheet plays
+        do not re-link to the restored release, and the five excluded
+        dependents above stay excluded.
+
 
         Restoring into a taken call code ASKS rather than silently
         relocating or silently refusing — decided 2026-09-17, mockup
@@ -13071,8 +13259,10 @@ paths:
         `jobs/library-call-number-dedup` merges on — never the
         genre-blind `(artist_id, code_number)` pair, which production
         measurement found gives roughly 11x too many false collisions.
-        See `RestoreCodeConflictRefusal` for the conflict shape and
-        `code_conflict_resolution` below for the two-armed resolution.
+        The ask is a **400** `resolution_required` carrying every
+        conflict (see `RestoreResolutionRequiredRefusal`), not a 409:
+        the request is incomplete, and the same batch succeeds as soon as
+        `resolution` is supplied.
       tags:
         - Library
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
@@ -13088,27 +13278,29 @@ paths:
       requestBody:
         required: false
         description: >
-          Optional on the first attempt. Supply
-          `code_conflict_resolution` up front to pre-commit to an
-          answer, or omit it and let a 409 name the occupied slot and
-          the next free code, then retry with it set.
+          Optional on the first attempt. Supply `resolution` up front to
+          pre-commit to an answer, or omit it and let the **400**
+          `resolution_required` name every occupied slot and the next
+          free code, then retry with it set.
         content:
           application/json:
             schema:
               type: object
               properties:
-                code_conflict_resolution:
+                resolution:
                   type: string
-                  enum: ['reassign_next_code', 'decline']
+                  enum: ['next_free_code', 'decline']
                   description: >
                     Resolution for a taken original call-code slot.
-                    `reassign_next_code` takes the next free code in
-                    that genre/letters sequence and writes it onto the
-                    restored row — the archive record keeps the
-                    original code regardless. `decline` aborts the
-                    whole batch restore rather than relocating or
-                    partially restoring it. Irrelevant, and ignored,
-                    when the original slot turns out to still be free.
+                    `next_free_code` takes the next free code in that
+                    artist's sequence and writes it onto the restored
+                    row — the archive record keeps the original code
+                    regardless, and the value actually written comes
+                    back as that entity's `relocated_code_number`.
+                    `decline` aborts the whole batch restore rather than
+                    relocating or partially restoring it. Irrelevant,
+                    and ignored, when the original slot turns out to
+                    still be free.
       responses:
         '200':
           description: Batch restored — see `RestoreBatchResponse`
@@ -13117,11 +13309,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/RestoreBatchResponse'
         '400':
-          description: Invalid batchId, or an unrecognized code_conflict_resolution value
+          description: >
+            Either a malformed request — `batchId` is not a UUID, or
+            `resolution` is not one of the two accepted values — or a
+            slot conflict awaiting a decision. **The two are told apart
+            by `reason`**, and only the second carries `conflicts`: a
+            client that types this branch as the bare error shape throws
+            the conflict list away and cannot render the question it
+            exists to ask.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiErrorResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/RestoreResolutionRequiredRefusal'
+                  - $ref: '#/components/schemas/ApiErrorResponse'
         '404':
           description: No delete batch with that batchId
           content:
@@ -13130,13 +13331,19 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: >
-            The original call-code slot is occupied and unresolved, or
-            the caller explicitly declined — see
-            `RestoreCodeConflictRefusal`.
+            Two different refusals, told apart by `reason`.
+            `restore_declined` — the caller sent `resolution: 'decline'`
+            over a taken slot, so the batch was aborted and nothing was
+            written. `already_restored` — the batch is already back in
+            the catalog, the ordinary answer to a double-click or a
+            retry. The second must NOT be handled as a code conflict:
+            there is no decision left to ask for.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RestoreCodeConflictRefusal'
+                oneOf:
+                  - $ref: '#/components/schemas/RestoreDeclinedRefusal'
+                  - $ref: '#/components/schemas/RestoreAlreadyRestoredRefusal'
         '503':
           description: >
             Stood down rather than wait on rows a live writer holds,
