@@ -40,14 +40,24 @@
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # construction. Read the entries.
 
-# wxyc-shared#512: the handler has enforced genre_id >= 1 via
-# parseCodeQueryInt(..., 1) for as long as it has parsed the value; the
-# sibling /library/artists/by-code's genre_id already declares this same
-# bound. This is a correction that brings the contract in line with what the
-# server has always done, not a new narrowing decision.
+# wxyc-shared#512: the handler has enforced BOTH bounds via
+# parseCodeQueryInt(..., 1) for as long as it has parsed the value --
+# `value < min || value > INT4_MAX` 400s on either side -- and Backend's
+# apps/backend/app.yaml declares both, as does the sibling
+# /library/artists/by-code's genre_id. Two findings, one class: a bound the
+# server has always applied being written down. These are corrections that
+# bring the contract in line with what the server has always done, not new
+# narrowing decisions.
 get /library/artists/{id}/next-release-number for the `query` request parameter `genre_id`, the min was set to `1.00`
+get /library/artists/{id}/next-release-number for the `query` request parameter `genre_id`, the max was set to `2147483647.00`
 
 # wxyc-shared#512: RestoreUnrestorableKindRefusal is a new member of the 409
-# oneOf, alongside the two the handler already served — additive, not a
-# narrowing of anything a client already decoded successfully.
+# oneOf. That union is CLOSED -- which is exactly why the branch had to be
+# declared at all, and why oasdiff flags the addition at ERR rather than
+# waving it through: a client generated against the old document decodes the
+# 409 body against two branches and fails closed on a third. The suppression
+# is justified not because oneOf additions are free -- they are not -- but
+# because the handler ALREADY sends this body on main, so the contract is
+# catching up to shipped behaviour rather than changing it. A decoder that
+# breaks on this branch breaks against today's server too.
 post /library/deleted/{batchId}/restore added `#/components/schemas/RestoreUnrestorableKindRefusal` to the response body `oneOf` list for the response status `409`

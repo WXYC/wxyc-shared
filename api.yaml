@@ -2175,10 +2175,17 @@ components:
             Operator-chosen release call number (BS#2564; the PATCH half
             of `AlbumCreateFields.code_number`, BS#2410). `library.code_number`
             is a Postgres smallint, hence the 32767 ceiling. No
-            application-level collision check, same as the create side
-            (single-librarian decision, rotation-import plan D2); the
-            eventual DB uniqueness constraint and its 409 mapping are
-            tracked at WXYC/Backend-Service#2033. Alongside an `artist_id`
+            application-level collision check on a `code_number`-only or
+            `artist_id`-only edit, same as the create side
+            (single-librarian decision, rotation-import plan D2); for those
+            paths the eventual DB uniqueness constraint and its 409 mapping
+            are tracked at WXYC/Backend-Service#2033. The one path that IS
+            checked is a PATCH that changes `genre_id`
+            (WXYC/Backend-Service#2587): the resulting `(artist_id, genre_id,
+            code_number, code_volume_letters)` slot is looked up against the
+            real shelf, and an occupied slot refuses with `409
+            library_slot_conflict` rather than silently filing two releases
+            onto it — see this operation's 409. Alongside an `artist_id`
             move in the same request, a value that DIFFERS from the stored
             one is honored verbatim as the destination shelf; a value that
             merely echoes the stored one expresses no choice and still
@@ -4579,12 +4586,35 @@ components:
         restorable:
           type: boolean
           description: >
-            Whether this batch's `entity_kind` has a restore plan at all
-            (WXYC/Backend-Service#2616) — an `artist` batch reads `false`
-            today, since no replay exists for it. This says the kind is
-            plannable, not that a restore of this specific batch will
-            succeed: a restorable kind can still fail on a corrupt
-            envelope.
+            Whether `POST /library/deleted/{batchId}/restore` can EVER bring
+            this batch back (WXYC/Backend-Service#2616), computed off the same
+            restore-plan set the restore's `409 unrestorable_kind` refusal
+            reads, so the two cannot drift.
+
+
+            `false` when any entity's `entity_kind` has no replay plan OR that
+            entity's captured envelope is missing its row. An `artist` batch
+            reads `false` on the first count today: the delete does capture a
+            snapshot, but an artist's shelf slot has no tombstone and needs
+            its own conflict probe, so no replay plan exists for it. The
+            envelope half is the same corruption the restore endpoint's own
+            500 guards against, so this field answers for envelope health, not
+            just `entity_kind`. A batch holding several entities is restorable
+            only if every one of them is, since the restore refuses the whole
+            batch on the first kind it cannot replay — and a batch whose rows
+            read back empty is `false` rather than vacuously `true`. A
+            `library` batch with an intact envelope reads `true`.
+
+
+            `true` is NOT a promise that a restore attempt will succeed — it
+            means this batch's kind has a working replay plan and a parseable
+            envelope, nothing more. The envelope half is settled here, at
+            listing time, against an immutable capture, so a batch that reads
+            `true` cannot go on to fail on a corrupt envelope; it can still
+            answer `already_restored`, `resolution_required` (a shelf-slot
+            conflict a client must resolve), or `lock_unavailable`. `false` is
+            the hard guarantee: the endpoint refuses every such batch with
+            `409 unrestorable_kind` before any row lock or write.
         captured_at:
           type: string
           format: date-time
@@ -12786,6 +12816,7 @@ paths:
           schema:
             type: integer
             minimum: 1
+            maximum: 2147483647
       responses:
         '200':
           description: The next release call number for the artist, on that genre's shelf
@@ -13050,6 +13081,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AlbumDetail'
+        '400':
+          description: >
+            Invalid field value, or no updatable field present in the body.
+            Every field-validation path in the handler raises this, and the
+            sibling `DELETE /library/{id}` already declares its own 400.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '404':
           description: Album not found
           content:
