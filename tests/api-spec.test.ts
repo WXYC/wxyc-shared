@@ -7513,18 +7513,67 @@ describe('OpenAPI Specification', () => {
     // that the contract omitted -- verified against the merged
     // Backend-Service handlers, not this ticket's prose.
     describe('CatalogDeleteBatch.restorable (wxyc-shared#512)', () => {
-      // `restorable` is computed from the batch's entity_kind, so it means
-      // "this kind has a restore plan," not "this row will restore" -- a
-      // restorable kind can still fail on a corrupt envelope. Pinning the
-      // required-ness AND the plan-existence wording, not restore-success
-      // wording, both matter: reverting either one is a real regression.
-      it('requires restorable as a boolean, described as plan-existence rather than restore success', () => {
+      // The handler computes
+      //   parsed.length > 0 && parsed.every(({ row, envelope }) =>
+      //     isRestorableEntityKind(row.entity_kind) && envelope.entity.row !== null)
+      // so there are THREE ways this reads false -- an unplannable kind, a
+      // captured envelope missing its row, and a batch whose rows read back
+      // empty (the deliberately non-vacuous length guard) -- and the restore
+      // screen that consumes the field needs all three. A kind-only claim
+      // tells that screen a `library` batch always reads true, so a false
+      // looks like a server bug rather than a corrupt capture.
+      it('describes every false-condition the handler computes, not entity_kind alone', () => {
         expect(requiredKeysOf('CatalogDeleteBatch')).toContain('restorable');
         expect(propertyOf('CatalogDeleteBatch', 'restorable')?.type).toBe('boolean');
 
         const description = String(propertyOf('CatalogDeleteBatch', 'restorable')?.description);
-        expect(description).toMatch(/restore plan/i);
-        expect(description).not.toMatch(/this row will restore/i);
+        expect(description).toMatch(/no replay plan/i);
+        expect(description).toMatch(/envelope is missing its row/i);
+        expect(description).toMatch(/read back empty/i);
+        expect(description).toMatch(/every one of them/i);
+      });
+
+      // The true side. Because the envelope half is evaluated HERE, at
+      // listing time, against an immutable capture, `true` cannot go on to
+      // hit the corrupt-envelope failure -- so naming that as the residual
+      // risk is backwards. What a restorable batch can still answer is the
+      // three outcomes below, all of which a caller must handle.
+      //
+      // The restore-success negative is deliberately NOT keyed to one
+      // phrasing. The assertion this replaces read
+      // `not.toMatch(/this row will restore/i)`, a phrase that only ever
+      // existed in the Backend docstring, so "pressing Restore on it will
+      // succeed" -- an explicit success promise -- passed it. Instead: find
+      // every clause that claims a restore will restore or succeed, and
+      // require each one to be the negated disclaimer.
+      it('promises no restore success, and names the outcomes a restorable batch can still answer', () => {
+        const description = String(propertyOf('CatalogDeleteBatch', 'restorable')?.description);
+
+        const successClaims = description.match(/[^.;]*\bwill (?:restore|succeed)\b[^.;]*/gi) ?? [];
+        expect(successClaims.length).toBeGreaterThan(0);
+        for (const claim of successClaims) {
+          expect(claim).toMatch(/is not a promise/i);
+        }
+
+        for (const outcome of ['already_restored', 'resolution_required', 'lock_unavailable']) {
+          expect(description).toContain(`\`${outcome}\``);
+        }
+      });
+    });
+
+    describe('UpdateAlbumRequest.code_number (wxyc-shared#512)', () => {
+      // This field sat eight thousand lines from the 409 the same PR
+      // declared, still saying flatly that nothing is checked and that the
+      // 409 mapping is future work on WXYC/Backend-Service#2033. A reader of
+      // the field description concluded the PATCH never refuses on a slot
+      // collision and wrote no handler for the 409. Backend's app.yaml
+      // carries the reconciling clause on this very field; this asserts
+      // api.yaml does too.
+      it('names the genre-change collision check its own 409 enforces', () => {
+        const description = String(propertyOf('UpdateAlbumRequest', 'code_number')?.description);
+        expect(description).toContain('library_slot_conflict');
+        expect(description).toMatch(/changes `genre_id`/);
+        expect(description).not.toMatch(/no application-level collision check,\s*same as the create side/i);
       });
     });
 
@@ -7548,13 +7597,30 @@ describe('OpenAPI Specification', () => {
         const schemaRef = responseSchema('/library/{id}', 'patch', '409');
         expect(schemaRef.$ref).toBe('#/components/schemas/ApiErrorResponse');
       });
+
+      // Backend's app.yaml declares this operation's 400 and the handler
+      // raises one on every field-validation path, while the sibling
+      // `DELETE /library/{id}` already declares its own. Undeclared, the
+      // app.yaml/api.yaml structural drift gate stays red on this operation
+      // for a missing status rather than a disagreeing one. Same
+      // response-key-set shape as the `flowsheet-play-counts` test above.
+      it('declares the 400 every field-validation path raises', () => {
+        const responses = operation('/library/{id}', 'patch').responses as Record<string, unknown>;
+        expect(Object.keys(responses).sort()).toEqual(['200', '400', '404', '409']);
+        expect(responseSchema('/library/{id}', 'patch', '400').$ref).toBe(
+          '#/components/schemas/ApiErrorResponse'
+        );
+      });
     });
 
     describe('GET /library/artists/{id}/next-release-number genre_id (wxyc-shared#512)', () => {
-      // The handler validates via parseCodeQueryInt(..., 1); the sibling
-      // /library/artists/by-code's genre_id already declares this same
-      // bound, so this is consistency with a sibling parameter.
-      it('declares minimum: 1 on genre_id, matching the handler bound', () => {
+      // The handler validates via parseCodeQueryInt(..., 1), which 400s
+      // below 1 AND above INT4_MAX; Backend's app.yaml declares both bounds,
+      // and so does the sibling /library/artists/by-code's genre_id -- the
+      // precedent this change cites. With only the minimum declared, a
+      // generated client can send genre_id=3000000000, expect the 200 the
+      // contract promises, and get a 400.
+      it('declares both handler bounds on genre_id, not just the minimum', () => {
         const parameters = operation('/library/artists/{id}/next-release-number', 'get').parameters as Array<
           Record<string, unknown>
         >;
@@ -7562,6 +7628,7 @@ describe('OpenAPI Specification', () => {
         if (!genre) throw new Error('no genre_id parameter found');
         const schemaOf = genre.schema as Record<string, unknown>;
         expect(schemaOf.minimum).toBe(1);
+        expect(schemaOf.maximum).toBe(2147483647);
       });
     });
   });
