@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.2.0
+  version: 10.3.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -5460,8 +5460,10 @@ components:
       description: >-
         One increment or decrement to a song's public like tally. Carries
         the song's identity and nothing whatsoever about who liked it —
-        see `POST /likes/tally` for why no listener key exists anywhere in
-        this contract.
+        see `POST /likes/tally` for why this tally endpoint stores no
+        listener key of any kind, and the `# Listener request replies`
+        section below for the contract's one documented departure from
+        that stance.
       required:
         - song_key
         - song_title
@@ -5562,6 +5564,94 @@ components:
             Of `applied`, how many carried or matched a WXYC catalog
             artist id. Diagnostic only: it describes catalog coverage, not
             the caller.
+
+    # ===================
+    # Listener request replies
+    # ===================
+
+    PushTokenRegistration:
+      type: object
+      description: >-
+        Request/delete body for `PUT` / `DELETE /listener/push-token`. Keys
+        the registration on `(provider, token)`.
+      required:
+        - provider
+        - token
+        - environment
+        - bundle_id
+      properties:
+        provider:
+          type: string
+          enum:
+            - apns
+            - fcm
+          description: >-
+            The push provider the token was issued by. `fcm` is reserved
+            for the Android fast-follow — no server accepts it in v1.
+        token:
+          type: string
+          description: The opaque provider-issued push token.
+        environment:
+          type: string
+          enum:
+            - production
+            - sandbox
+          description: >-
+            Debug builds register `sandbox` tokens. This column exists so
+            a sandbox token is never wrongly invalidated by production
+            APNs.
+        bundle_id:
+          type: string
+          description: The app's bundle identifier, which becomes the `apns-topic`.
+
+    ListenerRequestReply:
+      type: object
+      description: One DJ reply addressed to a listener's song/shout-out request.
+      required:
+        - request_id
+        - reply_id
+        - body
+        - sent_at
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: The request this reply answers.
+        reply_id:
+          type: string
+          format: uuid
+          description: This reply's own identity.
+        body:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: The reply text.
+        sent_at:
+          type: string
+          format: date-time
+          description: When the reply was sent.
+        on_air_dj_name:
+          type: string
+          nullable: true
+          description: >-
+            The flowsheet's on-air DJ name, stamped at send time. `null`
+            for confirmed automation or when no name was available to
+            stamp. Provenance only, never an authorization input — the
+            listener-facing card does not render it.
+
+    ListenerRequestRepliesResponse:
+      type: object
+      description: Response body for `GET /listener/request-replies`.
+      required:
+        - replies
+      properties:
+        replies:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListenerRequestReply'
+          description: >-
+            Replies addressed to the caller. Empty when nothing is
+            addressed to them.
 
     # ===================
     # Album Reviews (issue #229)
@@ -13922,6 +14012,175 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  # ============================
+  # Listener request replies
+  # ============================
+  #
+  # These two operations are the contract's first per-listener-keyed
+  # persistence, declared ahead of their Backend-Service implementation
+  # (Backend-Service#2665, Backend-Service#2667) so a future re-run of the
+  # #372 reachability probe does not mistake them for phantom paths. The key
+  # is the anonymous better-auth user id carried in the JWT — never the
+  # device fingerprint. That inverts /likes/tally's posture: there, the
+  # bearer authenticates purely for rate limiting and the identity MUST NOT
+  # be persisted; here, the bearer's subject IS the authorization input and
+  # IS what rows are keyed on. No listener message text is stored
+  # server-side beyond what these operations describe. Request rows are
+  # anonymized at 30 days; push tokens are pruned at 90 days unseen.
+
+  /listener/request-replies:
+    get:
+      x-wxyc-service: backend-service
+      summary: Fetch DJ replies addressed to the caller's requests
+      description: |
+        Returns replies for the given request ids, scoped to the caller.
+
+        The JWT is the authorization input here, not merely a rate-limit
+        key (the opposite of `POST /likes/tally`'s posture): the server
+        returns only rows whose request row's `anonymous_user_id` equals
+        the caller's authenticated subject. Any id the caller does not own
+        yields nothing rather than an error, so this response is not an
+        oracle for request ids that aren't the caller's. A retracted reply
+        is simply absent from the array — that absence is what makes
+        retraction work.
+
+        There is no device-fingerprint header on this operation,
+        deliberately: the fingerprint is published to every member of the
+        request Slack channel and must never unlock anything.
+      parameters:
+        - name: request_ids
+          in: query
+          required: true
+          schema:
+            type: string
+          description: >-
+            Comma-separated list of request UUIDs to fetch replies for, at
+            most 20.
+      responses:
+        '200':
+          description: Replies addressed to the caller, for the requested ids.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListenerRequestRepliesResponse'
+        '400':
+          description: request_ids is malformed or exceeds the 20-id cap.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: >
+            Forbidden — the session is banned or the bearer token carries no
+            `sub` claim (auth middleware gate).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '429':
+          description: Rate limited by the listener rate limiter.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /listener/push-token:
+    put:
+      x-wxyc-service: backend-service
+      summary: Register (or re-point) an APNs/FCM push token for the caller
+      description: >-
+        Upserts on `(provider, token)` and sets the row's owner to the
+        caller's authenticated subject on every launch. A `user_id` holds
+        at most 5 rows; a sixth registration evicts the oldest by
+        `updated_at`. Re-pointing an existing `(provider, token)` to the
+        caller is allowed by design — it is the identity-roll case. The
+        residual risk (someone holding another device's APNs token could
+        route their own replies to it) is accepted because the token never
+        leaves the device.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PushTokenRegistration'
+      responses:
+        '204':
+          description: Registered; no body
+        '400':
+          description: Malformed payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: >
+            Forbidden — the session is banned or the bearer token carries no
+            `sub` claim (auth middleware gate).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '429':
+          description: Rate limited by the listener rate limiter.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    delete:
+      x-wxyc-service: backend-service
+      summary: Unregister a push token
+      description: >-
+        Removes the `(provider, token)` registration named in the body. A
+        request body on `DELETE` is unusual but already has precedent in
+        this document.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PushTokenRegistration'
+      responses:
+        '204':
+          description: Deleted; no body
+        '400':
+          description: Malformed payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: >
+            Forbidden — the session is banned or the bearer token carries no
+            `sub` claim (auth middleware gate).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '429':
+          description: Rate limited by the listener rate limiter.
           content:
             application/json:
               schema:
