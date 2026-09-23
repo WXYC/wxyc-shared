@@ -250,10 +250,11 @@
       "platforms": ["ios", "android"],
       "status": "shipped",
       "properties": {
-        "reason": { "type": "string", "vocabulary": "reason" },
+        "reason": { "type": "string", "vocabulary": "reason", "optional": true },
         "source": { "type": "string", "vocabulary": "source" },
         "session_id": { "type": "string", "vocabulary": "session_id", "optional": true }
-      }
+      },
+      "notes": "iOS always sends reason (PlaybackStartedEvent.reason is non-optional). Android omits it on every non-`auto` play: PlaybackAttribution.resolve returns a null reason for REMOTE and for every fromOrigin branch, and PlaybackEventProperties.build drops null keys."
     },
     {
       "name": "playcut_detail_view_presented",
@@ -409,6 +410,7 @@
           "reconnect_attempts": { "type": "integer" },
           "session_duration": { "type": "number", "unit": "seconds" },
           "recovery_method": { "type": "string" },
+          "stall_duration": { "type": "number", "unit": "seconds", "optional": true },
           "session_id": { "type": "string", "optional": true }
         },
         "android": {
