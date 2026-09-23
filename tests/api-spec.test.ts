@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.2.0');
+      expect(spec.info.version).toBe('10.3.0');
     });
 
     it('should have components section', () => {
@@ -7629,6 +7629,108 @@ describe('OpenAPI Specification', () => {
         const schemaOf = genre.schema as Record<string, unknown>;
         expect(schemaOf.minimum).toBe(1);
         expect(schemaOf.maximum).toBe(2147483647);
+      });
+    });
+  });
+
+  // The contract's first per-listener-keyed persistence (wxyc-shared#522).
+  // Declared ahead of their Backend-Service implementation
+  // (Backend-Service#2665, #2667), so these assertions are the only thing
+  // proving the shape before either handler exists.
+  describe('Listener request replies (DJ replies)', () => {
+    function operation(path: string, method: string): Record<string, unknown> {
+      const item = (spec.paths as Record<string, Record<string, unknown> | undefined>)[path];
+      if (!item) throw new Error(`api.yaml declares no path ${path}`);
+      const op = item[method] as Record<string, unknown> | undefined;
+      if (!op) throw new Error(`api.yaml declares no ${method.toUpperCase()} on ${path}`);
+      return op;
+    }
+
+    describe('GET /listener/request-replies', () => {
+      const get = () => operation('/listener/request-replies', 'get');
+
+      it('is served by backend-service', () => {
+        expect(get()['x-wxyc-service']).toBe('backend-service');
+      });
+
+      it('declares a request_ids query parameter whose description mentions the 20-id cap', () => {
+        const parameters = get().parameters as Array<Record<string, unknown>>;
+        const requestIds = parameters.find((parameter) => parameter.name === 'request_ids');
+        if (!requestIds) throw new Error('no request_ids parameter found');
+        expect(requestIds.description).toMatch(/20/);
+      });
+
+      it('declares no operation-level security override, inheriting the document-level BearerAuth', () => {
+        expect((get() as { security?: unknown }).security).toBeUndefined();
+      });
+
+      it('states plainly that no device-fingerprint header is accepted', () => {
+        expect(get().description).toMatch(/no .*fingerprint/i);
+      });
+    });
+
+    describe('PUT and DELETE /listener/push-token', () => {
+      it.each(['put', 'delete'] as const)('%s is served by backend-service and requires PushTokenRegistration', (method) => {
+        const op = operation('/listener/push-token', method);
+        expect(op['x-wxyc-service']).toBe('backend-service');
+        const requestBody = op.requestBody as { required?: boolean; content?: Record<string, { schema?: { $ref?: string } }> };
+        expect(requestBody.required).toBe(true);
+        expect(requestBody.content?.['application/json']?.schema?.$ref).toBe(
+          '#/components/schemas/PushTokenRegistration'
+        );
+        const responses = op.responses as Record<string, unknown>;
+        expect(responses['204']).toBeDefined();
+      });
+    });
+
+    describe('PushTokenRegistration', () => {
+      it('requires provider, token, environment, bundle_id in that order', () => {
+        expect(requiredKeysOf('PushTokenRegistration')).toEqual([
+          'provider',
+          'token',
+          'environment',
+          'bundle_id',
+        ]);
+      });
+
+      it('constrains provider and environment to their closed enums', () => {
+        expect(propertyOf('PushTokenRegistration', 'provider')?.enum).toEqual(['apns', 'fcm']);
+        expect(propertyOf('PushTokenRegistration', 'environment')?.enum).toEqual(['production', 'sandbox']);
+      });
+    });
+
+    describe('ListenerRequestReply', () => {
+      it('requires request_id, reply_id, body, sent_at but not on_air_dj_name', () => {
+        const required = requiredKeysOf('ListenerRequestReply');
+        expect(required).toEqual(expect.arrayContaining(['request_id', 'reply_id', 'body', 'sent_at']));
+        expect(required).not.toContain('on_air_dj_name');
+      });
+
+      it('bounds body to between 1 and 500 characters', () => {
+        expect(propertyOf('ListenerRequestReply', 'body')?.minLength).toBe(1);
+        expect(propertyOf('ListenerRequestReply', 'body')?.maxLength).toBe(500);
+      });
+
+      it('formats request_id and reply_id as uuid', () => {
+        expect(propertyOf('ListenerRequestReply', 'request_id')?.format).toBe('uuid');
+        expect(propertyOf('ListenerRequestReply', 'reply_id')?.format).toBe('uuid');
+      });
+    });
+
+    describe('ListenerRequestRepliesResponse', () => {
+      it('declares replies as an array of ListenerRequestReply', () => {
+        const replies = propertyOf('ListenerRequestRepliesResponse', 'replies') as
+          | { items?: { $ref?: string } }
+          | undefined;
+        expect(replies?.items?.$ref).toBe('#/components/schemas/ListenerRequestReply');
+      });
+    });
+
+    describe('SongLikeDelta cross-reference amendment', () => {
+      it('no longer claims no listener key exists anywhere in this contract, and points at the departure', () => {
+        const description = spec.components.schemas.SongLikeDelta as { description?: string };
+        expect(description.description).not.toMatch(/anywhere in this contract/);
+        expect(description.description).toMatch(/listener request replies/i);
       });
     });
   });
