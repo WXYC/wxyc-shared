@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import contractJson from '../src/analytics/listener-events.json' with { type: 'json' };
+import schemaJson from '../src/analytics/listener-events.schema.json' with { type: 'json' };
 
 type ListenerEvent = {
   name: string;
@@ -17,6 +18,7 @@ const contract = contractJson as {
   events: ListenerEvent[];
 };
 const { vocabulary, events } = contract;
+const schema = schemaJson as Record<string, any>;
 
 const RESERVED_NAMES = [
   'push_permission_prompted',
@@ -31,6 +33,29 @@ function propsOf(event: ListenerEvent, platform: 'ios' | 'android'): Record<stri
     return event.platformProperties[platform] ?? {};
   }
   return event.properties ?? {};
+}
+
+/**
+ * The dereference step of rule 4 in CLAUDE.md's "Analytics event contract" section: a property
+ * that names a vocabulary takes that entry's type/unit/enum, with `platformEnum[platform]`
+ * replacing `enum` where the vocabulary carries one for that platform.
+ */
+function resolveProperty(prop: Record<string, any>, platform: 'ios' | 'android'): Record<string, any> {
+  const vocab = prop.vocabulary ? vocabulary[prop.vocabulary] : undefined;
+  if (!vocab) return prop;
+  return {
+    ...prop,
+    type: vocab.type,
+    unit: vocab.unit ?? prop.unit,
+    enum: vocab.platformEnum?.[platform] ?? vocab.enum ?? prop.enum,
+  };
+}
+
+function expectKeysDeclaredIn(actual: Record<string, any>, schemaNode: Record<string, any>): void {
+  const declared = Object.keys(schemaNode.properties);
+  for (const key of Object.keys(actual)) {
+    expect(declared).toContain(key);
+  }
 }
 
 describe('listener-events contract', () => {
@@ -106,25 +131,26 @@ describe('listener-events contract', () => {
 
   it('every property naming a vocabulary conforms to that vocabulary entry', () => {
     for (const event of events) {
-      const propertySets: Array<[string | undefined, Record<string, any>]> = event.platformProperties
-        ? Object.entries(event.platformProperties)
-        : [[undefined, event.properties ?? {}]];
-      for (const [platform, props] of propertySets) {
-        for (const prop of Object.values(props)) {
+      for (const platform of event.platforms as Array<'ios' | 'android'>) {
+        for (const prop of Object.values(propsOf(event, platform))) {
           if (!prop.vocabulary) continue;
           const vocab = vocabulary[prop.vocabulary];
           expect(vocab).toBeDefined();
           expect(prop.type).toBe(vocab.type);
           if (vocab.unit) expect(prop.unit).toBe(vocab.unit);
-          if (prop.enum) {
-            const expectedEnum =
-              platform === 'android' && vocab.platformEnum?.android
-                ? vocab.platformEnum.android
-                : vocab.enum;
-            expect(prop.enum).toEqual(expectedEnum);
-          }
+          if (prop.enum) expect(prop.enum).toEqual(resolveProperty(prop, platform).enum);
         }
       }
+    }
+  });
+
+  it('play.source and pause.source resolve to the shared source enum, per platform', () => {
+    for (const name of ['play', 'pause']) {
+      const event = events.find(e => e.name === name)!;
+      expect(resolveProperty(propsOf(event, 'ios').source, 'ios').enum).toEqual(vocabulary.source.enum);
+      expect(resolveProperty(propsOf(event, 'android').source, 'android').enum).toEqual(
+        vocabulary.source.platformEnum.android
+      );
     }
   });
 
@@ -175,5 +201,42 @@ describe('listener-events contract', () => {
   it('stream_reconnected is android-only', () => {
     const event = events.find(e => e.name === 'stream_reconnected')!;
     expect(event.platforms).toEqual(['android']);
+  });
+});
+
+describe('listener-events schema', () => {
+  it('closes every object it defines against unknown keys', () => {
+    const open: string[] = [];
+    const walk = (node: any, path: string): void => {
+      if (!node || typeof node !== 'object') return;
+      if (node.type === 'object' && node.properties && node.additionalProperties !== false) open.push(path);
+      for (const [key, child] of Object.entries(node)) walk(child, `${path}/${key}`);
+    };
+    walk(schema, '#');
+    expect(open).toEqual([]);
+  });
+
+  it('declares every key and every enum value the data file uses', () => {
+    const eventDef = schema.$defs.event;
+    expectKeysDeclaredIn(contractJson, schema);
+    expectKeysDeclaredIn(contractJson.meta, schema.properties.meta);
+    for (const entry of Object.values(vocabulary)) {
+      expectKeysDeclaredIn(entry, schema.$defs.vocabularyEntry);
+    }
+    for (const event of events) {
+      expectKeysDeclaredIn(event, eventDef);
+      expect(eventDef.properties.status.enum).toContain(event.status);
+      if (event.platformProperties) {
+        expectKeysDeclaredIn(event.platformProperties, eventDef.properties.platformProperties);
+      }
+      for (const platform of event.platforms as Array<'ios' | 'android'>) {
+        expect(eventDef.properties.platforms.items.enum).toContain(platform);
+        for (const prop of Object.values(propsOf(event, platform))) {
+          expectKeysDeclaredIn(prop, schema.$defs.property);
+          expect(schema.$defs.propertyType.enum).toContain(prop.type);
+          if ('unit' in prop) expect(schema.$defs.propertyUnit.enum).toContain(prop.unit);
+        }
+      }
+    }
   });
 });

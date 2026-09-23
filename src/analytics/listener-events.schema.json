@@ -79,6 +79,7 @@
     },
     "event": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["name", "platforms", "status"],
       "properties": {
         "name": { "type": "string", "pattern": "^[a-z0-9_]+$" },
