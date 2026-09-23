@@ -1028,7 +1028,7 @@ describe('OpenAPI Specification', () => {
       expect(schema.required ?? []).not.toContain('lastDiscogsRecheckAt');
     });
 
-    it('defines UpdateAlbumRequest matching BS wire format exactly: 12 fields, all optional, no `required` list', () => {
+    it('defines UpdateAlbumRequest matching BS wire format exactly: 13 fields, all optional, no `required` list', () => {
       const schema = spec.components.schemas.UpdateAlbumRequest as Schema;
       expect(schema).toBeDefined();
       expect(schema.required ?? []).toEqual([]);
@@ -1041,6 +1041,8 @@ describe('OpenAPI Specification', () => {
           'format_id',
           'artist_id',
           'alternate_artist_name',
+          // BS#2004: writable on PATCH since Backend opened the column.
+          'album_artist',
           'disc_quantity',
           'code_number',
           'code_volume_letters',
@@ -1063,6 +1065,9 @@ describe('OpenAPI Specification', () => {
       expect(props.format_id?.type).toBe('integer');
       expect(props.artist_id?.type).toBe('integer');
       expect(props.alternate_artist_name?.type).toBe('string');
+      // BS#2004: nullable like alternate_artist_name — `null` clears the credit.
+      expect(props.album_artist?.type).toBe('string');
+      expect(props.album_artist?.nullable).toBe(true);
       expect(props.alternate_artist_name?.nullable).toBe(true);
       expect(props.disc_quantity?.type).toBe('integer');
     });
