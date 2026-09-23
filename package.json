@@ -77,7 +77,9 @@
     "dist",
     "api.yaml",
     "src/test-utils/wxyc-example-data.json",
-    "src/test-utils/charset-torture.json"
+    "src/test-utils/charset-torture.json",
+    "src/analytics/listener-events.json",
+    "src/analytics/listener-events.schema.json"
   ],
   "devDependencies": {
     "@openapitools/openapi-generator-cli": "^2.41.0",
