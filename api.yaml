@@ -2165,6 +2165,12 @@ components:
         alternate_artist_name:
           type: string
           nullable: true
+        album_artist:
+          type: string
+          nullable: true
+          description: >
+            Credited album artist on a compilation card (BS#2004). Omit to leave
+            the stored value alone; `null` or an empty string clears it.
         disc_quantity:
           type: integer
         code_number:
