@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wxyc.org/schemas/listener-events.schema.json",
+  "title": "WXYC listener-app analytics event contract",
+  "description": "Cross-platform PostHog event contract for the WXYC listener apps (wxyc-ios-64, WXYC-Android). See CLAUDE.md's 'Analytics event contract' section for the contract superset app rule this file's consumers implement.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["meta", "vocabulary", "events"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "description", "posthogProject", "platformAxis", "platforms"],
+      "properties": {
+        "version": { "type": "integer" },
+        "description": { "type": "string" },
+        "posthogProject": { "type": "string" },
+        "platformAxis": { "type": "string" },
+        "platforms": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ios", "android"],
+          "properties": {
+            "ios": { "type": "string" },
+            "android": { "type": "string" }
+          }
+        }
+      }
+    },
+    "vocabulary": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/vocabularyEntry" }
+    },
+    "events": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "vocabularyEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "$ref": "#/$defs/propertyType" },
+        "unit": { "$ref": "#/$defs/propertyUnit" },
+        "enum": { "type": "array", "items": { "type": "string" } },
+        "platformEnum": {
+          "type": "object",
+          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "propertyType": {
+      "type": "string",
+      "enum": ["string", "number", "integer", "boolean"]
+    },
+    "propertyUnit": {
+      "type": "string",
+      "enum": ["seconds", "milliseconds", "bytes"]
+    },
+    "property": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "$ref": "#/$defs/propertyType" },
+        "unit": { "$ref": "#/$defs/propertyUnit" },
+        "enum": { "type": "array", "items": { "type": "string" } },
+        "optional": { "type": "boolean" },
+        "vocabulary": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    },
+    "propertyMap": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/property" }
+    },
+    "event": {
+      "type": "object",
+      "required": ["name", "platforms", "status"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "platforms": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "enum": ["ios", "android"] }
+        },
+        "status": { "type": "string", "enum": ["shipped", "reserved"] },
+        "properties": { "$ref": "#/$defs/propertyMap" },
+        "platformProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ios": { "$ref": "#/$defs/propertyMap" },
+            "android": { "$ref": "#/$defs/propertyMap" }
+          }
+        },
+        "reconciled": { "const": false },
+        "tracking": { "type": "string" },
+        "openProperties": { "const": true },
+        "notes": { "type": "string" }
+      },
+      "oneOf": [
+        { "required": ["properties"] },
+        { "required": ["platformProperties"] }
+      ]
+    }
+  }
+}

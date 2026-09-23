@@ -1,0 +1,467 @@
+{
+  "meta": {
+    "version": 1,
+    "description": "Cross-platform PostHog event contract for the WXYC listener apps. Both apps report into PostHog project 134292 with shared event names; platform is carried by $lib, so compatibility lives in the properties. See WXYC-Android/docs/adr/0001-shared-posthog-project.md.",
+    "posthogProject": "134292",
+    "platformAxis": "$lib",
+    "platforms": { "ios": "posthog-ios", "android": "posthog-android" }
+  },
+  "vocabulary": {
+    "duration": {
+      "type": "number",
+      "unit": "seconds",
+      "notes": "Seconds, on `pause` only. Never on `play` -- iOS's PlaybackStartedEvent carries only reason/source/session_id. Not type-enforced on either platform; the real backstop is the PostHog `max(pause.duration)` guard alert (insight 95Ns1Slm). Any duration math must exclude the millisecond-era Android rows with `NOT ($lib = 'posthog-android' AND toFloat64OrNull(toString(properties.$app_build)) <= 38)` -- the cast is required, since '100' <= '38' is true as strings."
+    },
+    "session_id": {
+      "type": "string",
+      "notes": "A per-listen UUID, on both `play` and `pause`. iOS preserves it across `interruption began` / `route disconnected` because those are the first half of pause-then-auto-resume there; Android mints on every play and clears on every pause, because media3 never auto-resumes from either."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["app", "carPlay", "widget", "siri", "watch", "lockScreen", "remote", "auto", "unknown"],
+      "platformEnum": { "android": ["app", "remote", "auto", "unknown"] },
+      "notes": "Closed enum, on `play` and `pause` only. `enum` is iOS's canonical list (PlaybackSource.swift); `platformEnum.android` must remain a subset of it -- a value iOS does not define splits the shared breakdown in two. Other events (`artwork_cache_cleared`, `concert_detail_viewed`, `request_line_feature_flag_evaluated_event`, ...) also carry a property spelled `source`; those are per-event vocabularies on iOS-only events and are declared on the event, not here."
+    },
+    "reason": {
+      "type": "string",
+      "notes": "Free text; Android may extend it, and reuses iOS's exact wording where the same thing happens on both (`interruption began`, `route disconnected`). Those two strings select DIFFERENT POPULATIONS: iOS includes transient interruptions that auto-resume, Android sees only permanent focus loss and headphone unplug, so Android reports fewer pauses and longer durations for identical listener behaviour. Filter `source != 'auto'` to compare like for like."
+    }
+  },
+  "events": [
+    {
+      "name": "app_entered_background",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "is_playing": { "type": "boolean" }
+      }
+    },
+    {
+      "name": "app_launch",
+      "platforms": ["ios", "android"],
+      "status": "shipped",
+      "properties": {
+        "has_used_theme_picker": { "type": "boolean", "optional": true }
+      },
+      "notes": "iOS's AppLaunch carries has_used_theme_picker; iOS's AppLaunchSimple and Android's call site carry nothing."
+    },
+    {
+      "name": "artwork_cache_cleared",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "source": { "type": "string" },
+        "size_bytes": { "type": "integer", "unit": "bytes" }
+      },
+      "notes": "This `source` is free text and is not the closed playback `source` enum; iOS-only, so no cross-platform collision."
+    },
+    {
+      "name": "background_refresh_completed",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "entry_count": { "type": "string" }
+      },
+      "notes": "The init takes an Int and stringifies it."
+    },
+    {
+      "name": "bug_report_presented",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {}
+    },
+    {
+      "name": "bug_report_sent",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {}
+    },
+    {
+      "name": "carplay_connected",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {}
+    },
+    {
+      "name": "concert_calendar_flow",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "artist": { "type": "string" },
+        "venue": { "type": "string" },
+        "concert_id": { "type": "integer" },
+        "status": { "type": "string" },
+        "artist_id": { "type": "integer", "optional": true },
+        "surface": { "type": "string" },
+        "outcome": { "type": "string" }
+      }
+    },
+    {
+      "name": "concert_detail_viewed",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "artist": { "type": "string" },
+        "venue": { "type": "string" },
+        "concert_id": { "type": "integer" },
+        "status": { "type": "string" },
+        "artist_id": { "type": "integer", "optional": true },
+        "source": { "type": "string" }
+      }
+    },
+    {
+      "name": "concert_directions_tapped",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "artist": { "type": "string" },
+        "venue": { "type": "string" },
+        "concert_id": { "type": "integer" },
+        "status": { "type": "string" },
+        "artist_id": { "type": "integer", "optional": true },
+        "surface": { "type": "string" }
+      }
+    },
+    {
+      "name": "concert_share_initiated",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "artist": { "type": "string" },
+        "venue": { "type": "string" },
+        "concert_id": { "type": "integer" },
+        "status": { "type": "string" },
+        "artist_id": { "type": "integer", "optional": true },
+        "surface": { "type": "string" }
+      }
+    },
+    {
+      "name": "concert_tickets_tapped",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "artist": { "type": "string" },
+        "venue": { "type": "string" },
+        "concert_id": { "type": "integer" },
+        "status": { "type": "string" },
+        "artist_id": { "type": "integer", "optional": true },
+        "surface": { "type": "string" }
+      }
+    },
+    {
+      "name": "device_fingerprint_init_failed_event",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "error": { "type": "string" }
+      }
+    },
+    {
+      "name": "error",
+      "platforms": ["ios", "android"],
+      "status": "shipped",
+      "reconciled": false,
+      "tracking": "https://github.com/WXYC/WXYC-Android/issues/52",
+      "openProperties": true,
+      "platformProperties": {
+        "ios": {
+          "error": { "type": "string" },
+          "context": { "type": "string" },
+          "code": { "type": "integer", "optional": true },
+          "domain": { "type": "string", "optional": true },
+          "category": { "type": "string", "optional": true }
+        },
+        "android": {
+          "description": { "type": "string" },
+          "context": { "type": "string" },
+          "error_type": { "type": "string", "optional": true }
+        }
+      },
+      "notes": "Android writes the message under `description` and iOS under `error`; Android's `error_type` (a Java class name) collides by name with iOS's `stream_error.error_type` (a StreamErrorType). Always scope by $lib."
+    },
+    {
+      "name": "external_link_tapped",
+      "platforms": ["ios", "android"],
+      "status": "shipped",
+      "properties": {
+        "service": { "type": "string" },
+        "song_title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" }
+      },
+      "notes": "Android's `service` carries a service name (\"Discogs\", \"Wikipedia\"), not a URL, deliberately, because that is the key iOS uses."
+    },
+    {
+      "name": "feedback_email_presented",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {}
+    },
+    {
+      "name": "feedback_email_sent",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {}
+    },
+    {
+      "name": "foreground_session",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "duration_seconds": { "type": "number", "unit": "seconds" },
+        "is_playing": { "type": "boolean" }
+      },
+      "notes": "The key is duration_seconds, not duration -- the shared duration vocabulary binds pause only."
+    },
+    {
+      "name": "handle_in_intent",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "intent_data": { "type": "string" }
+      }
+    },
+    {
+      "name": "party_horn_presented",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {}
+    },
+    {
+      "name": "pause",
+      "platforms": ["ios", "android"],
+      "status": "shipped",
+      "properties": {
+        "duration": { "type": "number", "unit": "seconds", "vocabulary": "duration", "optional": true },
+        "source": { "type": "string", "vocabulary": "source" },
+        "reason": { "type": "string", "vocabulary": "reason", "optional": true },
+        "session_id": { "type": "string", "vocabulary": "session_id", "optional": true }
+      },
+      "notes": "Android sends duration optional -- it omits rather than substitutes when the start was never observed."
+    },
+    {
+      "name": "pause_wxyc_intent",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {}
+    },
+    {
+      "name": "play",
+      "platforms": ["ios", "android"],
+      "status": "shipped",
+      "properties": {
+        "reason": { "type": "string", "vocabulary": "reason" },
+        "source": { "type": "string", "vocabulary": "source" },
+        "session_id": { "type": "string", "vocabulary": "session_id", "optional": true }
+      }
+    },
+    {
+      "name": "playcut_detail_view_presented",
+      "platforms": ["ios", "android"],
+      "status": "shipped",
+      "properties": {
+        "song_title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" }
+      }
+    },
+    {
+      "name": "push_permission_prompted",
+      "platforms": ["ios", "android"],
+      "status": "reserved",
+      "properties": {
+        "context": { "type": "string", "enum": ["request_reply"] }
+      }
+    },
+    {
+      "name": "push_permission_result",
+      "platforms": ["ios", "android"],
+      "status": "reserved",
+      "properties": {
+        "granted": { "type": "boolean" }
+      }
+    },
+    {
+      "name": "request_line_auth_failed_event",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "error": { "type": "string" },
+        "phase": { "type": "string", "enum": ["keychain", "network", "parse", "jwtExchange"] }
+      },
+      "notes": "Note the camelCase raw value on `phase` (\"jwtExchange\") -- that is the shipped wire value."
+    },
+    {
+      "name": "request_line_auth_resolved",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "outcome": { "type": "string", "enum": ["keychain_hit", "token_refresh", "fresh_sign_in"] },
+        "fingerprint_mode": { "type": "string", "enum": ["existing", "synchronizable", "local", "failed"] },
+        "premature_access_count": { "type": "integer" },
+        "duration_ms": { "type": "number", "unit": "milliseconds" },
+        "duration_clamped": { "type": "boolean" },
+        "jwt_duration_ms": { "type": "number", "unit": "milliseconds", "optional": true }
+      },
+      "notes": "The _ms suffix is load-bearing in a project where the unsuffixed duration is seconds."
+    },
+    {
+      "name": "request_line_feature_flag_evaluated_event",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "source": { "type": "string", "enum": ["flag", "override", "unwired"] }
+      },
+      "notes": "iOS-only event; this source is not the playback vocabulary."
+    },
+    {
+      "name": "request_line_keychain_error_event",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "operation": { "type": "string", "enum": ["read", "write", "delete"] },
+        "os_status": { "type": "integer" }
+      }
+    },
+    {
+      "name": "request_line_request_completed_event",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "authenticated": { "type": "boolean" },
+        "status_code": { "type": "integer" },
+        "duration_ms": { "type": "number", "unit": "milliseconds" }
+      }
+    },
+    {
+      "name": "request_line_token_refreshed_event",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "reason": { "type": "string", "enum": ["401", "expired"] },
+        "success": { "type": "boolean" }
+      },
+      "notes": "This `reason` is a closed enum on an iOS-only event and is not the shared free-text reason vocabulary."
+    },
+    {
+      "name": "request_line_user_banned_event",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "user_id": { "type": "string" }
+      }
+    },
+    {
+      "name": "request_reply_dismissed",
+      "platforms": ["ios", "android"],
+      "status": "reserved",
+      "properties": {}
+    },
+    {
+      "name": "request_reply_received",
+      "platforms": ["ios", "android"],
+      "status": "reserved",
+      "properties": {
+        "delivery": { "type": "string", "enum": ["push", "fetch"] },
+        "latency_seconds": { "type": "number", "unit": "seconds" }
+      }
+    },
+    {
+      "name": "request_reply_viewed",
+      "platforms": ["ios", "android"],
+      "status": "reserved",
+      "properties": {}
+    },
+    {
+      "name": "siri_intent_donated",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "intent_data": { "type": "string" }
+      }
+    },
+    {
+      "name": "song_like_toggled",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "action": { "type": "string" },
+        "surface": { "type": "string" },
+        "total_bucket": { "type": "string" },
+        "song_title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" },
+        "artist_id": { "type": "integer", "optional": true }
+      }
+    },
+    {
+      "name": "stream_error",
+      "platforms": ["ios", "android"],
+      "status": "shipped",
+      "reconciled": false,
+      "tracking": "https://github.com/WXYC/WXYC-Android/issues/52",
+      "platformProperties": {
+        "ios": {
+          "player_type": { "type": "string" },
+          "error_type": { "type": "string" },
+          "error_description": { "type": "string" },
+          "reconnect_attempts": { "type": "integer" },
+          "session_duration": { "type": "number", "unit": "seconds" },
+          "recovery_method": { "type": "string" },
+          "session_id": { "type": "string", "optional": true }
+        },
+        "android": {
+          "reason": { "type": "string" },
+          "attempt": { "type": "integer" },
+          "delay_ms": { "type": "integer", "unit": "milliseconds" },
+          "played_for_ms": { "type": "integer", "unit": "milliseconds" }
+        }
+      },
+      "notes": "Same name, different meaning, zero overlapping property keys -- Android emits per reconnect attempt from scheduleReconnect, iOS emits once per episode at terminal escalation. count(stream_error) is not comparable across platforms and never was. Neither side is renamed here; recording the divergence is the point."
+    },
+    {
+      "name": "stream_reconnected",
+      "platforms": ["android"],
+      "status": "shipped",
+      "properties": {
+        "attempts": { "type": "integer" }
+      },
+      "notes": "No iOS counterpart at all (iOS's nearest is stall_recovery), so this is Android-only rather than colliding."
+    },
+    {
+      "name": "streaming_link_tapped",
+      "platforms": ["ios", "android"],
+      "status": "shipped",
+      "properties": {
+        "service": { "type": "string" },
+        "song_title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" }
+      }
+    },
+    {
+      "name": "whats_playing_on_wxyc_intent",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {}
+    },
+    {
+      "name": "widget_get_snapshot",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "family": { "type": "string" }
+      }
+    },
+    {
+      "name": "widget_get_timeline",
+      "platforms": ["ios"],
+      "status": "shipped",
+      "properties": {
+        "family": { "type": "string" },
+        "outcome": { "type": "string", "enum": ["ok", "empty", "fetch_failed"] }
+      }
+    }
+  ]
+}

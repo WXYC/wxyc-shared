@@ -295,6 +295,24 @@ Run `npm run check:version-bump` locally before opening a PR that touches `api.y
 
 When two contract PRs touch `api.yaml` in parallel worktrees, only the one that lands first bumps against the version it started from. The second is protected structurally, not by a merge queue or a merge-time re-check — neither exists in this repo. What actually defends it: the gate runs on GitHub's `refs/pull/N/merge` preview (which folds in whatever `main` holds when the job runs), and once the first PR lands, the second's rebase hits a conflict on the `version:` line — both edited it — forcing a push, and the push re-fires the gate against the new base. When resolving that conflict, take the **higher** version and raise it: rebase's ours/theirs inversion makes the intuitive "keep mine" silently restore the older number, which the gate rejects as backward motion. Don't pre-emptively bump on behalf of a sibling PR you can see is coming; the rebase conflict is the mechanism that makes the second author bump deliberately. Also know what the gate is not: with no `required_status_checks` rule on `main` (and org admins holding ruleset bypass), a red X is a signal a reviewer must notice, not a merge block.
 
+## Analytics event contract
+
+`src/analytics/listener-events.json` (documented by the hand-written `src/analytics/listener-events.schema.json`) is the cross-platform PostHog event contract for the WXYC listener apps. Both apps report into PostHog project `134292` with shared event names — platform is carried by `$lib`, not by the name — so compatibility has to live in the properties; see `WXYC-Android/docs/adr/0001-shared-posthog-project.md`. Its two consumers are `wxyc-ios-64` and `WXYC-Android`, each vendoring the file at a pinned merge SHA and converting its own hardcoded event-name-pin suite into a **contract ⊇ app** assertion.
+
+The contract ⊇ app rule, verbatim, for platform `P` and an event named `E` that the app declares with wire property keys `K`:
+
+1. exactly one entry in `events` has `name == E`;
+2. that entry's `platforms` contains `P`;
+3. let `props = entry.platformProperties[P]` if `platformProperties` is present, else `entry.properties`; then `K ⊆ keys(props)`, unless `entry.openProperties` is `true`, in which case only the non-`optional` keys of `props` must be ⊆ `K`;
+4. for each `k ∈ K` the app's type/unit/enum agrees with `props[k]`;
+5. the contract MAY hold names and properties the app does not emit — a `"reserved"` entry, or the other platform's — and that is the direction of the ⊇. A rename, a unit drift, or a dropped property fails **in the repo that drifted**.
+
+This file is **data only**: it touches no version number, cuts no tag, and is not gated by `check-version-bump.sh` (that gate reads `api.yaml`'s content only, and this file changing content leaves `api.yaml` byte-identical). Consumers pin this file by its **merge SHA**, not by a tag — there is no release step for it, unlike `api.yaml`'s `gha`/`vN` tags above.
+
+```bash
+npm test               # runs tests/listener-events.test.ts among the rest of the suite
+```
+
 ## Testing
 
 ```bash
