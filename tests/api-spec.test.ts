@@ -188,7 +188,19 @@ describe('OpenAPI Specification', () => {
   // the #503 block failed: silently. Pin the shape against the handler rather
   // than trusting that a reviewer re-read both.
   describe('POST /auth/wxyc/update-identity', () => {
-    const op = () => spec.paths['/auth/wxyc/update-identity'].post;
+    type Operation = {
+      security?: Array<Record<string, string[]>>;
+      responses: Record<string, { content: Record<string, { schema: { $ref?: string } }> }>;
+    };
+    type Schema = {
+      enum?: unknown[];
+      required?: string[];
+      properties?: Record<string, { $ref?: string; enum?: unknown[]; maxLength?: number; nullable?: boolean }>;
+    };
+
+    const op = (): Operation =>
+      (spec.paths['/auth/wxyc/update-identity'] as Record<string, unknown>).post as Operation;
+    const schema = (name: string): Schema => spec.components.schemas[name] as Schema;
 
     it('is declared and session-authenticated', () => {
       expect(op()).toBeDefined();
@@ -203,33 +215,34 @@ describe('OpenAPI Specification', () => {
     // shape; the 429 comes from the express limiter, which is also code-less.
     // Every other error carries a code, which is what lets `code` be required.
     it('routes each error response to the shape that body actually has', () => {
-      const schemaFor = (status) => op().responses[status].content['application/json'].schema.$ref;
+      const schemaFor = (status: string): string | undefined =>
+        op().responses[status]?.content['application/json']?.schema.$ref;
       for (const status of ['400', '401', '403']) {
         expect(schemaFor(status)).toBe('#/components/schemas/UpdateIdentityErrorResponse');
       }
       for (const status of ['429', '500']) {
         expect(schemaFor(status)).toBe('#/components/schemas/AuthPlainErrorResponse');
       }
-      expect(spec.components.schemas.UpdateIdentityErrorResponse.required).toEqual(['error', 'code']);
+      expect(schema('UpdateIdentityErrorResponse').required).toEqual(['error', 'code']);
     });
 
     it('admits exactly the two fields the handler allowlists, both bounded', () => {
-      const props = spec.components.schemas.UpdateIdentityRequest.properties;
-      expect(Object.keys(props).sort()).toEqual(['djName', 'realName']);
-      for (const key of Object.keys(props)) {
-        expect(props[key].maxLength).toBe(255);
+      const request = schema('UpdateIdentityRequest');
+      const props = Object.entries(request.properties ?? {});
+      expect(props.map(([key]) => key).sort()).toEqual(['djName', 'realName']);
+      for (const [, prop] of props) {
+        expect(prop.maxLength).toBe(255);
+        // Neither field may be nullable: the handler 400s on an explicit null,
+        // and declaring it accepted would be a shape no client can rely on.
+        expect(prop.nullable).toBeUndefined();
       }
-      // Neither is individually required -- "at least one" is a handler rule
-      // OpenAPI cannot express -- but neither may be nullable either: the
-      // handler 400s on an explicit null.
-      expect(spec.components.schemas.UpdateIdentityRequest.required).toBeUndefined();
-      for (const key of Object.keys(props)) {
-        expect(props[key].nullable).toBeUndefined();
-      }
+      // Neither is individually required either -- "at least one" is a handler
+      // rule OpenAPI cannot express.
+      expect(request.required).toBeUndefined();
     });
 
     it('pins the error codes the handler raises', () => {
-      expect(spec.components.schemas.UpdateIdentityErrorCode.enum).toEqual([
+      expect(schema('UpdateIdentityErrorCode').enum).toEqual([
         'UNAUTHORIZED',
         'FORBIDDEN',
         'INVALID_REQUEST',
@@ -243,12 +256,15 @@ describe('OpenAPI Specification', () => {
     // renames unrelated committed types in every consumer that vendors the
     // models -- measured on this very operation before it was fixed.
     it('keeps both enums behind named schemas rather than inline', () => {
-      const res = spec.components.schemas.UpdateIdentityResponse.properties;
-      expect(res.status.$ref).toBe('#/components/schemas/UpdateIdentityAck');
-      expect(res.status.enum).toBeUndefined();
-      const err = spec.components.schemas.UpdateIdentityErrorResponse.properties;
-      expect(err.code.$ref).toBe('#/components/schemas/UpdateIdentityErrorCode');
-      expect(err.code.enum).toBeUndefined();
+      const property = (schemaName: string, key: string) => (schema(schemaName).properties ?? {})[key];
+
+      const status = property('UpdateIdentityResponse', 'status');
+      expect(status?.$ref).toBe('#/components/schemas/UpdateIdentityAck');
+      expect(status?.enum).toBeUndefined();
+
+      const code = property('UpdateIdentityErrorResponse', 'code');
+      expect(code?.$ref).toBe('#/components/schemas/UpdateIdentityErrorCode');
+      expect(code?.enum).toBeUndefined();
     });
   });
 
