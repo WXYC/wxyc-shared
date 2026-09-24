@@ -184,6 +184,75 @@ describe('OpenAPI Specification', () => {
     });
   });
 
+  // A generated-client defect from this operation fails the way every one in
+  // the #503 block failed: silently. Pin the shape against the handler rather
+  // than trusting that a reviewer re-read both.
+  describe('POST /auth/wxyc/update-identity', () => {
+    const op = () => spec.paths['/auth/wxyc/update-identity'].post;
+
+    it('is declared and session-authenticated', () => {
+      expect(op()).toBeDefined();
+      expect(op().security).toEqual([{ SessionBearerAuth: [] }]);
+    });
+
+    it('declares every status the handler can answer', () => {
+      expect(Object.keys(op().responses).sort()).toEqual(['200', '400', '401', '403', '429', '500']);
+    });
+
+    // The 500 is the one code-less error body, which is why it uses the plain
+    // shape; the 429 comes from the express limiter, which is also code-less.
+    // Every other error carries a code, which is what lets `code` be required.
+    it('routes each error response to the shape that body actually has', () => {
+      const schemaFor = (status) => op().responses[status].content['application/json'].schema.$ref;
+      for (const status of ['400', '401', '403']) {
+        expect(schemaFor(status)).toBe('#/components/schemas/UpdateIdentityErrorResponse');
+      }
+      for (const status of ['429', '500']) {
+        expect(schemaFor(status)).toBe('#/components/schemas/AuthPlainErrorResponse');
+      }
+      expect(spec.components.schemas.UpdateIdentityErrorResponse.required).toEqual(['error', 'code']);
+    });
+
+    it('admits exactly the two fields the handler allowlists, both bounded', () => {
+      const props = spec.components.schemas.UpdateIdentityRequest.properties;
+      expect(Object.keys(props).sort()).toEqual(['djName', 'realName']);
+      for (const key of Object.keys(props)) {
+        expect(props[key].maxLength).toBe(255);
+      }
+      // Neither is individually required -- "at least one" is a handler rule
+      // OpenAPI cannot express -- but neither may be nullable either: the
+      // handler 400s on an explicit null.
+      expect(spec.components.schemas.UpdateIdentityRequest.required).toBeUndefined();
+      for (const key of Object.keys(props)) {
+        expect(props[key].nullable).toBeUndefined();
+      }
+    });
+
+    it('pins the error codes the handler raises', () => {
+      expect(spec.components.schemas.UpdateIdentityErrorCode.enum).toEqual([
+        'UNAUTHORIZED',
+        'FORBIDDEN',
+        'INVALID_REQUEST',
+        'INVALID_DJ_NAME',
+        'UPDATE_FAILED',
+      ]);
+    });
+
+    // Both enums must stay NAMED. Inlining either one makes the Python
+    // generator emit a bare top-level class numbered by document order, which
+    // renames unrelated committed types in every consumer that vendors the
+    // models -- measured on this very operation before it was fixed.
+    it('keeps both enums behind named schemas rather than inline', () => {
+      const res = spec.components.schemas.UpdateIdentityResponse.properties;
+      expect(res.status.$ref).toBe('#/components/schemas/UpdateIdentityAck');
+      expect(res.status.enum).toBeUndefined();
+      const err = spec.components.schemas.UpdateIdentityErrorResponse.properties;
+      expect(err.code.$ref).toBe('#/components/schemas/UpdateIdentityErrorCode');
+      expect(err.code.enum).toBeUndefined();
+    });
+  });
+
+
   describe('Common Schemas', () => {
     it('should define ApiErrorResponse', () => {
       expect(spec.components.schemas.ApiErrorResponse).toBeDefined();
