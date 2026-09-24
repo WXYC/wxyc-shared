@@ -4,7 +4,15 @@
     "description": "Cross-platform PostHog event contract for the WXYC listener apps. Both apps report into PostHog project 134292 with shared event names; platform is carried by $lib, so compatibility lives in the properties. See WXYC-Android/docs/adr/0001-shared-posthog-project.md.",
     "posthogProject": "134292",
     "platformAxis": "$lib",
-    "platforms": { "ios": "posthog-ios", "android": "posthog-android" }
+    "platforms": { "ios": "posthog-ios", "android": "posthog-android" },
+    "commonProperties": {
+      "ios": {
+        "build_type": { "type": "string", "notes": "Stamped by StructuredPostHogAnalytics.capture on every event from the WXYC_BUILD_TYPE Info.plist key (`unknown` when the key is absent); an event that already carries build_type keeps its own value. Outside K in the contract superset app rule." }
+      },
+      "android": {
+        "Build Configuration": { "type": "string", "enum": ["Debug", "Release"], "notes": "Registered once in WXYCApplication as a PostHog super property from BuildConfig.DEBUG, so the SDK attaches it to every capture. Not the same key or vocabulary as iOS's build_type. Outside K in the contract superset app rule." }
+      }
+    }
   },
   "vocabulary": {
     "duration": {
@@ -174,10 +182,11 @@
         "android": {
           "description": { "type": "string" },
           "context": { "type": "string" },
-          "error_type": { "type": "string", "optional": true }
+          "error_type": { "type": "string", "optional": true },
+          "error_code": { "type": "string", "optional": true }
         }
       },
-      "notes": "Android writes the message under `description` and iOS under `error`; Android's `error_type` (a Java class name) collides by name with iOS's `stream_error.error_type` (a StreamErrorType). Always scope by $lib."
+      "notes": "Android writes the message under `description` and iOS under `error`. Android's `error_type` is the throwable's simple class name (`javaClass.simpleName`, only on the Throwable overload of captureError) and collides by name with iOS's `stream_error.error_type` (a StreamErrorType); `error_code` is media3's errorCodeName, added through additionalData by AudioPlaybackService on playback errors only. Always scope by $lib."
     },
     {
       "name": "external_link_tapped",
@@ -254,7 +263,7 @@
         "source": { "type": "string", "vocabulary": "source" },
         "session_id": { "type": "string", "vocabulary": "session_id", "optional": true }
       },
-      "notes": "iOS always sends reason (PlaybackStartedEvent.reason is non-optional). Android omits it on every non-`auto` play: PlaybackAttribution.resolve returns a null reason for REMOTE and for every fromOrigin branch, and PlaybackEventProperties.build drops null keys."
+      "notes": "iOS always sends reason (PlaybackStartedEvent.reason is non-optional). Android never sends it on `play`: every PlaybackAttribution.resolve branch that can accompany a play -- REMOTE and the fromOrigin branches -- returns a null reason, which PlaybackEventProperties.build drops; the four `auto` branches that do carry a reason are media3 pause reasons, so an Android `play` is never `source = auto` either."
     },
     {
       "name": "playcut_detail_view_presented",
@@ -463,7 +472,8 @@
       "properties": {
         "family": { "type": "string" },
         "outcome": { "type": "string", "enum": ["ok", "empty", "fetch_failed"] }
-      }
+      },
+      "notes": "`ok` is a case of the Swift enum but never reaches the wire: WidgetTimelineOutcome.isReportable is false for .ok and WidgetGetTimeline's failable init returns nil, so only `empty` and `fetch_failed` rows exist."
     }
   ]
 }

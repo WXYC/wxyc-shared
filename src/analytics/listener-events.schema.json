@@ -24,6 +24,14 @@
             "ios": { "type": "string" },
             "android": { "type": "string" }
           }
+        },
+        "commonProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ios": { "$ref": "#/$defs/propertyMap" },
+            "android": { "$ref": "#/$defs/propertyMap" }
+          }
         }
       }
     },
@@ -47,6 +55,7 @@
         "enum": { "type": "array", "items": { "type": "string" } },
         "platformEnum": {
           "type": "object",
+          "propertyNames": { "enum": ["ios", "android"] },
           "additionalProperties": { "type": "array", "items": { "type": "string" } }
         },
         "notes": { "type": "string" }
@@ -86,12 +95,14 @@
         "platforms": {
           "type": "array",
           "minItems": 1,
+          "uniqueItems": true,
           "items": { "type": "string", "enum": ["ios", "android"] }
         },
         "status": { "type": "string", "enum": ["shipped", "reserved"] },
         "properties": { "$ref": "#/$defs/propertyMap" },
         "platformProperties": {
           "type": "object",
+          "minProperties": 1,
           "additionalProperties": false,
           "properties": {
             "ios": { "$ref": "#/$defs/propertyMap" },
@@ -103,6 +114,7 @@
         "openProperties": { "const": true },
         "notes": { "type": "string" }
       },
+      "dependentRequired": { "reconciled": ["tracking", "platformProperties"] },
       "oneOf": [
         { "required": ["properties"] },
         { "required": ["platformProperties"] }

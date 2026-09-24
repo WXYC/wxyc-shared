@@ -14,10 +14,11 @@ type ListenerEvent = {
 };
 
 const contract = contractJson as {
+  meta: Record<string, any>;
   vocabulary: Record<string, any>;
   events: ListenerEvent[];
 };
-const { vocabulary, events } = contract;
+const { meta, vocabulary, events } = contract;
 const schema = schemaJson as Record<string, any>;
 
 const RESERVED_NAMES = [
@@ -46,8 +47,8 @@ function resolveProperty(prop: Record<string, any>, platform: 'ios' | 'android')
   return {
     ...prop,
     type: vocab.type,
-    unit: vocab.unit ?? prop.unit,
-    enum: vocab.platformEnum?.[platform] ?? vocab.enum ?? prop.enum,
+    unit: vocab.unit,
+    enum: vocab.platformEnum?.[platform] ?? vocab.enum,
   };
 }
 
@@ -96,10 +97,24 @@ describe('listener-events contract', () => {
     }
   });
 
+  it('platforms is duplicate-free and, with platformProperties, names exactly its blocks', () => {
+    for (const event of events) {
+      expect(new Set(event.platforms).size).toBe(event.platforms.length);
+      if (!event.platformProperties) continue;
+      expect(Object.keys(event.platformProperties).sort()).toEqual([...event.platforms].sort());
+    }
+  });
+
   it('every entry has a status of shipped or reserved', () => {
     for (const event of events) {
       expect(['shipped', 'reserved']).toContain(event.status);
     }
+  });
+
+  it('openProperties is true on error and absent everywhere else', () => {
+    const open = events.filter(e => e.openProperties !== undefined);
+    expect(open.map(e => e.name)).toEqual(['error']);
+    for (const event of open) expect(event.openProperties).toBe(true);
   });
 
   it('reconciled appears only as false, only with platformProperties, and only alongside a tracking string', () => {
@@ -134,11 +149,11 @@ describe('listener-events contract', () => {
       for (const platform of event.platforms as Array<'ios' | 'android'>) {
         for (const prop of Object.values(propsOf(event, platform))) {
           if (!prop.vocabulary) continue;
-          const vocab = vocabulary[prop.vocabulary];
-          expect(vocab).toBeDefined();
-          expect(prop.type).toBe(vocab.type);
-          if (vocab.unit) expect(prop.unit).toBe(vocab.unit);
-          if (prop.enum) expect(prop.enum).toEqual(resolveProperty(prop, platform).enum);
+          expect(vocabulary[prop.vocabulary]).toBeDefined();
+          const resolved = resolveProperty(prop, platform);
+          expect(prop.type).toBe(resolved.type);
+          expect(prop.unit).toBe(resolved.unit);
+          if ('enum' in prop) expect(prop.enum).toEqual(resolved.enum);
         }
       }
     }
@@ -154,10 +169,16 @@ describe('listener-events contract', () => {
     }
   });
 
-  it('vocabulary.source.platformEnum.android is a subset of vocabulary.source.enum', () => {
-    const source = vocabulary.source;
-    for (const value of source.platformEnum.android) {
-      expect(source.enum).toContain(value);
+  it('every platformEnum names only ios/android and is a subset of its vocabulary enum', () => {
+    expect(vocabulary.source.platformEnum.android).toBeDefined();
+    for (const entry of Object.values(vocabulary)) {
+      if (!entry.platformEnum) continue;
+      for (const [platform, values] of Object.entries(entry.platformEnum)) {
+        expect(['ios', 'android']).toContain(platform);
+        for (const value of values as string[]) {
+          expect(entry.enum).toContain(value);
+        }
+      }
     }
   });
 
@@ -219,7 +240,14 @@ describe('listener-events schema', () => {
   it('declares every key and every enum value the data file uses', () => {
     const eventDef = schema.$defs.event;
     expectKeysDeclaredIn(contractJson, schema);
-    expectKeysDeclaredIn(contractJson.meta, schema.properties.meta);
+    expectKeysDeclaredIn(meta, schema.properties.meta);
+    expectKeysDeclaredIn(meta.commonProperties, schema.properties.meta.properties.commonProperties);
+    for (const props of Object.values(meta.commonProperties) as Array<Record<string, any>>) {
+      for (const prop of Object.values(props)) {
+        expectKeysDeclaredIn(prop, schema.$defs.property);
+        expect(schema.$defs.propertyType.enum).toContain(prop.type);
+      }
+    }
     for (const entry of Object.values(vocabulary)) {
       expectKeysDeclaredIn(entry, schema.$defs.vocabularyEntry);
     }
