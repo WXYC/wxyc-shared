@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.4.0
+  version: 10.5.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -6321,6 +6321,72 @@ components:
         email:
           type: string
           nullable: true
+
+    UpdateIdentityRequest:
+      type: object
+      description: >
+        Body for POST /auth/wxyc/update-identity — a WXYC-custom route (see
+        the path's own comment), not a better-auth one. Both properties are
+        optional individually but at least one must be present; a body
+        carrying neither is a 400. Absent means "leave unchanged"; blank is
+        NOT a clear (the handler rejects it) because these are the two
+        identity fields the settings form marks non-clearable and a blank
+        handle would leave the public on-air name stale rather than empty.
+      properties:
+        realName:
+          type: string
+          maxLength: 255
+          description: >
+            The DJ's legal name — PII (docs/pii.md), never rendered to a
+            public surface. Maps to auth_user.real_name.
+        djName:
+          type: string
+          maxLength: 255
+          description: >
+            The on-air HANDLE, not a legal name — this is the value public
+            surfaces display. Maps to auth_user.dj_name. The literal
+            "Anonymous" (case-insensitive) is rejected: resolveDjDisplayName
+            treats it as unusable, so accepting it would leave dj_name and
+            the derived auth_user.name in disagreement.
+
+    UpdateIdentityResponse:
+      type: object
+      description: >
+        Echoes back only the fields the request actually wrote, so a client
+        can tell a partial submission from a full one.
+      required:
+        - status
+        - userId
+      properties:
+        status:
+          type: boolean
+          enum: [true]
+        userId:
+          type: string
+        realName:
+          type: string
+        djName:
+          type: string
+
+    UpdateIdentityErrorResponse:
+      type: object
+      description: >
+        `{error, code}` — the shape POST /auth/wxyc/update-identity's own
+        Express handler answers with. Distinct from AuthPlainErrorResponse
+        (`{error}` only, no code) and from both better-auth shapes. `code`
+        is machine-readable and stable; `error` is display text.
+      required:
+        - error
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          enum:
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - INVALID_REQUEST
+            - INVALID_DJ_NAME
 
     OTPType:
       type: string
@@ -15691,6 +15757,95 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthPlainErrorResponse'
+
+  /auth/wxyc/update-identity:
+    post:
+      x-wxyc-service: backend-service
+      summary: Update the signed-in DJ's own personal name and on-air handle
+      description: >
+        WXYC-CUSTOM ROUTE — updateIdentityHandler in Backend-Service
+        apps/auth/app.ts, not a better-auth endpoint, and NOT covered by
+        this file's better-auth pinned-mirror comment above.
+
+        This route exists because BS#2297 locked `realName`/`djName` to
+        `input: false` in better-auth's `user.additionalFields`, which
+        closes the public POST /auth/update-user to both fields — that
+        route answers 400 "djName is not allowed to be set" for any attempt.
+        The lock is correct and stays; a DJ editing their OWN two fields is
+        the one legitimate case it over-closed, so it is served here rather
+        than by relaxing the lock.
+
+        Scope is deliberately narrow. The subject is ALWAYS the session's
+        own user — there is no userId parameter, and a body-supplied one is
+        ignored; editing another account is the admin plugin's job. The
+        handler forwards a two-field allowlist rather than the request body,
+        so no other auth_user column (capabilities, role, emailVerified, the
+        self-signup review columns) is reachable through it. Writes go via
+        internalAdapter.updateUser, so the databaseHooks name-derivation
+        choke point still re-derives auth_user.name from the new handle.
+      security:
+        - SessionBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIdentityRequest'
+      responses:
+        '200':
+          description: Updated. Echoes back only the fields that were written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateIdentityResponse'
+        '400':
+          description: >
+            INVALID_REQUEST — neither field supplied, a field blank, over
+            255 characters, or not a string. INVALID_DJ_NAME — djName is
+            the reserved literal "Anonymous".
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateIdentityErrorResponse'
+        '401':
+          description: UNAUTHORIZED — no session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateIdentityErrorResponse'
+        '403':
+          description: >
+            FORBIDDEN — the session is anonymous (a listener-app device
+            session, not a DJ account).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateIdentityErrorResponse'
+        '429':
+          description: >
+            Rate limited — Express's updateUserRateLimit (300 requests /
+            60 s per X-Real-IP), the SAME instance POST /auth/update-user
+            uses, NOT the 10-per-15-min authMutationRateLimit bucket the
+            sign-in operations share. The key is the shared Cloudflare
+            edge rather than one DJ, so the budget is sized for a whole
+            edge bucket's worth of profile writes. This route never reaches
+            better-auth's request pipeline, so its 429 is always this
+            shape, never a oneOf.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+              description: Seconds until the express-layer bucket resets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPlainErrorResponse'
+        '500':
+          description: '"Internal server error" — unexpected failure writing the row.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateIdentityErrorResponse'
 
   /auth/email-otp/send-verification-otp:
     post:
