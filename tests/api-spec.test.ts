@@ -1601,7 +1601,7 @@ describe('OpenAPI Specification', () => {
     // `propertyOf` already follows inline `allOf` branches, which is where
     // FlowsheetV2TrackEntry's declaration lives, so no special-casing is
     // needed; a text scan would also couple this assertion to formatting,
-    // and these descriptions are byte-identical across two schemas -- the
+    // and these descriptions are byte-identical across several schemas -- the
     // exact condition that produced the `&streaming-url-note-album` anchor
     // elsewhere in this document, which a text scan would stop matching.
     //
@@ -7855,19 +7855,36 @@ describe('OpenAPI Specification', () => {
 
     // The binding copy constraint: nothing may claim the badge means the
     // release was in rotation when this entry aired. The honest reading is
-    // pinned positively, because a forbidden-phrase list only catches the
-    // phrasings someone thought of; the sweep over the whole schema (every
-    // description, title and example) then excludes the one sanctioned
-    // negation and rejects the claim anywhere else it appears.
+    // pinned positively, which catches the sanctioned sentence being reworded
+    // into the claim. The sweep then catches the claim being ADDED beside it:
+    // it reads every string in the schema (descriptions, titles, examples),
+    // collapses whitespace so a `|` literal block's line breaks cannot split a
+    // phrase, removes the one sanctioned negation, and rejects the common
+    // phrasings of the claim in what is left. It is a tripwire for the likely
+    // rewordings, not a proof that no paraphrase exists.
     it('describes rotation_bin as "in rotation at some point", never "in rotation when this aired"', () => {
       const description = String(propertyOf('PlaylistSearchResult', 'rotation_bin')?.description);
       expect(description).toMatch(
         /in rotation at some point, not that it was in rotation when this entry aired/i
       );
       expect(description).toMatch(/BS#2184/);
-      expect(JSON.stringify(spec.components.schemas.PlaylistSearchResult)).not.toMatch(
-        /(?<!not that it was )in rotation (?:when|while|at the time) this (?:entry )?(?:aired|was played)/i
-      );
+
+      const stringsIn = (node: unknown): string[] =>
+        typeof node === 'string'
+          ? [node]
+          : node && typeof node === 'object'
+            ? Object.values(node).flatMap(stringsIn)
+            : [];
+      const claim =
+        /\b(?:in rotation|rotating)\b[^.]{0,40}?\b(?:when|while|at the time|as of)\b[^.]{0,40}?\b(?:air(?:ed|ing|s|time)?|played|broadcast)\b/i;
+      const claims = stringsIn(spec.components.schemas.PlaylistSearchResult)
+        .map((text) =>
+          text
+            .replace(/\s+/g, ' ')
+            .replace(/not that it was in rotation when this entry aired/gi, '')
+        )
+        .filter((text) => claim.test(text));
+      expect(claims).toEqual([]);
     });
 
     it('declares request_flag as an optional, non-nullable boolean', () => {
