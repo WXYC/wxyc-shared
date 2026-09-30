@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.5.0
+  version: 10.6.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1035,6 +1035,29 @@ components:
             `"Unknown DJ"` substitutes when that resolves to nothing.
         show_id:
           type: integer
+        rotation_bin:
+          allOf:
+            - $ref: '#/components/schemas/RotationBin'
+          nullable: true
+          description: >
+            Resolved by the shared flowsheet resolver: the writer's
+            `rotation_id` where present (unwindowed, per BS#2183), otherwise a
+            window bounded on both sides against this entry's own `add_time`.
+            Null when neither source resolves. This reports that the release
+            was in rotation at some point, not that it was in rotation when
+            this entry aired. BS#2184 tracks a known inaccuracy in the
+            retired-record cohort.
+        request_flag:
+          type: boolean
+          description: >
+            Straight from `flowsheet.request_flag`
+            (`NOT NULL DEFAULT false`), so `false` here is a real negative.
+            The key itself is optional on the wire: absent means this server
+            does not emit it, not that the request flag is unknown.
+        on_streaming:
+          type: boolean
+          nullable: true
+          description: True if this release is available on at least one streaming service. False means only available in the WXYC physical library. Null if unknown.
 
     PlaylistSearchResponse:
       type: object

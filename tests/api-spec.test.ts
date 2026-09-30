@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.5.0');
+      expect(spec.info.version).toBe('10.6.0');
     });
 
     it('should have components section', () => {
@@ -1619,6 +1619,7 @@ describe('OpenAPI Specification', () => {
           'FlowsheetV2TrackEntry',
           'LibraryCatalogItem',
           'LibrarySearchItem',
+          'PlaylistSearchResult',
           'StreamingCheckResponse',
         ].sort()
       );
@@ -7822,6 +7823,78 @@ describe('OpenAPI Specification', () => {
         expect(description.description).not.toMatch(/anywhere in this contract/);
         expect(description.description).toMatch(/listener request replies/i);
       });
+    });
+  });
+
+  describe('PlaylistSearchResult rotation/request/streaming badges (#528)', () => {
+    type SchemaProp = {
+      type?: string;
+      nullable?: boolean;
+      description?: string;
+      $ref?: string;
+      allOf?: Array<{ $ref?: string }>;
+    };
+    type Schema = {
+      properties?: Record<string, SchemaProp>;
+      required?: string[];
+    };
+
+    function playlistSearchResult(): Schema {
+      return spec.components.schemas.PlaylistSearchResult as Schema;
+    }
+
+    it('leaves the eight original fields as the only required ones', () => {
+      const schema = playlistSearchResult();
+      expect(schema.required).toEqual([
+        'id',
+        'play_date',
+        'artist_name',
+        'track_title',
+        'album_title',
+        'record_label',
+        'dj_name',
+        'show_id',
+      ]);
+    });
+
+    it('declares rotation_bin as an optional, nullable $ref to RotationBin', () => {
+      const schema = playlistSearchResult();
+      const prop = schema.properties?.rotation_bin;
+      expect(prop).toBeDefined();
+      expect(schema.required ?? []).not.toContain('rotation_bin');
+      expect(prop?.nullable).toBe(true);
+      // Sibling keys next to a bare `$ref` are ignored under OpenAPI 3.0, so
+      // `nullable` has to attach via an `allOf` wrapper, not a bare $ref.
+      const refs = [prop?.$ref, ...(prop?.allOf ?? []).map((branch) => branch.$ref)];
+      expect(refs).toContain('#/components/schemas/RotationBin');
+    });
+
+    it('never describes rotation_bin as meaning "in rotation when this aired"', () => {
+      const description = playlistSearchResult().properties?.rotation_bin?.description ?? '';
+      expect(description).not.toMatch(/in rotation when this aired/i);
+      expect(description).toMatch(/BS#2184/);
+    });
+
+    it('declares request_flag as an optional, non-nullable boolean', () => {
+      const schema = playlistSearchResult();
+      const prop = schema.properties?.request_flag;
+      expect(prop).toBeDefined();
+      expect(prop?.type).toBe('boolean');
+      expect(prop?.nullable).toBeUndefined();
+      expect(schema.required ?? []).not.toContain('request_flag');
+    });
+
+    it('declares on_streaming as an optional, nullable boolean matching AlbumSearchResult wording', () => {
+      const schema = playlistSearchResult();
+      const prop = schema.properties?.on_streaming;
+      expect(prop).toBeDefined();
+      expect(prop?.type).toBe('boolean');
+      expect(prop?.nullable).toBe(true);
+      expect(schema.required ?? []).not.toContain('on_streaming');
+      expect(prop?.description).toBe(
+        (spec.components.schemas.AlbumSearchResult as Schema).properties?.on_streaming
+          ?.description
+      );
     });
   });
 });
