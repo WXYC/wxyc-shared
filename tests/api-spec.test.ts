@@ -7827,25 +7827,8 @@ describe('OpenAPI Specification', () => {
   });
 
   describe('PlaylistSearchResult rotation/request/streaming badges (#528)', () => {
-    type SchemaProp = {
-      type?: string;
-      nullable?: boolean;
-      description?: string;
-      $ref?: string;
-      allOf?: Array<{ $ref?: string }>;
-    };
-    type Schema = {
-      properties?: Record<string, SchemaProp>;
-      required?: string[];
-    };
-
-    function playlistSearchResult(): Schema {
-      return spec.components.schemas.PlaylistSearchResult as Schema;
-    }
-
     it('leaves the eight original fields as the only required ones', () => {
-      const schema = playlistSearchResult();
-      expect(schema.required).toEqual([
+      expect(requiredKeysOf('PlaylistSearchResult')).toEqual([
         'id',
         'play_date',
         'artist_name',
@@ -7857,44 +7840,50 @@ describe('OpenAPI Specification', () => {
       ]);
     });
 
-    it('declares rotation_bin as an optional, nullable $ref to RotationBin', () => {
-      const schema = playlistSearchResult();
-      const prop = schema.properties?.rotation_bin;
-      expect(prop).toBeDefined();
-      expect(schema.required ?? []).not.toContain('rotation_bin');
+    // Same wrapper, same reason as AlbumSearchResult.rotation_bin (#191):
+    // OpenAPI 3.0 ignores `nullable` beside a bare `$ref`, so that form
+    // generates `RotationBin` with no `| null`, without complaint. Asserting
+    // the bare `$ref` is absent — not merely that RotationBin is reachable —
+    // is what makes that simplification fail here.
+    it('wraps RotationBin in allOf + nullable, never a bare $ref with a sibling nullable', () => {
+      const prop = propertyOf('PlaylistSearchResult', 'rotation_bin');
+      const allOf = prop?.allOf as Array<{ $ref?: string }> | undefined;
+      expect(prop?.$ref).toBeUndefined();
+      expect(allOf?.[0]?.$ref).toBe('#/components/schemas/RotationBin');
       expect(prop?.nullable).toBe(true);
-      // Sibling keys next to a bare `$ref` are ignored under OpenAPI 3.0, so
-      // `nullable` has to attach via an `allOf` wrapper, not a bare $ref.
-      const refs = [prop?.$ref, ...(prop?.allOf ?? []).map((branch) => branch.$ref)];
-      expect(refs).toContain('#/components/schemas/RotationBin');
     });
 
-    it('never describes rotation_bin as meaning "in rotation when this aired"', () => {
-      const description = playlistSearchResult().properties?.rotation_bin?.description ?? '';
-      expect(description).not.toMatch(/in rotation when this aired/i);
+    // The binding copy constraint: nothing may claim the badge means the
+    // release was in rotation when this entry aired. The honest reading is
+    // pinned positively, because a forbidden-phrase list only catches the
+    // phrasings someone thought of; the sweep over the whole schema (every
+    // description, title and example) then excludes the one sanctioned
+    // negation and rejects the claim anywhere else it appears.
+    it('describes rotation_bin as "in rotation at some point", never "in rotation when this aired"', () => {
+      const description = String(propertyOf('PlaylistSearchResult', 'rotation_bin')?.description);
+      expect(description).toMatch(
+        /in rotation at some point, not that it was in rotation when this entry aired/i
+      );
       expect(description).toMatch(/BS#2184/);
+      expect(JSON.stringify(spec.components.schemas.PlaylistSearchResult)).not.toMatch(
+        /(?<!not that it was )in rotation (?:when|while|at the time) this (?:entry )?(?:aired|was played)/i
+      );
     });
 
     it('declares request_flag as an optional, non-nullable boolean', () => {
-      const schema = playlistSearchResult();
-      const prop = schema.properties?.request_flag;
-      expect(prop).toBeDefined();
+      const prop = propertyOf('PlaylistSearchResult', 'request_flag');
       expect(prop?.type).toBe('boolean');
       expect(prop?.nullable).toBeUndefined();
-      expect(schema.required ?? []).not.toContain('request_flag');
     });
 
-    it('declares on_streaming as an optional, nullable boolean matching AlbumSearchResult wording', () => {
-      const schema = playlistSearchResult();
-      const prop = schema.properties?.on_streaming;
-      expect(prop).toBeDefined();
+    // Nullability is already enforced for every on_streaming site by the
+    // closed-set guard above; this pins only the reused wording.
+    it('declares on_streaming as a boolean with AlbumSearchResult.on_streaming wording verbatim', () => {
+      const prop = propertyOf('PlaylistSearchResult', 'on_streaming');
+      const albumWording = propertyOf('AlbumSearchResult', 'on_streaming')?.description;
+      expect(albumWording).toEqual(expect.any(String));
       expect(prop?.type).toBe('boolean');
-      expect(prop?.nullable).toBe(true);
-      expect(schema.required ?? []).not.toContain('on_streaming');
-      expect(prop?.description).toBe(
-        (spec.components.schemas.AlbumSearchResult as Schema).properties?.on_streaming
-          ?.description
-      );
+      expect(prop?.description).toBe(albumWording);
     });
   });
 });

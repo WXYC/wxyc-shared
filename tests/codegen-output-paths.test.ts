@@ -336,3 +336,25 @@ describe("generated LookupResponse markers stay optional and nullable (#316)", (
     expect(block).toMatch(/\bresolved: components\["schemas"\]\["IdentityResolution"\]\[\];/);
   });
 });
+
+// #528: PlaylistSearchResult.rotation_bin carries its nullability through an
+// `allOf` wrapper, because OpenAPI 3.0 ignores `nullable` written beside a bare
+// `$ref`. The spec-level guard in api-spec.test.ts asserts the wrapper; this
+// pins what openapi-typescript actually emits from it, since the bare form
+// would generate `rotation_bin?: components["schemas"]["RotationBin"];` without
+// complaint and without the `| null` the server sends for an unresolved entry.
+describe("generated PlaylistSearchResult.rotation_bin stays optional and nullable (#528)", () => {
+  const resultBlock = () => schemaBlock("PlaylistSearchResult");
+
+  it("emits rotation_bin as optional and nullable", () => {
+    expect(resultBlock()).toMatch(
+      /\brotation_bin\?: components\["schemas"\]\["RotationBin"\] \| null;/,
+    );
+  });
+
+  it("keeps show_id required", () => {
+    // Guards the assertion above against passing for the wrong reason — e.g.
+    // a regex that matches because the whole block vanished.
+    expect(resultBlock()).toMatch(/\n\s+show_id: number;/);
+  });
+});
