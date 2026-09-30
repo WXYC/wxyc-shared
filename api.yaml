@@ -1051,9 +1051,10 @@ components:
           type: boolean
           description: >
             Straight from `flowsheet.request_flag`
-            (`NOT NULL DEFAULT false`), so `false` here is a real negative.
-            The key itself is optional on the wire: absent means this server
-            does not emit it, not that the request flag is unknown.
+            (`NOT NULL DEFAULT false`), so a present `false` is a real
+            negative. The key itself is optional on the wire: absent means
+            this server does not emit the field, so treat absence as unknown,
+            not as `false`.
         on_streaming:
           type: boolean
           nullable: true
