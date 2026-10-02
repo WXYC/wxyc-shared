@@ -8060,6 +8060,23 @@ describe('OpenAPI Specification', () => {
       expect(qDescriptionAt('operation')).toEqual(qDescriptionAt('PlaylistSearchParams'));
     });
 
+    it('the inline page description matches PlaylistSearchParams.page exactly, so the two copies cannot drift', () => {
+      expect(param('page')?.description).toEqual(playlistSearchParamsProp('page')?.description);
+    });
+
+    // The date-sort-only fallback cascade: whole-word matching first, then —
+    // under the date sort only — the typing term as a prefix, then
+    // substring matching. Both copies must say so, and still without ever
+    // promising a wildcard operator.
+    it.each(['operation', 'PlaylistSearchParams'] as const)(
+      '%s q description mentions the date-sort-only prefix/substring fallback',
+      (where) => {
+        const description = String(qDescriptionAt(where));
+        expect(description).toMatch(/prefix/i);
+        expect(description).toMatch(/substring/i);
+      }
+    );
+
     it.each(['operation', 'PlaylistSearchParams'] as const)(
       '%s q description drops wildcards',
       (where) => {
@@ -8089,19 +8106,27 @@ describe('OpenAPI Specification', () => {
       }
     });
 
-    it('describes total as capped at 10,001 and points callers at nextCursor instead of total for "are there more rows"', () => {
+    // Not pinned to "lower bound" — under cursor pagination `total` is an
+    // exact (shrinking) count of the remaining match set, not a bound, and
+    // only the count-unavailable fallback is ever a bound/estimate. What
+    // must hold regardless of exact phrasing: the cap is stated, the
+    // cursor-position caveat is stated (so a reader does not assume `total`
+    // is the full match count on every page), and callers are pointed at
+    // `nextCursor` rather than `total` for "are there more rows".
+    it('describes total as capped at 10,001, caveated by cursor position, and points callers at nextCursor', () => {
       const total = propertyOf('PlaylistSearchResponse', 'total') as
         | { description?: string }
         | undefined;
       expect(total?.description).toMatch(/10,001/);
+      expect(total?.description).toMatch(/cursor/i);
       expect(total?.description).toMatch(/nextCursor/);
     });
 
-    it('describes totalPages as a lower bound derived from total', () => {
+    it('describes totalPages as derived from total, inheriting its caveats', () => {
       const totalPages = propertyOf('PlaylistSearchResponse', 'totalPages') as
         | { description?: string }
         | undefined;
-      expect(totalPages?.description).toMatch(/lower bound/i);
+      expect(totalPages?.description).toMatch(/total/);
     });
   });
 });
