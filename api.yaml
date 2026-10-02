@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.6.0
+  version: 10.7.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -976,7 +976,13 @@ components:
       properties:
         q:
           type: string
-          description: Search query (supports AND, OR, NOT, "", *)
+          description: >-
+            Search query. Optional — an empty or omitted `q` applies no
+            filter and returns all track entries in the requested sort
+            (most recent first by default). Supports upper-case `AND`,
+            `OR`, `NOT`, "quoted" exact terms, and the field prefixes
+            `artist:`, `song:`, `album:`, `label:`, `dj:`,
+            `date:YYYY-MM-DD`, and `dateRange:YYYY-MM-DD..YYYY-MM-DD`.
         page:
           type: integer
           minimum: 0
@@ -1000,6 +1006,20 @@ components:
             - asc
             - desc
           default: desc
+        cursor:
+          type: string
+          description: >-
+            Opaque pagination token copied verbatim from a previous
+            response's `nextCursor`. Honoured only when the effective sort
+            is `date` (the default, and the fallback when `sort` is
+            omitted or unrecognised); validated and then ignored under any
+            other effective sort. A cursor is tied to the `q`, `sort`, and
+            `order` that produced it, but not to `limit` — discard it
+            whenever `q`, `sort`, or `order` change; the server does not
+            detect a mismatched cursor and returns a page that may skip or
+            repeat rows. Send `page=0` alongside it — cursor pagination
+            does not use the page offset. Treat the token as opaque: do
+            not parse its contents or assume a stable format.
 
     PlaylistSearchResult:
       type: object
@@ -1074,10 +1094,31 @@ components:
             $ref: '#/components/schemas/PlaylistSearchResult'
         total:
           type: integer
+          description: >-
+            Normally the match count, capped at 10,001 (meaning more than
+            10,000). When the underlying count is unavailable, this is a
+            best-effort lower bound instead: the rows already paged past,
+            plus this page (under cursor pagination that collapses to just
+            this page's size). Clients must not use `total` to decide
+            whether more rows exist under the date sort — use `nextCursor`
+            for that.
         page:
           type: integer
         totalPages:
           type: integer
+          description: >-
+            Derived from `total`, so it is a lower bound in both the
+            capped case and the count-unavailable fallback case — never
+            an exact page count in either.
+        nextCursor:
+          type: string
+          description: >-
+            Opaque pagination token for the next page. Present only when
+            the effective sort is `date` (the default, and the fallback
+            when `sort` is omitted or unrecognised) and the page is full;
+            pass it back unchanged as `cursor`. Its absence under the date
+            sort means there are no more rows. Absent when the effective
+            sort is `artist`, `song`, or `dj`.
 
     LibraryQueryResponse:
       type: object
@@ -11537,19 +11578,30 @@ paths:
       parameters:
         - name: q
           in: query
-          required: true
           schema:
             type: string
-          description: Search query (supports AND, OR, NOT, exact phrases, wildcards)
+          description: >-
+            Search query. Optional — an empty or omitted `q` applies no
+            filter and returns all track entries in the requested sort
+            (most recent first by default). Supports upper-case `AND`,
+            `OR`, `NOT`, "quoted" exact terms, and the field prefixes
+            `artist:`, `song:`, `album:`, `label:`, `dj:`,
+            `date:YYYY-MM-DD`, and `dateRange:YYYY-MM-DD..YYYY-MM-DD`.
         - name: page
           in: query
           schema:
             type: integer
+            minimum: 0
             default: 0
+          description: >-
+            Send `0` when paging with `cursor` — cursor pagination carries
+            its own position and does not use this as an offset.
         - name: limit
           in: query
           schema:
             type: integer
+            minimum: 1
+            maximum: 100
             default: 50
         - name: sort
           in: query
@@ -11563,6 +11615,23 @@ paths:
             type: string
             enum: [asc, desc]
             default: desc
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >-
+            Opaque pagination token copied verbatim from a previous
+            response's `nextCursor`. Honoured only when the effective sort
+            is `date` (the default, and the fallback when `sort` is
+            omitted or unrecognised); validated and then ignored under any
+            other effective sort. A cursor is tied to the `q`, `sort`, and
+            `order` that produced it, but not to `limit` — discard it
+            whenever `q`, `sort`, or `order` change; the server does not
+            detect a mismatched cursor and returns a page that may skip or
+            repeat rows. Send `page=0` alongside it — cursor pagination
+            does not use the page offset. Treat the token as opaque: do
+            not parse its contents or assume a stable format.
       responses:
         '200':
           description: Search results
@@ -11570,6 +11639,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlaylistSearchResponse'
+        '400':
+          description: >-
+            Invalid `cursor` token, or `page`/`limit` outside their valid
+            range.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   # ===================
   # Flowsheet V2 Endpoints

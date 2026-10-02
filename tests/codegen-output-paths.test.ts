@@ -358,3 +358,21 @@ describe("generated PlaylistSearchResult.rotation_bin stays optional and nullabl
     expect(resultBlock()).toMatch(/\n\s+show_id: number;/);
   });
 });
+
+// #534: PlaylistSearchResponse gains an optional nextCursor string. The
+// spec-level guard in api-spec.test.ts asserts the schema property; this pins
+// what openapi-typescript actually emits, since CI generates this file before
+// `npm test` runs and a consumer imports this artifact, not the spec.
+describe("generated PlaylistSearchResponse.nextCursor stays optional (#534)", () => {
+  const responseBlock = () => schemaBlock("PlaylistSearchResponse");
+
+  it("emits nextCursor as an optional string", () => {
+    expect(responseBlock()).toMatch(/\bnextCursor\?: string;/);
+  });
+
+  it("keeps totalPages required", () => {
+    // Guards the assertion above against passing for the wrong reason — e.g.
+    // a regex that matches because the whole block vanished.
+    expect(responseBlock()).toMatch(/\n\s+totalPages: number;/);
+  });
+});
