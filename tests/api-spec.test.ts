@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.6.0');
+      expect(spec.info.version).toBe('10.7.0');
     });
 
     it('should have components section', () => {
@@ -7901,6 +7901,207 @@ describe('OpenAPI Specification', () => {
       expect(albumWording).toEqual(expect.any(String));
       expect(prop?.type).toBe('boolean');
       expect(prop?.description).toBe(albumWording);
+    });
+  });
+
+  // WXYC/wxyc-shared#534: Backend-Service's search.controller.ts has
+  // supported cursor pagination on this endpoint for some time
+  // (search.service.ts / COUNT_CAP) without the spec ever declaring it, so
+  // every generated client saw an offset-only endpoint and dj-site had to
+  // hand-extend PlaylistSearchResponse with a local
+  // PlaylistSearchResponseWithCursor type. Spec-only change: no server
+  // behaviour moves.
+  describe('GET /flowsheet/search cursor pagination (#534)', () => {
+    type QueryParamSchema = {
+      type?: string;
+      pattern?: string;
+      format?: string;
+      example?: unknown;
+      enum?: unknown[];
+      minLength?: number;
+      maxLength?: number;
+      minimum?: number;
+      maximum?: number;
+      default?: unknown;
+    };
+    type QueryParam = {
+      name: string;
+      in?: string;
+      required?: boolean;
+      schema?: QueryParamSchema;
+      description?: string;
+    };
+
+    const operation = () =>
+      (spec.paths['/flowsheet/search'] as Record<string, Record<string, unknown>> | undefined)
+        ?.get as {
+        parameters?: QueryParam[];
+        responses?: Record<
+          string,
+          { description?: string; content?: Record<string, { schema?: { $ref?: string } }> }
+        >;
+      };
+
+    const param = (name: string) => operation()?.parameters?.find((p) => p.name === name);
+
+    const playlistSearchParamsProp = (prop: string) =>
+      propertyOf('PlaylistSearchParams', prop) as
+        | { description?: string; minimum?: number; maximum?: number }
+        | undefined;
+
+    // Existence and `type: string` are asserted here too, alongside each
+    // negative guard, so a guard cannot pass vacuously on a property that
+    // isn't declared at all (the #528 defect `4ef1040` fixed).
+    function expectOpaqueStringSchema(schema: QueryParamSchema | undefined) {
+      expect(schema).toBeDefined();
+      expect(schema?.type).toBe('string');
+      expect(schema?.pattern).toBeUndefined();
+      expect(schema?.format).toBeUndefined();
+      expect(schema?.example).toBeUndefined();
+      expect(schema?.enum).toBeUndefined();
+      expect(schema?.minLength).toBeUndefined();
+      expect(schema?.maxLength).toBeUndefined();
+    }
+
+    it('declares an optional, opaque cursor query parameter', () => {
+      const cursor = param('cursor');
+      expect(cursor).toBeDefined();
+      expect(cursor?.in).toBe('query');
+      expect(cursor?.required).not.toBe(true);
+      expectOpaqueStringSchema(cursor?.schema);
+    });
+
+    it('adds the same opaque cursor property to PlaylistSearchParams', () => {
+      const prop = propertyOf('PlaylistSearchParams', 'cursor') as QueryParamSchema | undefined;
+      expectOpaqueStringSchema(prop);
+    });
+
+    it('the inline cursor description matches PlaylistSearchParams.cursor exactly, so the two copies cannot drift', () => {
+      expect(param('cursor')?.description).toEqual(playlistSearchParamsProp('cursor')?.description);
+    });
+
+    it('describes cursor as tied to the q/sort/order that produced it, discarded when any of them change', () => {
+      const description = String(playlistSearchParamsProp('cursor')?.description);
+      expect(description).toMatch(/discard/i);
+      expect(description).toMatch(/`q`/);
+      expect(description).toMatch(/`sort`/);
+      expect(description).toMatch(/`order`/);
+    });
+
+    it('adds nextCursor to PlaylistSearchResponse as an opaque optional string, never widening required', () => {
+      const prop = propertyOf('PlaylistSearchResponse', 'nextCursor') as
+        | QueryParamSchema
+        | undefined;
+      expectOpaqueStringSchema(prop);
+      expect(requiredKeysOf('PlaylistSearchResponse')).toEqual([
+        'results',
+        'total',
+        'page',
+        'totalPages',
+      ]);
+    });
+
+    it('no longer requires q on the operation, but still declares it', () => {
+      const q = param('q');
+      expect(q).toBeDefined();
+      expect(q?.required).not.toBe(true);
+    });
+
+    // The inline operation parameter and PlaylistSearchParams.limit must
+    // agree, or a client generated from one disagrees with a client
+    // generated from the other about what the server actually enforces
+    // (search.controller.ts's MAX_LIMIT = 100 and its `limit < 1` 400).
+    it('bounds the inline limit parameter 1..100, matching PlaylistSearchParams.limit', () => {
+      const inline = param('limit')?.schema;
+      const schemaLimit = playlistSearchParamsProp('limit');
+      expect({ minimum: inline?.minimum, maximum: inline?.maximum }).toEqual({
+        minimum: 1,
+        maximum: 100,
+      });
+      expect({ minimum: inline?.minimum, maximum: inline?.maximum }).toEqual({
+        minimum: schemaLimit?.minimum,
+        maximum: schemaLimit?.maximum,
+      });
+    });
+
+    // Same parity check for `page`: search.controller.ts 400s `page < 0` and
+    // PlaylistSearchParams.page already declared `minimum: 0` — the inline
+    // operation parameter had no bound at all until this ticket.
+    it('bounds the inline page parameter at minimum 0, matching PlaylistSearchParams.page', () => {
+      const inline = param('page')?.schema;
+      const schemaPage = playlistSearchParamsProp('page');
+      expect(inline?.minimum).toBe(0);
+      expect(inline?.minimum).toBe(schemaPage?.minimum);
+    });
+
+    it('declares a 400 referencing ApiErrorResponse for an invalid cursor or an out-of-range page/limit', () => {
+      const responses = operation()?.responses;
+      expect(responses?.['400']).toBeDefined();
+      expect(responses?.['400']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/ApiErrorResponse'
+      );
+    });
+
+    // q's description — both the inline operation parameter and the
+    // PlaylistSearchParams schema copy — must never promise a wildcard
+    // operator (the parser strips `*` as a tsquery metacharacter; there is
+    // no wildcard support) and must name every field prefix
+    // FLOWSHEET_PARSER_CONFIG honours, so a reader of either copy learns the
+    // real grammar.
+    //
+    // `spec` is populated in `beforeAll`, so this must stay a function called
+    // from inside a test body, never evaluated while `it.each` builds its case
+    // list (that runs while the describe block itself executes, before any
+    // hook) — the sites below are plain string literals for that reason.
+    const qDescriptionAt = (where: 'operation' | 'PlaylistSearchParams'): string | undefined =>
+      where === 'operation' ? param('q')?.description : playlistSearchParamsProp('q')?.description;
+
+    it('the inline q description matches PlaylistSearchParams.q exactly, so the two copies cannot drift', () => {
+      expect(qDescriptionAt('operation')).toEqual(qDescriptionAt('PlaylistSearchParams'));
+    });
+
+    it.each(['operation', 'PlaylistSearchParams'] as const)(
+      '%s q description drops wildcards',
+      (where) => {
+        const description = qDescriptionAt(where);
+        // Non-vacuous: an absent description would otherwise stringify to
+        // the literal "undefined", which matches neither the regex nor the
+        // `*` check below and would let this guard pass on a property that
+        // was never declared at all.
+        expect(typeof description).toBe('string');
+        expect(description?.length).toBeGreaterThan(0);
+        const collapsed = String(description).replace(/\s+/g, ' ').toLowerCase();
+        expect(collapsed).not.toMatch(/wildcard/);
+        expect(collapsed).not.toContain('*');
+      }
+    );
+
+    // Case-sensitive on purpose: FLOWSHEET_PARSER_CONFIG's prefix match is
+    // exact (`dateRange:`, never `daterange:`), so lower-casing before this
+    // check would let a description cite the wrong case and still pass —
+    // only the wildcard guard above collapses case.
+    const PREFIXES = ['artist:', 'song:', 'album:', 'label:', 'dj:', 'date:', 'dateRange:'];
+
+    it.each(PREFIXES)('both q descriptions name the %s prefix, case-sensitively', (prefix) => {
+      for (const where of ['operation', 'PlaylistSearchParams'] as const) {
+        const description = String(qDescriptionAt(where)).replace(/\s+/g, ' ');
+        expect(description, `${where} description missing ${prefix}`).toContain(prefix);
+      }
+    });
+
+    it('describes total as capped at 10,001 and points callers at nextCursor instead of total for "are there more rows"', () => {
+      const total = propertyOf('PlaylistSearchResponse', 'total') as
+        | { description?: string }
+        | undefined;
+      expect(total?.description).toMatch(/10,001/);
+      expect(total?.description).toMatch(/nextCursor/);
+    });
+
+    it('describes totalPages as a lower bound derived from total', () => {
+      const totalPages = propertyOf('PlaylistSearchResponse', 'totalPages') as
+        | { description?: string }
+        | undefined;
+      expect(totalPages?.description).toMatch(/lower bound/i);
     });
   });
 });
