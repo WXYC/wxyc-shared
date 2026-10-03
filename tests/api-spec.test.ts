@@ -3778,6 +3778,22 @@ describe('OpenAPI Specification', () => {
       expect(item.description).not.toMatch(/no real names appear anywhere in this contract/);
     });
 
+    it('words IntakeItemState so requested is held for a named DJ and checked_out is held by its holder', () => {
+      const text = (spec.components.schemas.IntakeItemState as { description?: string }).description ?? '';
+      const flat = text.replace(/\s+/g, ' ');
+      expect(flat).toMatch(/held in the office for a named DJ as `requested`/);
+      expect(flat).toMatch(/held by its holder as `checked_out`/);
+      expect(flat).toMatch(/the DJ it was requested of/);
+      expect(flat).not.toMatch(/requesting DJ/);
+      expect(flat).not.toMatch(/held by a DJ as `requested` or `checked_out`/);
+    });
+
+    it('names all three DJ-name fields in the single IntakeItem sentence', () => {
+      const item = spec.components.schemas.IntakeItem as { description?: string };
+      const flat = (item.description ?? '').replace(/\s+/g, ' ');
+      expect(flat).toMatch(/`requested_dj_name`, `checked_out_by_name`,? (and )?`passes\[\]\.dj_name`/);
+    });
+
     it('states four things a restore does not put back, as four separate list items', () => {
       const restore = spec.paths['/library/deleted/{batchId}/restore'] as { post: { description?: string } };
       const text = restore.post.description ?? '';
@@ -3872,6 +3888,10 @@ describe('OpenAPI Specification', () => {
       expect(state?.schema?.$ref).toBe('#/components/schemas/IntakeItemState');
       expect(list.description).toMatch(/effective_state/);
       expect(list.description).toMatch(/`passes`/);
+    });
+
+    it('declares a 400 referencing ApiErrorResponse for an unknown state value', () => {
+      expect(body(op('/intake', 'get'), '400')).toEqual(ref('ApiErrorResponse'));
     });
 
     it('words invalid_citation per the inclusive "submitted review" rule', () => {
