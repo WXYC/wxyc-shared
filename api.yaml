@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.9.0
+  version: 10.10.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -5173,18 +5173,81 @@ components:
           additionalProperties:
             type: integer
           description: >
-            Child table name to the number of rows replayed under this
-            entity, mirroring `CatalogDeleteEntity.children` from the
-            listing. A table with no captured rows is present with `0`
-            rather than omitted, the same absent-versus-empty
-            distinction the capture itself keeps.
+            Child table name to the number of rows actually re-inserted
+            under this entity. It follows the shape of
+            `CatalogDeleteEntity.children` from the listing, but counts
+            replayed rows rather than captured ones: a captured child
+            row left out of the replay is not counted here and is listed
+            in `deviations` as `dropped`. A table with no captured rows
+            is present with `0` rather than omitted, the same
+            absent-versus-empty distinction the capture itself keeps.
+        deviations:
+          type: array
+          items:
+            $ref: '#/components/schemas/RestoreDeviation'
+          description: >
+            The departures from the snapshot in this entity's replay, one
+            `RestoreDeviation` per nulled reference or dropped child row.
+            Lands ahead of WXYC/Backend-Service#2818, which populates it
+            (empty when nothing departed). Until that deploys the 200
+            carries no `deviations`, and a captured child whose
+            `ON DELETE CASCADE` target is gone fails the restore with a
+            500 rather than being dropped; a consumer must tolerate its
+            absence.
+
+    RestoreDeviationKind:
+      type: string
+      enum: [nulled, dropped]
+      description: >
+        `nulled`: a nullable `ON DELETE SET NULL` reference whose target
+        was deleted after the batch came back NULL. `dropped`: once
+        WXYC/Backend-Service#2818 deploys, a captured child row whose
+        `ON DELETE CASCADE` target is neither live nor restored by this
+        batch is left out of the replay. Named rather than left as an
+        inline enum on `RestoreDeviation.kind` so the Python generator
+        does not emit a numbered `Kind4` that shifts with declaration
+        order (see `OTPType`).
+
+    RestoreDeviation:
+      type: object
+      description: >
+        One way a restore came back different from its snapshot, reported
+        on `RestoredEntity.deviations`. Carries ids only, never names or
+        any `auth_user` profile field.
+      required:
+        - kind
+        - table
+        - row_id
+        - column
+        - captured_value
+      properties:
+        kind:
+          $ref: '#/components/schemas/RestoreDeviationKind'
+        table:
+          type: string
+          description: The table of the affected row.
+        row_id:
+          type: integer
+          description: The affected row's primary key (the captured id).
+        column:
+          type: string
+          nullable: true
+          description: The reference column that was nulled; `null` for a dropped row.
+        captured_value:
+          type: string
+          nullable: true
+          description: >
+            The referenced id the snapshot carried for that column (for
+            `dropped`, the missing parent's id), as a string because some
+            referenced keys (`auth_user.id`) are text.
 
     RestoreBatchResponse:
       type: object
       description: >
         `POST /library/deleted/{batchId}/restore`'s 200
-        (WXYC/Backend-Service#2585). The parent row and every captured
-        child row were re-inserted inside one transaction.
+        (WXYC/Backend-Service#2585). The parent row and its captured
+        child rows were re-inserted inside one transaction, except any
+        child row reported as `dropped` in `entities[].deviations`.
 
 
         **The relocation result is per entity, not per batch.** Whether
@@ -5325,7 +5388,10 @@ components:
         `POST /library/deleted/{batchId}/restore`'s 409 when the batch is
         already back in the catalog. This is the ordinary answer to a
         double-click or a retry after a timeout, not an error state: the
-        rows are present, so there is nothing to do and nothing was
+        rows are present (except any child rows the original restore
+        dropped, which were reported only on that restore's 200 and are
+        not reported again here, so a retry after a timeout does not
+        surface them), so there is nothing to do and nothing was
         written.
 
 
@@ -5339,7 +5405,7 @@ components:
 
         Distinct from the code-conflict branch and must not be handled as
         one — prompting for a call-number decision on a batch that is
-        already fully restored is the failure mode a lenient decoder
+        already restored is the failure mode a lenient decoder
         produces here.
       required:
         - message
@@ -14191,8 +14257,12 @@ paths:
       summary: Restore a captured delete batch (WXYC/Backend-Service#2585)
       description: >
         WXYC/Backend-Service#2585. Restores a `catalog_delete_snapshot`
-        batch: the parent row plus every captured child, re-inserted
-        under their ORIGINAL primary keys inside one transaction.
+        batch: the parent row plus its captured children, re-inserted
+        under their ORIGINAL primary keys inside one transaction. Once
+        WXYC/Backend-Service#2818 deploys (see below), a captured child
+        whose `ON DELETE CASCADE` target is neither live nor restored by
+        this batch is left out of the replay and reported rather than
+        re-inserted.
 
 
         **`library` batches only, today.** A batch holds exactly one
@@ -14219,7 +14289,7 @@ paths:
         and its PII-bearing `reviewer_raw` column is never read here).
 
 
-        **Four things a restore does not put back**, and a client
+        **Five things a restore does not put back**, and a client
         presenting it as undone should say so:
 
         - archived flowsheet plays do not re-link to the restored release;
@@ -14228,7 +14298,12 @@ paths:
 
         - a row whose nullable `ON DELETE SET NULL` reference to a deleted release was cleared by that delete (an intake item's citation, for example) keeps the reference NULL after the release is restored;
 
-        - a restored row's nullable `ON DELETE SET NULL` reference whose target was deleted after the batch comes back NULL, as its delete rule would have left it, rather than failing the restore. For example, a restored rotation row can come back without its card filing (WXYC/Backend-Service#2799, https://github.com/WXYC/Backend-Service/pull/2815). The 200 does not say which references were nulled.
+        - a restored row's nullable `ON DELETE SET NULL` reference whose target was deleted after the batch comes back NULL, as its delete rule would have left it, rather than failing the restore. For example, a restored rotation row can come back without its card filing (WXYC/Backend-Service#2799, https://github.com/WXYC/Backend-Service/pull/2815). Each one is reported in `entities[].deviations` as a `nulled` `RestoreDeviation`;
+
+        - a captured child row whose `ON DELETE CASCADE` target is gone is left out of the replay, because the delete it would have cascaded from already happened. For example, a release that sat in a DJ's bin restores without the bin row after that DJ's account was removed. Each one is reported in `entities[].deviations` as a `dropped` `RestoreDeviation` and is not counted in `entities[].children`.
+
+
+        `entities[].deviations` lands ahead of WXYC/Backend-Service#2818, which populates it. Until that deploys the 200 carries no `deviations`, and a captured child whose `ON DELETE CASCADE` target is gone fails the restore with a 500 rather than being dropped.
 
 
         Restoring into a taken call code ASKS rather than silently

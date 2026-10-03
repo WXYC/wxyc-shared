@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.9.0');
+      expect(spec.info.version).toBe('10.10.0');
     });
 
     it('should have components section', () => {
@@ -3794,23 +3794,24 @@ describe('OpenAPI Specification', () => {
       expect(flat).toMatch(/`requested_dj_name`, `checked_out_by_name`,? (and )?`passes\[\]\.dj_name`/);
     });
 
-    it('states four things a restore does not put back, as four separate list items', () => {
+    it('states five things a restore does not put back, as five separate list items', () => {
       const restore = spec.paths['/library/deleted/{batchId}/restore'] as { post: { description?: string } };
       const text = restore.post.description ?? '';
-      expect(text).toMatch(/\*\*Four things a restore does not put back\*\*/);
+      expect(text).toMatch(/\*\*Five things a restore does not put back\*\*/);
       expect(text).not.toMatch(/Two things a restore does not put back/);
-      // Text distinctive to each of the two bullets #537 adds, so a
-      // mutation that drops either one is caught.
+      // Text distinctive to each of the bullets #537 and the restore-deviation
+      // work add, so a mutation that drops any of them is caught.
       expect(text).toMatch(/keeps the reference NULL after the release is restored/);
       expect(text).toMatch(/WXYC\/Backend-Service#2799/);
+      expect(text).toMatch(/left out of the replay, because the delete it would have cascaded from already happened/);
       // The source is a `>` folded scalar: without a blank line between
       // bullets, consecutive `- ` lines fold into one. Parsing the
-      // description and counting top-level list items pins the four-item
+      // description and counting top-level list items pins the five-item
       // structure itself, not just the substrings -- a run-on rendering
-      // with all four substrings present but folded onto one line would
+      // with all the substrings present but folded onto one line would
       // fail this half of the assertion.
       const items = text.match(/^- .+$/gm) ?? [];
-      expect(items).toHaveLength(4);
+      expect(items).toHaveLength(5);
     });
   });
 
@@ -7591,6 +7592,57 @@ describe('OpenAPI Specification', () => {
         const relocated = propertyOf('RestoredEntity', 'relocated_code_number');
         expect(relocated?.type).toBe('integer');
         expect(relocated?.nullable).toBe(true);
+      });
+    });
+
+    describe('RestoreDeviation', () => {
+      it('requires all five keys, with column and captured_value nullable', () => {
+        expect(requiredKeysOf('RestoreDeviation').sort()).toEqual(
+          ['captured_value', 'column', 'kind', 'row_id', 'table'].sort()
+        );
+        expect(propertyOf('RestoreDeviation', 'row_id')?.type).toBe('integer');
+        for (const key of ['column', 'captured_value']) {
+          const prop = propertyOf('RestoreDeviation', key);
+          expect(prop?.type).toBe('string');
+          expect(prop?.nullable).toBe(true);
+        }
+      });
+
+      // Optional so a client built against this version still decodes a 200
+      // from a server that predates the field.
+      it('is an optional array on RestoredEntity, and the route points at it', () => {
+        expect(requiredKeysOf('RestoredEntity')).not.toContain('deviations');
+        const deviations = propertyOf('RestoredEntity', 'deviations');
+        expect(deviations?.type).toBe('array');
+        expect(JSON.stringify(deviations?.items)).toContain('#/components/schemas/RestoreDeviation');
+        const description = String(operation(restorePath, 'post').description);
+        expect(description).toContain('entities[].deviations');
+        expect(description).toContain('`nulled`');
+        expect(description).toContain('`dropped`');
+        // The hedge: the route must not state the drop as current behavior.
+        const flat = description.replace(/\s+/g, ' ');
+        expect(flat).toContain('lands ahead of WXYC/Backend-Service#2818');
+        expect(flat).toMatch(/carries no `deviations`, and a captured child whose `ON DELETE CASCADE` target is gone fails the restore with a 500 rather than being dropped/);
+        expect(flat).toContain('Once WXYC/Backend-Service#2818 deploys');
+        expect(description).not.toContain('The 200 does not say which references were nulled');
+      });
+
+      it('defines children as rows actually re-inserted, with dropped rows left uncounted', () => {
+        const flat = String(propertyOf('RestoredEntity', 'children')?.description).replace(/\s+/g, ' ');
+        expect(flat).toContain('actually re-inserted');
+        expect(flat).toContain('counts replayed rows rather than captured ones');
+        expect(flat).not.toContain('mirroring `CatalogDeleteEntity.children`');
+      });
+
+      it('names the kind enum as a component so Python does not emit a numbered Kind', () => {
+        expect(propertyOf('RestoreDeviation', 'kind')?.$ref).toBe('#/components/schemas/RestoreDeviationKind');
+        expect((spec.components.schemas.RestoreDeviationKind as { enum?: string[] }).enum).toEqual(['nulled', 'dropped']);
+      });
+
+      it('qualifies RestoreAlreadyRestoredRefusal for rows a restore dropped', () => {
+        const flat = String((spec.components.schemas.RestoreAlreadyRestoredRefusal as { description?: string }).description).replace(/\s+/g, ' ');
+        expect(flat).toContain('except any child rows the original restore dropped');
+        expect(flat).not.toContain('already fully restored');
       });
     });
 
