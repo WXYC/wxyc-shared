@@ -3814,7 +3814,7 @@ describe('OpenAPI Specification', () => {
       o.responses?.[status]?.content?.['application/json']?.schema;
     const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 
-    // method, path, grant named in the description, delivering issue, success schema
+    // method, path, grant named in the description, delivering issue
     it.each([
       ['get', '/intake', 'reviews: read', '#2796'],
       ['post', '/intake', 'reviews: manage', '#2796'],
@@ -3826,6 +3826,24 @@ describe('OpenAPI Specification', () => {
       expect(o['x-wxyc-service']).toBe('backend-service');
       expect(o.description).toContain(grant);
       expect(o.description).toContain(issue);
+    });
+
+    it('declares /intake/{id} with the shared IntakeId path parameter', () => {
+      const params = (spec.components as unknown as { parameters: Record<string, unknown> }).parameters;
+      const expected = {
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: { type: 'integer' },
+        description: "The intake item's id.",
+      };
+      expect(params.IntakeId).toEqual(expected);
+      const pathItem = (spec.paths as Record<string, { parameters?: unknown[] }>)['/intake/{id}']!;
+      expect(pathItem.parameters).toContainEqual({ $ref: '#/components/parameters/IntakeId' });
+    });
+
+    it('orders GET /intake by logged_at descending, then id descending', () => {
+      expect(op('/intake', 'get').description).toContain('`logged_at` descending, then `id` descending');
     });
 
     it('serves item responses as IntakeItem and the delete as IntakeDeleteResponse', () => {
@@ -7357,10 +7375,10 @@ describe('OpenAPI Specification', () => {
     ];
 
     // Schemas declared before the paths that reference them, so a schema-first
-    // slice can land ahead of its paths. The `IntakeFile*` schemas wait for `POST /intake/{id}/file` (#542's
-    // action-routes remainder). The `IntakeFile*` schemas wait for `POST /intake/{id}/file` (#542's
-    // action-routes remainder). Prune an entry once its path lands:
-    // the "carries no exemption" guard below fails until it is removed.
+    // slice can land ahead of its paths. The `IntakeFile*` schemas wait for
+    // `POST /intake/{id}/file` (WXYC/wxyc-shared#546). Prune an entry once its
+    // path lands: the "carries no exemption" guard below fails until it is
+    // removed.
     const DECLARED_AHEAD_OF_PATHS = [
       'IntakeFileRequest', 'IntakeFileNewRelease', 'IntakeFileExistingRelease',
     ];
