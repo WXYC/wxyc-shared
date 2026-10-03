@@ -3668,59 +3668,132 @@ describe('OpenAPI Specification', () => {
       ]);
     });
 
-    it('requires the identity, state, and computed fields on IntakeItem', () => {
+    it('requires the identity, state, and computed fields on IntakeItem, and every nullable column it always emits', () => {
       const item = spec.components.schemas.IntakeItem as {
         required?: string[];
-        properties?: Record<string, { $ref?: string; maxLength?: number }>;
+        properties?: Record<
+          string,
+          { $ref?: string; allOf?: Array<{ $ref?: string }>; maxLength?: number; nullable?: boolean }
+        >;
       };
       expect(item.required).toEqual(
         expect.arrayContaining(['id', 'artist_name', 'album_title', 'state', 'effective_state', 'overdue'])
       );
       expect(item.properties?.state?.$ref).toBe('#/components/schemas/IntakeItemState');
-      expect(item.properties?.effective_state?.$ref).toBe('#/components/schemas/IntakeItemState');
+      expect(item.properties?.effective_state?.allOf?.[0]?.$ref).toBe('#/components/schemas/IntakeItemState');
       expect(item.properties?.artist_name?.maxLength).toBe(128);
       expect(item.properties?.album_title?.maxLength).toBe(128);
+      // Every nullable column the server always returns is required+nullable
+      // (CLAUDE.md's "Python codegen and `nullable` on required fields"
+      // idiom, matching `AlbumReview`'s own 14 nullable fields), not
+      // optional+nullable -- otherwise a consumer can't tell "not sent"
+      // apart from "meaningfully null".
+      const nullableFields = Object.entries(item.properties ?? {})
+        .filter(([, prop]) => prop.nullable)
+        .map(([name]) => name);
+      expect(nullableFields.length).toBeGreaterThan(0);
+      for (const name of nullableFields) {
+        expect(item.required).toContain(name);
+      }
       // `passes` is gated to reviews: manage callers, so it cannot be required.
       expect(item.required).not.toContain('passes');
     });
 
-    it('makes IntakeFileRequest a oneOf of the filing bench body and an existing-release arm', () => {
+    it('makes IntakeFileRequest a discriminated union over named new-release and existing-release arms', () => {
       const file = spec.components.schemas.IntakeFileRequest as {
-        oneOf?: Array<{ $ref?: string; required?: string[]; properties?: Record<string, unknown> }>;
+        oneOf?: Array<{ $ref?: string }>;
+        discriminator?: { propertyName?: string; mapping?: Record<string, string> };
       };
       expect(file.oneOf).toHaveLength(2);
-      expect(file.oneOf?.[0]?.$ref).toBe('#/components/schemas/LibraryFilingRequest');
-      expect(file.oneOf?.[1]?.required).toEqual(['album_id']);
-      expect(file.oneOf?.[1]?.properties?.album_id).toBeDefined();
+      expect(file.oneOf?.[0]?.$ref).toBe('#/components/schemas/IntakeFileNewRelease');
+      expect(file.oneOf?.[1]?.$ref).toBe('#/components/schemas/IntakeFileExistingRelease');
+      expect(file.discriminator?.propertyName).toBe('kind');
+      expect(file.discriminator?.mapping).toEqual({
+        new_release: '#/components/schemas/IntakeFileNewRelease',
+        existing_release: '#/components/schemas/IntakeFileExistingRelease',
+      });
+
+      const newRelease = spec.components.schemas.IntakeFileNewRelease as {
+        allOf?: Array<{ $ref?: string; required?: string[]; properties?: Record<string, { enum?: string[] }> }>;
+      };
+      expect(newRelease.allOf?.[0]?.$ref).toBe('#/components/schemas/LibraryFilingRequest');
+      expect(newRelease.allOf?.[1]?.required).toEqual(['kind']);
+      expect(newRelease.allOf?.[1]?.properties?.kind?.enum).toEqual(['new_release']);
+
+      const existingRelease = spec.components.schemas.IntakeFileExistingRelease as {
+        required?: string[];
+        properties?: Record<string, { enum?: string[] }>;
+      };
+      expect(existingRelease.required).toEqual(['kind', 'album_id']);
+      expect(existingRelease.properties?.kind?.enum).toEqual(['existing_release']);
+      expect(existingRelease.properties?.album_id).toBeDefined();
     });
 
-    it('makes the patch refuse citing a submission and a release at once', () => {
+    it('makes the patch refuse citing a submission and a release as non-null at once, but allows switching in one request', () => {
       const patch = spec.components.schemas.IntakeItemPatch as {
-        not?: { required?: string[] };
+        not?: {
+          allOf?: Array<{
+            required?: string[];
+            properties?: Record<string, { not?: { enum?: unknown[] } }>;
+          }>;
+        };
         properties?: Record<string, unknown>;
       };
       expect(patch.properties?.cited_album_id).toBeDefined();
       expect(patch.properties?.cited_submission_id).toBeDefined();
-      expect(patch.not?.required).toEqual(['cited_album_id', 'cited_submission_id']);
+      const branches = patch.not?.allOf ?? [];
+      expect(branches).toHaveLength(2);
+      const albumBranch = branches.find((branch) => branch.required?.includes('cited_album_id'));
+      const submissionBranch = branches.find((branch) => branch.required?.includes('cited_submission_id'));
+      // Exclusivity is keyed on non-null values, not key presence, so a
+      // patch may set one citation while explicitly clearing the other in
+      // the same request rather than passing through an uncited state
+      // across two.
+      expect(albumBranch?.properties?.cited_album_id?.not?.enum).toEqual([null]);
+      expect(submissionBranch?.properties?.cited_submission_id?.not?.enum).toEqual([null]);
     });
 
-    it('types the delete response with the names of the review authors it removed', () => {
+    it('types the delete response with the names of the review authors it removed, and flags them as possibly real names', () => {
       const del = spec.components.schemas.IntakeDeleteResponse as {
         required?: string[];
-        properties?: { deleted_review_authors?: { type?: string; items?: { type?: string } } };
+        properties?: { deleted_review_authors?: { type?: string; items?: { type?: string }; description?: string } };
       };
       expect(del.required).toEqual(['deleted_review_authors']);
       expect(del.properties?.deleted_review_authors?.type).toBe('array');
       expect(del.properties?.deleted_review_authors?.items?.type).toBe('string');
+      // Unlike IntakeItem's own `*_name` fields, these entries are
+      // `reviews.author` free text and may be a real name for an on-behalf
+      // review -- the contract must say so rather than let a consumer
+      // assume the same PII-free guarantee IntakeItem states for itself.
+      expect(del.properties?.deleted_review_authors?.description).toMatch(/real name/);
     });
 
+    it('states IntakeItem carries no real name, scoped to its own fields, distinctly from the delete response', () => {
+      const item = spec.components.schemas.IntakeItem as { description?: string };
+      expect(item.description).toMatch(/no real name appears in it/);
+      // The schema-wide claim from before #537's respec ("no real names
+      // appear anywhere in this contract") over-claimed across
+      // IntakeDeleteResponse; it must not reappear.
+      expect(item.description).not.toMatch(/no real names appear anywhere in this contract/);
+    });
 
-    it('states four things a restore does not put back, the new one generically', () => {
+    it('states four things a restore does not put back, as four separate list items', () => {
       const restore = spec.paths['/library/deleted/{batchId}/restore'] as { post: { description?: string } };
       const text = restore.post.description ?? '';
       expect(text).toMatch(/\*\*Four things a restore does not put back\*\*/);
       expect(text).not.toMatch(/Two things a restore does not put back/);
-      expect(text).toMatch(/ON DELETE SET NULL/);
+      // Text distinctive to each of the two bullets #537 adds, so a
+      // mutation that drops either one is caught.
+      expect(text).toMatch(/keeps the reference NULL after the release is restored/);
+      expect(text).toMatch(/WXYC\/Backend-Service#2799/);
+      // The source is a `>` folded scalar: without a blank line between
+      // bullets, consecutive `- ` lines fold into one. Parsing the
+      // description and counting top-level list items pins the four-item
+      // structure itself, not just the substrings -- a run-on rendering
+      // with all four substrings present but folded onto one line would
+      // fail this half of the assertion.
+      const items = text.match(/^- .+$/gm) ?? [];
+      expect(items).toHaveLength(4);
     });
   });
 
@@ -7209,12 +7282,13 @@ describe('OpenAPI Specification', () => {
     ];
 
     // Declared ahead of the `/intake` paths that reference them (#537 slice 1
-    // lands the schemas; the paths follow in the next slice). Drop these once
-    // those paths land: the "carries no exemption" guard above then fails
-    // until they are removed here.
+    // lands the schemas; the paths follow in the next slice, #542). Drop
+    // these once those paths land: the "carries no exemption" guard below
+    // then fails until they are removed here.
     const DECLARED_AHEAD_OF_PATHS = [
       'IntakeItemState', 'IntakeItem', 'NewIntakeItemRequest', 'IntakeItemPatch',
-      'IntakeFileRequest', 'IntakeConflictReason', 'IntakeConflictError', 'IntakeDeleteResponse',
+      'IntakeFileRequest', 'IntakeFileNewRelease', 'IntakeFileExistingRelease',
+      'IntakeConflictReason', 'IntakeConflictError', 'IntakeDeleteResponse',
     ];
 
     const EXEMPT = new Set([

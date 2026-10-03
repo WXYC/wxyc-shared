@@ -3787,25 +3787,50 @@ components:
         Where an intake item sits in its lifecycle: logged into `pool`, held
         by a DJ as `requested` or `checked_out`, `reviewed`, `filed` into the
         catalog, and `finalized` once shelved. `effective_state` on
-        `IntakeItem` reads a stale `requested` as `pool`.
+        `IntakeItem` reads a stale `requested` as `pool`
+        (WXYC/Backend-Service#2796): a `requested` row is stale once its
+        `requested_at` is more than 7 days old, or once the requesting DJ's
+        account has been deleted (`requested_dj_id` turns `null`). `state`
+        itself does not change when a request goes stale — a read never
+        writes — so `state: requested` can outlive the 7-day window on a row
+        no one has touched since; only `effective_state` reflects the lapse.
 
     IntakeItem:
       type: object
       description: >
         One physical copy the station holds, logged by a music director and
-        waiting for a review (WXYC/Backend-Service#2791). Names are
-        `auth_user.name`, the public-safe display value; no real names appear
-        anywhere in this contract. `passes` is present only for callers
-        holding `reviews: manage`.
+        waiting for a review (WXYC/Backend-Service#2791). This schema's own
+        `*_name` fields (`requested_dj_name`, `checked_out_by_name`) are
+        `auth_user.name`, the public-safe display value — `IntakeItem` itself
+        carries account ids, not names, and no real name appears in it.
+        `passes` is present only for callers holding `reviews: manage`.
+        `IntakeDeleteResponse.deleted_review_authors` is a different schema
+        with its own, weaker guarantee — see its description.
       required:
         - id
         - artist_name
         - album_title
+        - record_label
+        - label_id
         - format_id
+        - discogs_release_id
         - state
         - effective_state
         - overdue
         - logged_at
+        - requested_dj_id
+        - requested_dj_name
+        - requested_at
+        - checked_out_by
+        - checked_out_by_name
+        - checked_out_at
+        - cited_album_id
+        - cited_submission_id
+        - album_id
+        - rotation_id
+        - filed_at
+        - printed_at
+        - finalized_at
       properties:
         id:
           type: integer
@@ -3830,7 +3855,15 @@ components:
         state:
           $ref: '#/components/schemas/IntakeItemState'
         effective_state:
-          $ref: '#/components/schemas/IntakeItemState'
+          allOf:
+            - $ref: '#/components/schemas/IntakeItemState'
+          description: >
+            `state` as actually usable, per WXYC/Backend-Service#2796: equal
+            to `state` except a stale `requested` reads as `pool` — stale
+            meaning `requested_at` is more than 7 days old, or
+            `requested_dj_id` is `null` because the requesting DJ's account
+            was deleted. A read never writes, so `state` itself is left
+            untouched by the lapse; only `effective_state` reflects it.
         overdue:
           type: boolean
           description: True while `checked_out` for more than 14 days.
@@ -3840,6 +3873,11 @@ components:
         requested_dj_id:
           type: string
           nullable: true
+          description: >
+            Null outside `requested`. Also `null` while `state: requested`
+            when the requesting DJ's account has since been deleted — the
+            case that makes `effective_state` read `pool` despite `state`
+            still saying `requested`.
         requested_dj_name:
           type: string
           nullable: true
@@ -3850,6 +3888,10 @@ components:
         checked_out_by:
           type: string
           nullable: true
+          description: >
+            Null outside `checked_out`. Also `null` while `state:
+            checked_out` when the holder's account has since been deleted —
+            shown to MDs as "holder removed"; the MD may release the item.
         checked_out_by_name:
           type: string
           nullable: true
@@ -3928,11 +3970,26 @@ components:
       description: >
         Any subset of the `NewIntakeItemRequest` fields, plus setting or
         clearing the citation. `cited_album_id` and `cited_submission_id` are
-        mutually exclusive: a patch carries at most one of them.
+        mutually exclusive as non-null values (WXYC/Backend-Service#2797's
+        table CHECK enforces this in storage): a patch may not carry both as
+        non-null at once, but may set one while explicitly clearing the
+        other (for example `{cited_album_id: null, cited_submission_id: 12}`)
+        to switch citation kinds in a single request, rather than passing
+        through an uncited state across two.
       not:
-        required:
-          - cited_album_id
-          - cited_submission_id
+        allOf:
+          - required:
+              - cited_album_id
+            properties:
+              cited_album_id:
+                not:
+                  enum: [null]
+          - required:
+              - cited_submission_id
+            properties:
+              cited_submission_id:
+                not:
+                  enum: [null]
       properties:
         artist_name:
           type: string
@@ -3959,19 +4016,55 @@ components:
           type: integer
           nullable: true
 
-    IntakeFileRequest:
+    IntakeFileNewRelease:
       description: >
-        Files an intake item into the catalog. The new-release arm is the
-        filing bench's body (`POST /library/filings`); the existing-release arm
-        attaches the item to a release already in the library.
-      oneOf:
+        The new-release arm of `IntakeFileRequest`: the filing bench's body
+        (`LibraryFilingRequest`, i.e. `POST /library/filings` — artist,
+        release and an optional rotation entry) plus the `kind`
+        discriminant. Inherits `LibraryFilingRequest`'s field semantics
+        unchanged.
+      allOf:
         - $ref: '#/components/schemas/LibraryFilingRequest'
         - type: object
           required:
-            - album_id
+            - kind
           properties:
-            album_id:
-              type: integer
+            kind:
+              type: string
+              enum: [new_release]
+
+    IntakeFileExistingRelease:
+      type: object
+      required:
+        - kind
+        - album_id
+      properties:
+        kind:
+          type: string
+          enum: [existing_release]
+        album_id:
+          type: integer
+
+    IntakeFileRequest:
+      description: >
+        Files an intake item into the catalog: either a full new-release
+        payload (`kind: new_release`) or a reference to a release already in
+        the library (`kind: existing_release`). Discriminated rather than
+        left a bare `oneOf` deliberately — the same idiom as `FilingArtist`,
+        `LiveFsEvent` and `AutoDJWebSocketMessage`: without `kind`, a payload
+        carrying both an `album_id` and the new-release trio validates
+        against both arms, and try-order decoders (the generated Swift and
+        Python clients) silently take one arm over the other. The required
+        `kind` makes the caller's intent explicit on the wire and that
+        ambiguous payload rejectable.
+      oneOf:
+        - $ref: '#/components/schemas/IntakeFileNewRelease'
+        - $ref: '#/components/schemas/IntakeFileExistingRelease'
+      discriminator:
+        propertyName: kind
+        mapping:
+          new_release: '#/components/schemas/IntakeFileNewRelease'
+          existing_release: '#/components/schemas/IntakeFileExistingRelease'
 
     IntakeConflictReason:
       type: string
@@ -3982,10 +4075,12 @@ components:
         `LibraryFilingConflictError`. `state_changed`: the item was not in a
         state that allows the transition (two DJs racing for one record, an
         expired request, an item already filed). `not_reviewed`: filing an
-        item with no submitted review and no valid citation. `invalid_citation`:
-        a cited release that neither has a review nor predates the cutover
-        date, or a cited form submission dated after the form closed.
-        `already_filed`: delete or patch after filing.
+        item with no submitted review and no valid citation, or printing one
+        with no submitted **typed** review (WXYC/Backend-Service#2804 — a
+        handwritten review is already on the sleeve, so nothing prints).
+        `invalid_citation`: a cited release that neither has a review nor
+        predates the cutover date, or a cited form submission dated after
+        the form closed. `already_filed`: delete or patch after filing.
 
     IntakeConflictError:
       type: object
@@ -4011,6 +4106,16 @@ components:
           type: array
           items:
             type: string
+          description: >
+            `reviews.author` snapshots (WXYC/Backend-Service#2805), not
+            `auth_user.name`. For an account-holding DJ's own review this is
+            the same public-safe display value; for a handwritten or
+            on-behalf review an MD typed by hand, it is free text and may be
+            a real name. Unlike `IntakeItem`'s `*_name` fields, this is not
+            guaranteed PII-free — it exists for the MD's own in-station
+            confirmation of what was removed, never for display outside the
+            station or for client telemetry (analytics properties, error
+            breadcrumbs, logs).
 
     # Legacy rotation schema (for backward compatibility with existing endpoints)
     Rotation:
@@ -13908,8 +14013,11 @@ paths:
         presenting it as undone should say so:
 
         - archived flowsheet plays do not re-link to the restored release;
+
         - the five excluded dependents above stay excluded;
+
         - a row whose nullable `ON DELETE SET NULL` reference to a deleted release was cleared by that delete (an intake item's citation, for example) keeps the reference NULL after the release is restored;
+
         - a restored row's nullable `ON DELETE SET NULL` reference whose target was deleted after the batch comes back NULL, as its delete rule would have left it, rather than failing the restore. For example, a restored rotation row can come back without its card filing (WXYC/Backend-Service#2799, https://github.com/WXYC/Backend-Service/pull/2815). The 200 does not say which references were nulled.
 
 
