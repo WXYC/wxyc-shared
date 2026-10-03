@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.8.0');
+      expect(spec.info.version).toBe('10.9.0');
     });
 
     it('should have components section', () => {
@@ -3665,6 +3665,7 @@ describe('OpenAPI Specification', () => {
         'not_reviewed',
         'invalid_citation',
         'already_filed',
+        'in_rotation',
       ]);
     });
 
@@ -3794,6 +3795,80 @@ describe('OpenAPI Specification', () => {
       // fail this half of the assertion.
       const items = text.match(/^- .+$/gm) ?? [];
       expect(items).toHaveLength(4);
+    });
+  });
+
+  describe('Intake paths (WXYC/Backend-Service#2791 slice 1b, #542)', () => {
+    type Op = {
+      description?: string;
+      requestBody?: { content?: Record<string, { schema?: Record<string, unknown> }> };
+      responses?: Record<string, { content?: Record<string, { schema?: Record<string, unknown> }> } | undefined>;
+      'x-wxyc-service'?: string;
+    };
+    const op = (path: string, method: string): Op => {
+      const found = (spec.paths as Record<string, Record<string, Op> | undefined>)[path]?.[method];
+      if (!found) throw new Error(`api.yaml declares no ${method.toUpperCase()} ${path}`);
+      return found;
+    };
+    const body = (o: Op, status: string): Record<string, unknown> | undefined =>
+      o.responses?.[status]?.content?.['application/json']?.schema;
+    const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
+
+    // method, path, grant named in the description, delivering issue, success schema
+    it.each([
+      ['get', '/intake', 'reviews: read', '#2796'],
+      ['post', '/intake', 'reviews: manage', '#2796'],
+      ['get', '/intake/{id}', 'reviews: read', '#2796'],
+      ['patch', '/intake/{id}', 'reviews: manage', '#2796'],
+      ['delete', '/intake/{id}', 'reviews: manage', '#2796'],
+    ])('declares %s %s with its grant (%s) and delivering issue (%s)', (method, path, grant, issue) => {
+      const o = op(path, method);
+      expect(o['x-wxyc-service']).toBe('backend-service');
+      expect(o.description).toContain(grant);
+      expect(o.description).toContain(issue);
+    });
+
+    it('serves item responses as IntakeItem and the delete as IntakeDeleteResponse', () => {
+      expect(body(op('/intake/{id}', 'get'), '200')).toEqual(ref('IntakeItem'));
+      expect(body(op('/intake', 'post'), '200')).toEqual(ref('IntakeItem'));
+      expect(body(op('/intake/{id}', 'patch'), '200')).toEqual(ref('IntakeItem'));
+      expect(body(op('/intake/{id}', 'delete'), '200')).toEqual(ref('IntakeDeleteResponse'));
+      expect(body(op('/intake', 'get'), '200')).toEqual({ type: 'array', items: ref('IntakeItem') });
+    });
+
+    it('takes the request bodies from the intake schemas', () => {
+      const req = (path: string, method: string) =>
+        op(path, method).requestBody?.content?.['application/json']?.schema;
+      expect(req('/intake', 'post')).toEqual(ref('NewIntakeItemRequest'));
+      expect(req('/intake/{id}', 'patch')).toEqual(ref('IntakeItemPatch'));
+    });
+
+    it('declares the patch and delete 409 as IntakeConflictError', () => {
+      expect(body(op('/intake/{id}', 'patch'), '409')).toEqual(ref('IntakeConflictError'));
+      expect(body(op('/intake/{id}', 'delete'), '409')).toEqual(ref('IntakeConflictError'));
+    });
+
+    it('filters the list on effective_state and says passes reaches reviews: manage callers', () => {
+      const list = op('/intake', 'get') as Op & { parameters?: Array<{ name: string; schema?: { $ref?: string } }> };
+      const state = list.parameters?.find((p) => p.name === 'state');
+      expect(state?.schema?.$ref).toBe('#/components/schemas/IntakeItemState');
+      expect(list.description).toMatch(/effective_state/);
+      expect(list.description).toMatch(/`passes`/);
+    });
+
+    it('words invalid_citation per the inclusive "submitted review" rule', () => {
+      const text = (spec.components.schemas.IntakeConflictReason as { description?: string }).description ?? '';
+      expect(text).toMatch(/no \*\*submitted\*\* review/);
+      expect(text).toMatch(/catalogued on the cutover date counts as before it/);
+      expect(text).not.toMatch(/neither has a review nor predates/);
+      expect(text).toMatch(/`in_rotation`/);
+    });
+
+    it('documents the single-key citation switch on IntakeItemPatch', () => {
+      const text = (spec.components.schemas.IntakeItemPatch as { description?: string }).description ?? '';
+      expect(text).toMatch(/clears the other/);
+      expect(text).toMatch(/\{cited_submission_id: 12\}/);
+      expect(text).toMatch(/IntakeItemPatchNot/);
     });
   });
 
@@ -7281,14 +7356,13 @@ describe('OpenAPI Specification', () => {
     'ReadinessResponse', 'StreamingCheckRequest',
     ];
 
-    // Declared ahead of the `/intake` paths that reference them (#537 slice 1
-    // lands the schemas; the paths follow in the next slice, #542). Drop
-    // these once those paths land: the "carries no exemption" guard below
-    // then fails until they are removed here.
+    // Schemas declared before the paths that reference them, so a schema-first
+    // slice can land ahead of its paths. The `IntakeFile*` schemas wait for `POST /intake/{id}/file` (#542's
+    // action-routes remainder). The `IntakeFile*` schemas wait for `POST /intake/{id}/file` (#542's
+    // action-routes remainder). Prune an entry once its path lands:
+    // the "carries no exemption" guard below fails until it is removed.
     const DECLARED_AHEAD_OF_PATHS = [
-      'IntakeItemState', 'IntakeItem', 'NewIntakeItemRequest', 'IntakeItemPatch',
       'IntakeFileRequest', 'IntakeFileNewRelease', 'IntakeFileExistingRelease',
-      'IntakeConflictReason', 'IntakeConflictError', 'IntakeDeleteResponse',
     ];
 
     const EXEMPT = new Set([
