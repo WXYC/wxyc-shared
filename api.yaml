@@ -3874,10 +3874,14 @@ components:
           type: string
           nullable: true
           description: >
-            Null outside `requested`. Also `null` while `state: requested`
-            when the requesting DJ's account has since been deleted — the
-            case that makes `effective_state` read `pool` despite `state`
-            still saying `requested`.
+            The DJ a music director asked to review the item, set when it
+            enters `requested`. Read it together with `state` and
+            `effective_state`, not as proof of a live request: later
+            transitions may leave it set (a checkout clears a stale
+            request's fields). `null` while `state: requested` means the
+            requested DJ's account has since been deleted, the case that
+            makes `effective_state` read `pool` despite `state` still
+            saying `requested`.
         requested_dj_name:
           type: string
           nullable: true
@@ -3889,9 +3893,13 @@ components:
           type: string
           nullable: true
           description: >
-            Null outside `checked_out`. Also `null` while `state:
-            checked_out` when the holder's account has since been deleted —
-            shown to MDs as "holder removed"; the MD may release the item.
+            Who holds the physical copy, set on checkout. It stays set once
+            the review is submitted: deleting the last review of a
+            `reviewed` item returns it to `checked_out` with the same
+            holder. Read it together with `state`, not as proof of a live
+            checkout. `null` while `state: checked_out` means the holder's
+            account has since been deleted, shown to MDs as "holder
+            removed"; an MD may release the item.
         checked_out_by_name:
           type: string
           nullable: true
