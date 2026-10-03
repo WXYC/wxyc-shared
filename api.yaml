@@ -3796,11 +3796,11 @@ components:
         Where an intake item sits in its lifecycle: logged into `pool`, held
         in the office for a named DJ as `requested` (the DJ it was requested
         of has not yet accepted), held by its holder as `checked_out`,
-        `reviewed`, `filed` into the catalog, and `finalized` once shelved. `effective_state` on
-        `IntakeItem` reads a stale `requested` as `pool`
+        `reviewed`, `filed` into the catalog, and `finalized` once shelved.
+        `effective_state` on `IntakeItem` reads a stale `requested` as `pool`
         (WXYC/Backend-Service#2796): a `requested` row is stale once its
-        `requested_at` is more than 7 days old, or once the requesting DJ's
-        account has been deleted (`requested_dj_id` turns `null`). `state`
+        `requested_at` is more than 7 days old, or once the DJ it was
+        requested of has had their account deleted (`requested_dj_id` turns `null`). `state`
         itself does not change when a request goes stale — a read never
         writes — so `state: requested` can outlive the 7-day window on a row
         no one has touched since; only `effective_state` reflects the lapse.
@@ -3871,8 +3871,8 @@ components:
             `state` as actually usable, per WXYC/Backend-Service#2796: equal
             to `state` except a stale `requested` reads as `pool` — stale
             meaning `requested_at` is more than 7 days old, or
-            `requested_dj_id` is `null` because the requesting DJ's account
-            was deleted. A read never writes, so `state` itself is left
+            `requested_dj_id` is `null` because the DJ it was requested of
+            had their account deleted. A read never writes, so `state` itself is left
             untouched by the lapse; only `effective_state` reflects it.
         overdue:
           type: boolean
@@ -12245,8 +12245,8 @@ paths:
       summary: List intake items
       description: >
         The intake pool and every other state, ordered by `logged_at`
-        descending, then `id` descending. Grant: `reviews: read`. `state` filters on `effective_state`, so a stale
-        `requested` item (see `IntakeItemState`) is returned for
+        descending, then `id` descending. Grant: `reviews: read`. `state`
+        filters on `effective_state`, so a stale `requested` item (see `IntakeItemState`) is returned for
         `state=pool`, not `state=requested`. Each item carries `passes` for
         callers holding `reviews: manage`, which the music director notice
         band in WXYC/dj-site#1764 reads from this list. Delivered by
@@ -12268,6 +12268,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: '`state` is not an `IntakeItemState` value'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
