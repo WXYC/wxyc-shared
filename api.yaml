@@ -3794,8 +3794,9 @@ components:
       enum: [pool, requested, checked_out, reviewed, filed, finalized]
       description: >
         Where an intake item sits in its lifecycle: logged into `pool`, held
-        by a DJ as `requested` or `checked_out`, `reviewed`, `filed` into the
-        catalog, and `finalized` once shelved. `effective_state` on
+        in the office for a named DJ as `requested` (the DJ it was requested
+        of has not yet accepted), held by its holder as `checked_out`,
+        `reviewed`, `filed` into the catalog, and `finalized` once shelved. `effective_state` on
         `IntakeItem` reads a stale `requested` as `pool`
         (WXYC/Backend-Service#2796): a `requested` row is stale once its
         `requested_at` is more than 7 days old, or once the requesting DJ's
@@ -3808,11 +3809,10 @@ components:
       type: object
       description: >
         One physical copy the station holds, logged by a music director and
-        waiting for a review (WXYC/Backend-Service#2791). This schema's own
-        `*_name` fields (`requested_dj_name`, `checked_out_by_name`) are
-        `auth_user.name`, the public-safe display value. Its three DJ-name
-        fields are `requested_dj_name`, `checked_out_by_name` and
-        `passes[].dj_name`; no real name appears in it.
+        waiting for a review (WXYC/Backend-Service#2791). Its three DJ-name
+        fields (`requested_dj_name`, `checked_out_by_name`,
+        `passes[].dj_name`) are `auth_user.name`, the public-safe display
+        value; no real name appears in it.
         `passes` is present only for callers holding `reviews: manage`.
         `IntakeDeleteResponse.deleted_review_authors` is a different schema
         with its own, weaker guarantee — see its description.
@@ -12244,8 +12244,8 @@ paths:
       x-wxyc-service: backend-service
       summary: List intake items
       description: >
-        The intake pool and every other state, newest first. Grant:
-        `reviews: read`. `state` filters on `effective_state`, so a stale
+        The intake pool and every other state, ordered by `logged_at`
+        descending, then `id` descending. Grant: `reviews: read`. `state` filters on `effective_state`, so a stale
         `requested` item (see `IntakeItemState`) is returned for
         `state=pool`, not `state=requested`. Each item carries `passes` for
         callers holding `reviews: manage`, which the music director notice
