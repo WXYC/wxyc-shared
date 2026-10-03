@@ -38,19 +38,3 @@
 # claiming a count is wrong the moment someone appends an entry below it, and no
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
-
-# wxyc-shared#534: GET /flowsheet/search's inline `limit` and `page`
-# parameters gain the bounds `PlaylistSearchParams.limit` and
-# `PlaylistSearchParams.page` have declared all along (`minimum: 1` /
-# `maximum: 100` on `limit`, `minimum: 0` on `page`). search.controller.ts
-# has enforced all three for as long as it has parsed the parameters --
-# `isNaN(limit) || limit < 1` 400s below 1, `limit > MAX_LIMIT` (100) 400s
-# above 100, `isNaN(page) || page < 0` 400s below 0 -- so a client that
-# stayed within the contract as `PlaylistSearchParams` already described it
-# was never going to see any of the three rejected values accepted anyway.
-# These are corrections that bring the inline parameters in line with what
-# the server, and the sibling schema, have always done, not new narrowing
-# decisions.
-get /flowsheet/search for the `query` request parameter `limit`, the max was set to `100.00`
-get /flowsheet/search for the `query` request parameter `limit`, the min was set to `1.00`
-get /flowsheet/search for the `query` request parameter `page`, the min was set to `0.00`
