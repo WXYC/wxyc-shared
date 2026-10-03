@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.8.0
+  version: 10.9.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -73,6 +73,15 @@ components:
         Configured via the `LML_API_KEY` env var on each consumer (Backend,
         request-o-matic, tubafrenzy). Distinct from `BearerAuth` (Better Auth
         JWTs); LML routes verify only this static key.
+
+  parameters:
+    IntakeId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: The intake item's id.
 
   schemas:
     # ===================
@@ -3801,8 +3810,9 @@ components:
         One physical copy the station holds, logged by a music director and
         waiting for a review (WXYC/Backend-Service#2791). This schema's own
         `*_name` fields (`requested_dj_name`, `checked_out_by_name`) are
-        `auth_user.name`, the public-safe display value — `IntakeItem` itself
-        carries account ids, not names, and no real name appears in it.
+        `auth_user.name`, the public-safe display value. Its three DJ-name
+        fields are `requested_dj_name`, `checked_out_by_name` and
+        `passes[].dj_name`; no real name appears in it.
         `passes` is present only for callers holding `reviews: manage`.
         `IntakeDeleteResponse.deleted_review_authors` is a different schema
         with its own, weaker guarantee — see its description.
@@ -3983,7 +3993,14 @@ components:
         non-null at once, but may set one while explicitly clearing the
         other (for example `{cited_album_id: null, cited_submission_id: 12}`)
         to switch citation kinds in a single request, rather than passing
-        through an uncited state across two.
+        through an uncited state across two. Setting one citation clears the
+        other, so the single-key form `{cited_submission_id: 12}` is the
+        canonical switch every generated client can send
+        (WXYC/Backend-Service#2797); Swift omits nil optionals and cannot
+        send an explicit null. The schema-level `not` rule is documentation
+        the pipeline does not enforce, and the generated `IntakeItemPatchNot`
+        type in swift6 and kotlin is a generator artifact, not part of the
+        wire contract.
       not:
         allOf:
           - required:
@@ -4076,7 +4093,7 @@ components:
 
     IntakeConflictReason:
       type: string
-      enum: [state_changed, not_reviewed, invalid_citation, already_filed]
+      enum: [state_changed, not_reviewed, invalid_citation, already_filed, in_rotation]
       description: >
         Discriminator for the intake 409s, pairing with `IntakeConflictError`
         the way `LibraryFilingConflictReason` pairs with
@@ -4086,9 +4103,14 @@ components:
         item with no submitted review and no valid citation, or printing one
         with no submitted **typed** review (WXYC/Backend-Service#2804 — a
         handwritten review is already on the sleeve, so nothing prints).
-        `invalid_citation`: a cited release that neither has a review nor
-        predates the cutover date, or a cited form submission dated after
-        the form closed. `already_filed`: delete or patch after filing.
+        `invalid_citation`: a cited release with no **submitted** review that
+        was catalogued **after** the cutover date (station time; a release
+        catalogued on the cutover date counts as before it), or a cited form
+        submission dated, in station time, after the cutover date
+        (WXYC/Backend-Service#2797). `already_filed`: delete or patch after
+        filing. `in_rotation`: finalize of a filed item whose rotation row's
+        kill date has not yet passed (WXYC/Backend-Service#2804); the item
+        stays `filed`, and the message names the kill date.
 
     IntakeConflictError:
       type: object
@@ -12216,6 +12238,180 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LibraryFilingConflictError'
+
+  /intake:
+    get:
+      x-wxyc-service: backend-service
+      summary: List intake items
+      description: >
+        The intake pool and every other state, newest first. Grant:
+        `reviews: read`. `state` filters on `effective_state`, so a stale
+        `requested` item (see `IntakeItemState`) is returned for
+        `state=pool`, not `state=requested`. Each item carries `passes` for
+        callers holding `reviews: manage`, which the music director notice
+        band in WXYC/dj-site#1764 reads from this list. Delivered by
+        WXYC/Backend-Service#2796.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/IntakeItemState'
+      responses:
+        '200':
+          description: The matching items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IntakeItem'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: read` permission'
+    post:
+      x-wxyc-service: backend-service
+      summary: Log an item into the intake pool
+      description: >
+        A music director logs a physical copy the station holds and wants
+        reviewed. Grant: `reviews: manage`. Delivered by
+        WXYC/Backend-Service#2796.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewIntakeItemRequest'
+      responses:
+        '200':
+          description: The logged item, in state `pool`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: Validation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: manage` permission'
+
+  /intake/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IntakeId'
+    get:
+      x-wxyc-service: backend-service
+      summary: Get one intake item
+      description: >
+        Grant: `reviews: read`. Delivered by WXYC/Backend-Service#2796.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: read` permission'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    patch:
+      x-wxyc-service: backend-service
+      summary: Edit an intake item before it is filed
+      description: >
+        Grant: `reviews: manage`. See `IntakeItemPatch` for the citation
+        switch. Refused with `already_filed` once the item is filed.
+        Delivered by WXYC/Backend-Service#2796 (citation rules:
+        WXYC/Backend-Service#2797).
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntakeItemPatch'
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: Validation failure, or both citations set non-null
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: manage` permission'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            `already_filed`, or `invalid_citation` when the new citation
+            fails the rule on `IntakeConflictReason`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeConflictError'
+    delete:
+      x-wxyc-service: backend-service
+      summary: Delete an intake item and the reviews attached to it
+      description: >
+        Grant: `reviews: manage`. The response names the review authors whose
+        reviews went with the item, so the confirmation can say whose work
+        was removed. Refused with `already_filed` once the item is filed.
+        Delivered by WXYC/Backend-Service#2796.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeDeleteResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: manage` permission'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: "`already_filed`"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeConflictError'
 
   /library/query:
     get:
