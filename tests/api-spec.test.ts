@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.7.0');
+      expect(spec.info.version).toBe('10.8.0');
     });
 
     it('should have components section', () => {
@@ -3647,6 +3647,80 @@ describe('OpenAPI Specification', () => {
       // card-bin arm has no artist to name.
       expect(error.properties?.artist?.allOf?.[0]?.$ref).toBe('#/components/schemas/Artist');
       expect(error.required).not.toContain('artist');
+    });
+  });
+
+  describe('Intake items (WXYC/Backend-Service#2791 slice 1, #537)', () => {
+    it('pins the intake state machine and conflict reasons as closed enums', () => {
+      expect((spec.components.schemas.IntakeItemState as { enum?: string[] }).enum).toEqual([
+        'pool',
+        'requested',
+        'checked_out',
+        'reviewed',
+        'filed',
+        'finalized',
+      ]);
+      expect((spec.components.schemas.IntakeConflictReason as { enum?: string[] }).enum).toEqual([
+        'state_changed',
+        'not_reviewed',
+        'invalid_citation',
+        'already_filed',
+      ]);
+    });
+
+    it('requires the identity, state, and computed fields on IntakeItem', () => {
+      const item = spec.components.schemas.IntakeItem as {
+        required?: string[];
+        properties?: Record<string, { $ref?: string; maxLength?: number }>;
+      };
+      expect(item.required).toEqual(
+        expect.arrayContaining(['id', 'artist_name', 'album_title', 'state', 'effective_state', 'overdue'])
+      );
+      expect(item.properties?.state?.$ref).toBe('#/components/schemas/IntakeItemState');
+      expect(item.properties?.effective_state?.$ref).toBe('#/components/schemas/IntakeItemState');
+      expect(item.properties?.artist_name?.maxLength).toBe(128);
+      expect(item.properties?.album_title?.maxLength).toBe(128);
+      // `passes` is gated to reviews: manage callers, so it cannot be required.
+      expect(item.required).not.toContain('passes');
+    });
+
+    it('makes IntakeFileRequest a oneOf of the filing bench body and an existing-release arm', () => {
+      const file = spec.components.schemas.IntakeFileRequest as {
+        oneOf?: Array<{ $ref?: string; required?: string[]; properties?: Record<string, unknown> }>;
+      };
+      expect(file.oneOf).toHaveLength(2);
+      expect(file.oneOf?.[0]?.$ref).toBe('#/components/schemas/LibraryFilingRequest');
+      expect(file.oneOf?.[1]?.required).toEqual(['album_id']);
+      expect(file.oneOf?.[1]?.properties?.album_id).toBeDefined();
+    });
+
+    it('makes the patch refuse citing a submission and a release at once', () => {
+      const patch = spec.components.schemas.IntakeItemPatch as {
+        not?: { required?: string[] };
+        properties?: Record<string, unknown>;
+      };
+      expect(patch.properties?.cited_album_id).toBeDefined();
+      expect(patch.properties?.cited_submission_id).toBeDefined();
+      expect(patch.not?.required).toEqual(['cited_album_id', 'cited_submission_id']);
+    });
+
+    it('types the delete response with the names of the review authors it removed', () => {
+      const del = spec.components.schemas.IntakeDeleteResponse as {
+        required?: string[];
+        properties?: { deleted_review_authors?: { type?: string; items?: { type?: string } } };
+      };
+      expect(del.required).toEqual(['deleted_review_authors']);
+      expect(del.properties?.deleted_review_authors?.type).toBe('array');
+      expect(del.properties?.deleted_review_authors?.items?.type).toBe('string');
+    });
+
+
+    it('states four things a restore does not put back, the new one generically', () => {
+      const restore = spec.paths['/library/deleted/{batchId}/restore'] as { post: { description?: string } };
+      const text = restore.post.description ?? '';
+      expect(text).toMatch(/\*\*Four things a restore does not put back\*\*/);
+      expect(text).not.toMatch(/Two things a restore does not put back/);
+      expect(text).toMatch(/ON DELETE SET NULL/);
     });
   });
 
@@ -7134,10 +7208,20 @@ describe('OpenAPI Specification', () => {
     'ReadinessResponse', 'StreamingCheckRequest',
     ];
 
+    // Declared ahead of the `/intake` paths that reference them (#537 slice 1
+    // lands the schemas; the paths follow in the next slice). Drop these once
+    // those paths land: the "carries no exemption" guard above then fails
+    // until they are removed here.
+    const DECLARED_AHEAD_OF_PATHS = [
+      'IntakeItemState', 'IntakeItem', 'NewIntakeItemRequest', 'IntakeItemPatch',
+      'IntakeFileRequest', 'IntakeConflictReason', 'IntakeConflictError', 'IntakeDeleteResponse',
+    ];
+
     const EXEMPT = new Set([
       ...WEBSOCKET_PROTOCOL,
       ...GENERATED_TYPE_VOCABULARY,
       ...ENDPOINT_NOT_DECLARED_HERE,
+      ...DECLARED_AHEAD_OF_PATHS,
     ]);
 
     function reachableSchemas(): Set<string> {
