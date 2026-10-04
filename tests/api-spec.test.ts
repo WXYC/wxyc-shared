@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.12.0');
+      expect(spec.info.version).toBe('10.13.0');
     });
 
     it('should have components section', () => {
@@ -6635,7 +6635,7 @@ describe('OpenAPI Specification', () => {
       expect(lml).toEqual([...LML_OPERATIONS].sort());
     });
 
-    // The seventeen. Set out as a closed list so the audit is re-runnable: a
+    // The closed list. Set out as a closed list so the audit is re-runnable: a
     // re-declaration at any of these paths fails here and sends the author back
     // to the probe rather than to a 404 in a generated client.
     //
@@ -6645,7 +6645,6 @@ describe('OpenAPI Specification', () => {
     // `cognito_user_name` query parameter names an auth system Backend has not
     // run for years.
     const UNREACHABLE_PATHS = [
-      '/album-reviews',
       '/djs',
       '/djs/register',
       '/library/labels',
@@ -7415,8 +7414,7 @@ describe('OpenAPI Specification', () => {
     // vendored Swift trees. Deleting one breaks a build somewhere, so this
     // list is permanent and is not expected to shrink.
     //
-    // Most entries are plain imports -- `AlbumReview` and `AlbumReviewsResponse`
-    // from Backend-Service's album-reviews service and controller, the `Discogs*`
+    // Most entries are plain imports -- the `Discogs*`
     // family from library-metadata-lookup's `discogs/models.py` (which imports
     // them from `generated.api_models` and re-aliases them) and from
     // Backend-Service's `shared/lml-client`, `HealthCheckResponse` from both
@@ -7437,7 +7435,7 @@ describe('OpenAPI Specification', () => {
     //     shape `GET /library/rotation` actually serves, is a superset of it in
     //     every field but those two.
     const GENERATED_TYPE_VOCABULARY = [
-    'AddToBinRequest', 'AlbumMetadata', 'AlbumReview', 'AlbumReviewsResponse', 'ArtistMetadata',
+    'AddToBinRequest', 'AlbumMetadata', 'ArtistMetadata',
     'BinLibraryDetails', 'DateTimeEntry', 'DiscogsArtistCredit', 'DiscogsArtistDetails',
     'DiscogsLabelCredit', 'DiscogsReleaseInfo', 'DiscogsReleaseMetadata', 'DiscogsReleaseVideo',
     'DiscogsTrackReleasesResponse', 'FlowsheetBreakpointEntry', 'FlowsheetMessageEntry',
@@ -8638,6 +8636,96 @@ describe('OpenAPI Specification', () => {
         | { description?: string }
         | undefined;
       expect(totalPages?.description).toMatch(/total/);
+    });
+  });
+
+  describe('In-app reviews (WXYC/Backend-Service#2791 slice 2, #538: the read half)', () => {
+    type Schema = {
+      description?: string;
+      enum?: string[];
+      required?: string[];
+      properties?: Record<string, Record<string, unknown>>;
+    };
+    type Op = {
+      description?: string;
+      parameters?: Array<Record<string, unknown>>;
+      requestBody?: { content?: Record<string, { schema?: Record<string, unknown> }> };
+      responses?: Record<string, { content?: Record<string, { schema?: Record<string, unknown> }> } | undefined>;
+      'x-wxyc-service'?: string;
+    };
+    const schema = (name: string) => spec.components.schemas[name] as Schema;
+    const op = (path: string, method: string): Op => {
+      const found = (spec.paths as Record<string, Record<string, Op> | undefined>)[path]?.[method];
+      if (!found) throw new Error(`api.yaml declares no ${method.toUpperCase()} ${path}`);
+      return found;
+    };
+    const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
+    const body = (o: Op, status: string) => o.responses?.[status]?.content?.['application/json']?.schema;
+
+    it.each([
+      ['ReviewMedium', ['typed', 'handwritten', 'printed']],
+      ['ReviewStatus', ['draft', 'submitted']],
+      ['ReviewCredit', ['dj_name', 'real_name', 'none']],
+    ])('declares %s as a closed enum', (name, values) => {
+      expect(schema(name).enum).toEqual(values);
+    });
+
+    it('requires every Review column and keeps nullable ones in the required set', () => {
+      const review = schema('Review');
+      for (const key of [
+        'id', 'album_id', 'intake_item_id', 'author', 'author_user_id', 'recorded_by_user_id',
+        'medium', 'status', 'buzzwords', 'artist_blurb', 'review', 'recommended_tracks', 'fcc',
+        'publish_website', 'publish_apps', 'publish_instagram', 'credit', 'add_date',
+        'submitted_at', 'last_modified', 'locked',
+      ]) {
+        expect(review.required, key).toContain(key);
+        expect(review.properties?.[key], key).toBeDefined();
+      }
+      expect(review.properties?.author?.maxLength).toBe(128);
+      expect(review.description).toMatch(/never published outside the station/);
+      expect(review.description).toMatch(/stores consent/);
+    });
+
+    it.each([
+      ['get', '/reviews', 'reviews: read'],
+      ['get', '/reviews/{id}', 'reviews: read'],
+    ])('declares %s %s with its grant (%s)', (method, path, grant) => {
+      const o = op(path, method);
+      expect(o['x-wxyc-service']).toBe('backend-service');
+      expect(o.description).toContain(grant);
+    });
+
+    it('states the draft-visibility rule on the read paths', () => {
+      expect(op('/reviews', 'get').description).toMatch(/draft is visible only to its author/);
+      expect(op('/reviews/{id}', 'get').description).toMatch(/404/);
+      expect(op('/reviews', 'get').parameters?.map((p) => p.name)).toEqual(
+        expect.arrayContaining(['album_id', 'intake_item_id', 'mine'])
+      );
+    });
+
+    it('serves Review from the read paths', () => {
+      expect(body(op('/reviews/{id}', 'get'), '200')).toEqual(ref('Review'));
+      expect(body(op('/reviews', 'get'), '200')).toEqual({ type: 'array', items: ref('Review') });
+    });
+
+    it('re-declares GET /album-reviews with album_id, artist, page and a 100-capped limit', () => {
+      const o = op('/album-reviews', 'get');
+      expect(o['x-wxyc-service']).toBe('backend-service');
+      expect(o.description).toContain('album_reviews: read');
+      const params = Object.fromEntries((o.parameters ?? []).map((p) => [p.name as string, p]));
+      expect(Object.keys(params).sort()).toEqual(['album_id', 'artist', 'limit', 'page']);
+      expect((params.limit?.schema as { maximum?: number }).maximum).toBe(100);
+      expect(params.page?.schema).toMatchObject({ minimum: 1, default: 1 });
+      expect(body(o, '400')).toEqual(ref('ApiErrorResponse'));
+      expect(body(o, '200')).toEqual(ref('AlbumReviewsResponse'));
+    });
+
+    it('corrects the AlbumReview description to allow names inside the station only', () => {
+      const text = schema('AlbumReview').description ?? '';
+      expect(text).not.toMatch(/deliberately not\s+exposed/);
+      expect(text).toMatch(/withheld\s+by\s+this\s+endpoint/);
+      expect(text).toMatch(/inside\s+the\s+station/);
+      expect(text).toMatch(/never\s+shown\s+outside/);
     });
   });
 });
