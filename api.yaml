@@ -5446,6 +5446,47 @@ components:
         entity_kind:
           type: string
 
+    RestoreMissingReferenceRefusal:
+      type: object
+      description: >
+        `POST /library/deleted/{batchId}/restore`'s 409 when a restored
+        row holds a reference with no `ON DELETE` action, or a NOT NULL
+        one, whose target no longer exists (WXYC/Backend-Service#2818).
+        Retryable once the target exists again; the snapshot is
+        untouched. Carries ids only, never names, as `RestoreDeviation`
+        does.
+      required:
+        - message
+        - reason
+        - table
+        - row_id
+        - column
+        - target_table
+        - captured_value
+      properties:
+        message:
+          type: string
+        reason:
+          type: string
+          enum: ['missing_reference']
+        table:
+          type: string
+          description: The table of the captured row that holds the reference.
+        row_id:
+          type: integer
+          description: The captured row's primary key.
+        column:
+          type: string
+          description: The reference column whose target is missing.
+        target_table:
+          type: string
+          description: The table the reference points into.
+        captured_value:
+          type: string
+          description: >
+            The referenced id the snapshot carried, as a string because
+            some referenced keys (`auth_user.id`) are text.
+
     # ===================
     # DJ Types
     # ===================
@@ -14646,7 +14687,7 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: >
-            Three different refusals, told apart by `reason`.
+            Four different refusals, told apart by `reason`.
             `restore_declined` — the caller sent `resolution: 'decline'`
             over a taken slot, so the batch was aborted and nothing was
             written. `already_restored` — the batch is already back in
@@ -14656,7 +14697,14 @@ paths:
             the batch holds an `entity_kind` with no restore plan (an
             `artist` batch today); permanent, not retryable, and
             `GET /library/deleted`'s `restorable` field already said so
-            for the same batch.
+            for the same batch. `missing_reference` — a restored row
+            holds a reference with no `ON DELETE` action, or a NOT NULL
+            one, whose target no longer exists (a release whose artist
+            was deleted, for example); retryable once the target exists
+            again (restore or re-create it first), and the snapshot is
+            untouched. Contract ahead of WXYC/Backend-Service#2818:
+            until that deploys, the same case is a 500, so a consumer
+            must tolerate its absence.
           content:
             application/json:
               schema:
@@ -14664,6 +14712,7 @@ paths:
                   - $ref: '#/components/schemas/RestoreDeclinedRefusal'
                   - $ref: '#/components/schemas/RestoreAlreadyRestoredRefusal'
                   - $ref: '#/components/schemas/RestoreUnrestorableKindRefusal'
+                  - $ref: '#/components/schemas/RestoreMissingReferenceRefusal'
         '503':
           description: >
             Stood down rather than wait on rows a live writer holds,

@@ -7622,17 +7622,26 @@ describe('OpenAPI Specification', () => {
         ]);
       });
 
-      // Three different 409s (wxyc-shared#512 added the third). Handling
+      // Four different 409s (wxyc-shared#512 added the third, #547 the fourth). Handling
       // `already_restored` as a code conflict prompts for a call-number
       // decision on a batch that is already fully back in the catalog,
       // which is what a lenient decoder does when the reason is outside a
       // declared enum.
-      it('declares all three 409 refusals, so already_restored is not read as a code conflict', () => {
+      it('declares all four 409 refusals, so already_restored is not read as a code conflict', () => {
         expect(oneOfNames(responseSchema(restorePath, 'post', '409')).sort()).toEqual([
           'RestoreAlreadyRestoredRefusal',
           'RestoreDeclinedRefusal',
+          'RestoreMissingReferenceRefusal',
           'RestoreUnrestorableKindRefusal',
         ]);
+      });
+
+      it('describes the 409 as four refusals and says the missing-reference one is retryable and lands ahead of #2818', () => {
+        const description = (operation(restorePath, 'post').responses as Record<string, { description: string }>)['409']?.description ?? '';
+        expect(description).toContain('Four different refusals');
+        expect(description).toContain('missing_reference');
+        expect(description).toContain('retryable');
+        expect(description).toContain('WXYC/Backend-Service#2818');
       });
 
       it('declares the 503 stand-down and the 404, and no other statuses', () => {
@@ -8065,6 +8074,20 @@ describe('OpenAPI Specification', () => {
           ['entity_kind', 'message', 'reason'].sort()
         );
         expect(propertyOf('RestoreUnrestorableKindRefusal', 'reason')?.enum).toEqual(['unrestorable_kind']);
+      });
+    });
+
+    describe('RestoreMissingReferenceRefusal (wxyc-shared#547)', () => {
+      it('requires the refusal keys, with reason pinned to the single literal', () => {
+        expect(requiredKeysOf('RestoreMissingReferenceRefusal').sort()).toEqual(
+          ['captured_value', 'column', 'message', 'reason', 'row_id', 'table', 'target_table'].sort()
+        );
+        expect(propertyOf('RestoreMissingReferenceRefusal', 'reason')?.enum).toEqual(['missing_reference']);
+      });
+
+      it('types row_id and captured_value as RestoreDeviation does', () => {
+        expect(propertyOf('RestoreMissingReferenceRefusal', 'row_id')?.type).toBe('integer');
+        expect(propertyOf('RestoreMissingReferenceRefusal', 'captured_value')?.type).toBe('string');
       });
     });
 
