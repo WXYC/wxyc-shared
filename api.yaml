@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.1.0
+  version: 11.2.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -92,7 +92,11 @@ components:
       required: true
       schema:
         type: integer
-      description: The review's id.
+        minimum: 1
+        maximum: 2147483647
+      description: >-
+        The review's id. Must be a positive int4; a non-digit value, zero, or
+        a value past 2147483647 is a 400.
 
   schemas:
     # ===================
@@ -13588,10 +13592,14 @@ paths:
           in: query
           schema:
             type: integer
+            minimum: 1
+            maximum: 2147483647
         - name: intake_item_id
           in: query
           schema:
             type: integer
+            minimum: 1
+            maximum: 2147483647
         - name: mine
           in: query
           schema:
@@ -13675,6 +13683,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Review'
+        '400':
+          description: A malformed id (a non-digit value, zero, or past 2147483647)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
@@ -13710,7 +13724,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Review'
         '400':
-          description: Validation failure, including a `review` of `null` that would leave a submitted `typed` review with no text
+          description: A malformed id, or a validation failure, including a `review` of `null` that would leave a submitted `typed` review with no text
           content:
             application/json:
               schema:
@@ -13747,6 +13761,12 @@ paths:
       responses:
         '204':
           description: Deleted; no body
+        '400':
+          description: A malformed id (a non-digit value, zero, or past 2147483647)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
@@ -13789,7 +13809,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Review'
         '400':
-          description: A `typed` review with a `null` `review`
+          description: A malformed id, or a `typed` review with a `null` `review`
           content:
             application/json:
               schema:
