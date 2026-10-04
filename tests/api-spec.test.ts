@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.15.0');
+      expect(spec.info.version).toBe('10.16.0');
     });
 
     it('should have components section', () => {
@@ -3883,8 +3883,8 @@ describe('OpenAPI Specification', () => {
         name: 'id',
         in: 'path',
         required: true,
-        schema: { type: 'integer' },
-        description: "The intake item's id.",
+        schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+        description: "The intake item's id. Must be a positive int4; a non-digit, zero or larger value is a 400.",
       };
       expect(params.IntakeId).toEqual(expected);
       const pathItem = (spec.paths as Record<string, { parameters?: unknown[] }>)['/intake/{id}']!;
@@ -3930,7 +3930,7 @@ describe('OpenAPI Specification', () => {
     // path, grant clause in the description, delivering issue (all POST)
     it.each([
       ['/intake/{id}/checkout', 'reviews: write', '#2798'],
-      ['/intake/{id}/release', 'Grant: `reviews: manage`, or the DJ holding the item.', '#2798'],
+      ['/intake/{id}/release', 'Grant: `reviews: write`; a `reviews: manage` holder may release anyone\'s checkout.', '#2798'],
       ['/intake/{id}/request', 'reviews: manage', '#2798'],
       ['/intake/{id}/cancel-request', 'reviews: manage', '#2798'],
       ['/intake/{id}/accept', 'Grant: `reviews: write`, and only the requested DJ.', '#2798'],
@@ -3954,13 +3954,17 @@ describe('OpenAPI Specification', () => {
     // Precedence (BS#2798, ADR 0006): no `reviews` grant is a 403 in any state; then a wrong
     // effective state is a 409; then a caller who is not the holder / requested DJ is a 403.
     it.each([
-      ['release', '`checked_out`', 'a caller who is neither the holder nor a `reviews: manage` holder gets a 403.', 'Caller has no `reviews` grant at the level this route requires, in any state; or the item is in effective state `checked_out` and the caller is neither the holder nor a `reviews: manage` holder.'],
+      ['release', '`checked_out`', 'a caller who is neither the holder nor a `reviews: manage` holder gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `checked_out` and the caller is neither the holder nor a `reviews: manage` holder.'],
       ['accept', '`requested`', 'a caller who is not the requested DJ gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` and the caller is not the requested DJ.'],
       ['pass', '`requested`', 'a caller who is not the requested DJ gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` and the caller is not the requested DJ.'],
     ])('states the %s 403/409 precedence in the description and the 403 response', (action, state, who, forbiddenText) => {
       const o = operation(`/intake/{id}/${action}`, 'post');
       const text = flat(o.description);
-      expect(text).toContain('Precedence: a caller without the `reviews` grant the route requires gets a 403 in any state;');
+      expect(text).toContain(
+        action === 'release'
+          ? 'Precedence: a caller without the `reviews: write` grant gets a 403 in any state;'
+          : 'Precedence: a caller without the `reviews` grant the route requires gets a 403 in any state;',
+      );
       expect(text).toContain(`otherwise an item not in effective state ${state} answers 409 \`state_changed\`; otherwise ${who}`);
       expect(text).not.toContain('whoever calls');
       const forbidden = flat(o.responses?.['403']?.description);
@@ -4034,6 +4038,76 @@ describe('OpenAPI Specification', () => {
       expect(slip.properties?.artist_name?.nullable).toBeUndefined();
       expect(slip.properties?.album_title?.nullable).toBeUndefined();
       expect(slip.properties?.submitted_at).toMatchObject({ type: 'string', format: 'date-time' });
+    });
+
+    // Derived from the path prefix, not from a `$ref` to IntakeId: a new /intake/{id}/... route that declares
+    // its `id` inline would otherwise slip past both the parameter check and the 400 check.
+    const intakeIdOperations = (): Array<[string, string]> =>
+      Object.entries(spec.paths as Record<string, Record<string, unknown>>)
+        .filter(([path]) => path === '/intake/{id}' || path.startsWith('/intake/{id}/'))
+        .flatMap(([path, item]) =>
+          ['get', 'put', 'post', 'patch', 'delete'].filter((m) => m in item).map((m): [string, string] => [path, m]),
+        );
+
+    it('finds the /intake/{id} operations the derived checks below cover', () => {
+      expect(intakeIdOperations().length).toBeGreaterThanOrEqual(10);
+    });
+
+    it('uses the shared IntakeId parameter, and declares the malformed-id 400, on every /intake/{id} operation', () => {
+      const paths = spec.paths as Record<string, { parameters?: unknown[] } & Record<string, unknown>>;
+      const idRef = { $ref: '#/components/parameters/IntakeId' };
+      for (const [path, method] of intakeIdOperations()) {
+        const o = operation(path, method) as { parameters?: unknown[] };
+        const declared = [...(paths[path]?.parameters ?? []), ...(o.parameters ?? [])];
+        expect(declared, `${method.toUpperCase()} ${path} IntakeId`).toContainEqual(idRef);
+        expect(responseSchema(path, method, '400'), `${method.toUpperCase()} ${path} 400`).toEqual(ref('ApiErrorResponse'));
+        expect(flat(operation(path, method).responses?.['400']?.description), `${method.toUpperCase()} ${path} 400 text`).toContain('malformed id');
+      }
+    });
+
+    it('states the source state and dj_id grant on /request, and effective requested on /cancel-request', () => {
+      const request = flat(operation('/intake/{id}/request', 'post').description);
+      expect(request).toContain('effective state `pool`');
+      expect(request).toContain('`dj_id` must name an account holding `reviews: write`, or the request is a 400');
+      expect(flat(operation('/intake/{id}/cancel-request', 'post').description)).toContain(
+        'effective `requested` item',
+      );
+    });
+
+    it('names the role-level release grant like accept and pass', () => {
+      const text = flat(operation('/intake/{id}/release', 'post').description);
+      expect(text).toContain('Grant: `reviews: write`; a `reviews: manage` holder may release anyone\'s checkout.');
+      expect(text).not.toContain('the `reviews` grant the route requires');
+    });
+
+    describe('POST /intake/{id}/file and /finalize (BS#2803, BS#2804)', () => {
+      it('declares /file with both grants and the IntakeFileRequest body', () => {
+        expectBackendRoute('/intake/{id}/file', 'post', { grant: 'reviews: manage` **and** `catalog:write', issue: '#2803' });
+        const o = operation('/intake/{id}/file', 'post');
+        expect(o.requestBody?.content?.['application/json']?.schema).toEqual(ref('IntakeFileRequest'));
+        expect(responseSchema('/intake/{id}/file', 'post', '200')).toEqual(ref('IntakeItem'));
+      });
+
+      it('declares the /file 409 as a oneOf over the intake and filing conflicts', () => {
+        expect(oneOfNames(responseSchema('/intake/{id}/file', 'post', '409'))).toEqual([
+          'IntakeConflictError',
+          'LibraryFilingConflictError',
+        ]);
+      });
+
+      it('declares /finalize with catalog:write and an IntakeConflictError 409 that reaches in_rotation', () => {
+        expectBackendRoute('/intake/{id}/finalize', 'post', { grant: 'catalog:write', issue: '#2804' });
+        expect(responseSchema('/intake/{id}/finalize', 'post', '200')).toEqual(ref('IntakeItem'));
+        expect(responseSchema('/intake/{id}/finalize', 'post', '409')).toEqual(ref('IntakeConflictError'));
+        expect(flat(operation('/intake/{id}/finalize', 'post').description)).toContain('`in_rotation`');
+        expect((spec.components.schemas.IntakeConflictReason as { enum?: string[] }).enum).toContain('in_rotation');
+      });
+
+      it.each(['file', 'finalize'])('takes the shared IntakeId parameter on %s', (action) => {
+        expect(
+          (spec.paths as Record<string, { parameters?: unknown[] }>)[`/intake/{id}/${action}`]?.parameters,
+        ).toContainEqual({ $ref: '#/components/parameters/IntakeId' });
+      });
     });
 
     it('words invalid_citation per the inclusive "submitted review" rule', () => {
@@ -7535,13 +7609,9 @@ describe('OpenAPI Specification', () => {
     ];
 
     // Schemas declared before the paths that reference them, so a schema-first
-    // slice can land ahead of its paths. The `IntakeFile*` schemas wait for
-    // `POST /intake/{id}/file` (WXYC/wxyc-shared#546). Prune an entry once its
-    // path lands: the "carries no exemption" guard below fails until it is
-    // removed.
-    const DECLARED_AHEAD_OF_PATHS = [
-      'IntakeFileRequest', 'IntakeFileNewRelease', 'IntakeFileExistingRelease',
-    ];
+    // slice can land ahead of its paths. Prune an entry once its path lands:
+    // the "carries no exemption" guard below fails until it is removed.
+    const DECLARED_AHEAD_OF_PATHS: string[] = [];
 
     const EXEMPT = new Set([
       ...WEBSOCKET_PROTOCOL,
