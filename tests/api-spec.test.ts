@@ -137,6 +137,57 @@ describe('OpenAPI Specification', () => {
     return [...new Set(walk(spec.components.schemas[schemaName]))];
   }
 
+  type Operation = {
+    summary?: string;
+    description?: string;
+    parameters?: Array<Record<string, unknown>>;
+    requestBody?: { content?: Record<string, { schema?: Record<string, unknown> }> };
+    responses?: Record<
+      string,
+      { description?: string; content?: Record<string, { schema?: Record<string, unknown> }> } | undefined
+    >;
+    'x-wxyc-service'?: string;
+  };
+
+  // Throws on a missing path or method rather than asserting it: `toBeDefined()` does not narrow
+  // the type, and a missing operation makes every assertion below it meaningless.
+  function operation(path: string, method: string): Operation {
+    const item = (spec.paths as Record<string, Record<string, Operation> | undefined>)[path];
+    if (!item) throw new Error(`api.yaml declares no path ${path}`);
+    const op = item[method];
+    if (!op) throw new Error(`api.yaml declares no ${method.toUpperCase()} on ${path}`);
+    return op;
+  }
+
+  // The JSON body schema of one response; throws when the status or its JSON body is missing.
+  function responseSchema(path: string, method: string, status: string): Record<string, unknown> {
+    const response = operation(path, method).responses?.[status];
+    if (!response) throw new Error(`${method.toUpperCase()} ${path} declares no ${status}`);
+    const json = response.content?.['application/json'];
+    if (!json) throw new Error(`${method.toUpperCase()} ${path} ${status} declares no JSON body`);
+    return json.schema as Record<string, unknown>;
+  }
+
+  // A `$ref` to a component schema, for toEqual against a response or request body schema.
+  const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
+
+  // The schema names a `oneOf` branches over, in declaration order.
+  function oneOfNames(schema: Record<string, unknown>): string[] {
+    const branches = (schema.oneOf as Array<{ $ref?: string }> | undefined) ?? [];
+    return branches.map((branch) => (branch.$ref ?? '').split('/').pop() ?? '');
+  }
+
+  // YAML folds `>` descriptions, so compare on single-spaced, trimmed text.
+  const flat = (text?: string): string => (text ?? '').replace(/\s+/g, ' ').trim();
+
+  // The route is served by backend-service and its description names the grant and delivering issue.
+  function expectBackendRoute(path: string, method: string, { grant, issue }: { grant: string; issue: string }) {
+    const o = operation(path, method);
+    expect(o['x-wxyc-service']).toBe('backend-service');
+    expect(flat(o.description)).toContain(grant);
+    expect(flat(o.description)).toContain(issue);
+  }
+
   // The effective property keys of a composed schema — every key reachable
   // through the flattened allOf lattice, deduplicated for the same
   // shared-branch reason as `requiredKeysOf`. Closed-set shape assertions
@@ -3779,19 +3830,18 @@ describe('OpenAPI Specification', () => {
     });
 
     it('words IntakeItemState so requested is held for a named DJ and checked_out is held by its holder', () => {
-      const text = (spec.components.schemas.IntakeItemState as { description?: string }).description ?? '';
-      const flat = text.replace(/\s+/g, ' ');
-      expect(flat).toMatch(/held in the office for a named DJ as `requested`/);
-      expect(flat).toMatch(/held by its holder as `checked_out`/);
-      expect(flat).toMatch(/the DJ it was requested of/);
-      expect(flat).not.toMatch(/requesting DJ/);
-      expect(flat).not.toMatch(/held by a DJ as `requested` or `checked_out`/);
+      const text = flat((spec.components.schemas.IntakeItemState as { description?: string }).description);
+      expect(text).toMatch(/held in the office for a named DJ as `requested`/);
+      expect(text).toMatch(/held by its holder as `checked_out`/);
+      expect(text).toMatch(/the DJ it was requested of/);
+      expect(text).not.toMatch(/requesting DJ/);
+      expect(text).not.toMatch(/held by a DJ as `requested` or `checked_out`/);
     });
 
     it('names all three DJ-name fields in the single IntakeItem sentence', () => {
       const item = spec.components.schemas.IntakeItem as { description?: string };
-      const flat = (item.description ?? '').replace(/\s+/g, ' ');
-      expect(flat).toMatch(/`requested_dj_name`, `checked_out_by_name`,? (and )?`passes\[\]\.dj_name`/);
+      const text = flat((item.description ?? ''));
+      expect(text).toMatch(/`requested_dj_name`, `checked_out_by_name`,? (and )?`passes\[\]\.dj_name`/);
     });
 
     it('states five things a restore does not put back, as five separate list items', () => {
@@ -3816,26 +3866,6 @@ describe('OpenAPI Specification', () => {
   });
 
   describe('Intake paths (WXYC/Backend-Service#2791 slice 1b, #542)', () => {
-    type Op = {
-      description?: string;
-      requestBody?: { content?: Record<string, { schema?: Record<string, unknown> }> };
-      responses?: Record<
-        string,
-        { description?: string; content?: Record<string, { schema?: Record<string, unknown> }> } | undefined
-      >;
-      'x-wxyc-service'?: string;
-    };
-    // YAML folds `>` descriptions, so compare on single-spaced text
-    const squash = (text?: string): string => (text ?? '').replace(/\s+/g, ' ').trim();
-    const op = (path: string, method: string): Op => {
-      const found = (spec.paths as Record<string, Record<string, Op> | undefined>)[path]?.[method];
-      if (!found) throw new Error(`api.yaml declares no ${method.toUpperCase()} ${path}`);
-      return found;
-    };
-    const body = (o: Op, status: string): Record<string, unknown> | undefined =>
-      o.responses?.[status]?.content?.['application/json']?.schema;
-    const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
-
     // method, path, grant named in the description, delivering issue
     it.each([
       ['get', '/intake', 'reviews: read', '#2796'],
@@ -3844,10 +3874,7 @@ describe('OpenAPI Specification', () => {
       ['patch', '/intake/{id}', 'reviews: manage', '#2796'],
       ['delete', '/intake/{id}', 'reviews: manage', '#2796'],
     ])('declares %s %s with its grant (%s) and delivering issue (%s)', (method, path, grant, issue) => {
-      const o = op(path, method);
-      expect(o['x-wxyc-service']).toBe('backend-service');
-      expect(o.description).toContain(grant);
-      expect(o.description).toContain(issue);
+      expectBackendRoute(path, method, { grant, issue });
     });
 
     it('declares /intake/{id} with the shared IntakeId path parameter', () => {
@@ -3865,31 +3892,31 @@ describe('OpenAPI Specification', () => {
     });
 
     it('orders GET /intake by logged_at descending, then id descending', () => {
-      expect(op('/intake', 'get').description).toContain('`logged_at` descending, then `id` descending');
+      expect(operation('/intake', 'get').description).toContain('`logged_at` descending, then `id` descending');
     });
 
     it('serves item responses as IntakeItem and the delete as IntakeDeleteResponse', () => {
-      expect(body(op('/intake/{id}', 'get'), '200')).toEqual(ref('IntakeItem'));
-      expect(body(op('/intake', 'post'), '200')).toEqual(ref('IntakeItem'));
-      expect(body(op('/intake/{id}', 'patch'), '200')).toEqual(ref('IntakeItem'));
-      expect(body(op('/intake/{id}', 'delete'), '200')).toEqual(ref('IntakeDeleteResponse'));
-      expect(body(op('/intake', 'get'), '200')).toEqual({ type: 'array', items: ref('IntakeItem') });
+      expect(responseSchema('/intake/{id}', 'get', '200')).toEqual(ref('IntakeItem'));
+      expect(responseSchema('/intake', 'post', '200')).toEqual(ref('IntakeItem'));
+      expect(responseSchema('/intake/{id}', 'patch', '200')).toEqual(ref('IntakeItem'));
+      expect(responseSchema('/intake/{id}', 'delete', '200')).toEqual(ref('IntakeDeleteResponse'));
+      expect(responseSchema('/intake', 'get', '200')).toEqual({ type: 'array', items: ref('IntakeItem') });
     });
 
     it('takes the request bodies from the intake schemas', () => {
       const req = (path: string, method: string) =>
-        op(path, method).requestBody?.content?.['application/json']?.schema;
+        operation(path, method).requestBody?.content?.['application/json']?.schema;
       expect(req('/intake', 'post')).toEqual(ref('NewIntakeItemRequest'));
       expect(req('/intake/{id}', 'patch')).toEqual(ref('IntakeItemPatch'));
     });
 
     it('declares the patch and delete 409 as IntakeConflictError', () => {
-      expect(body(op('/intake/{id}', 'patch'), '409')).toEqual(ref('IntakeConflictError'));
-      expect(body(op('/intake/{id}', 'delete'), '409')).toEqual(ref('IntakeConflictError'));
+      expect(responseSchema('/intake/{id}', 'patch', '409')).toEqual(ref('IntakeConflictError'));
+      expect(responseSchema('/intake/{id}', 'delete', '409')).toEqual(ref('IntakeConflictError'));
     });
 
     it('filters the list on effective_state and says passes reaches reviews: manage callers', () => {
-      const list = op('/intake', 'get') as Op & { parameters?: Array<{ name: string; schema?: { $ref?: string } }> };
+      const list = operation('/intake', 'get') as Omit<Operation, 'parameters'> & { parameters?: Array<{ name: string; schema?: { $ref?: string } }> };
       const state = list.parameters?.find((p) => p.name === 'state');
       expect(state?.schema?.$ref).toBe('#/components/schemas/IntakeItemState');
       expect(list.description).toMatch(/effective_state/);
@@ -3897,7 +3924,7 @@ describe('OpenAPI Specification', () => {
     });
 
     it('declares a 400 referencing ApiErrorResponse for an unknown state value', () => {
-      expect(body(op('/intake', 'get'), '400')).toEqual(ref('ApiErrorResponse'));
+      expect(responseSchema('/intake', 'get', '400')).toEqual(ref('ApiErrorResponse'));
     });
 
     // path, grant clause in the description, delivering issue (all POST)
@@ -3909,10 +3936,7 @@ describe('OpenAPI Specification', () => {
       ['/intake/{id}/accept', 'Grant: `reviews: write`, and only the requested DJ.', '#2798'],
       ['/intake/{id}/pass', 'Grant: `reviews: write`, and only the requested DJ.', '#2798'],
     ])('declares post %s with its grant (%s) and delivering issue (%s)', (path, grant, issue) => {
-      const o = op(path, 'post');
-      expect(o['x-wxyc-service']).toBe('backend-service');
-      expect(squash(o.description)).toContain(grant);
-      expect(o.description).toContain(issue);
+      expectBackendRoute(path, 'post', { grant, issue });
       expect(
         (spec.paths as Record<string, { parameters?: unknown[] }>)[path]?.parameters,
       ).toContainEqual({ $ref: '#/components/parameters/IntakeId' });
@@ -3921,9 +3945,9 @@ describe('OpenAPI Specification', () => {
     it.each(['checkout', 'release', 'request', 'cancel-request', 'accept', 'pass'])(
       'returns the updated IntakeItem or a 409 IntakeConflictError from %s',
       (action) => {
-        const o = op(`/intake/{id}/${action}`, 'post');
-        expect(body(o, '200')).toEqual(ref('IntakeItem'));
-        expect(body(o, '409')).toEqual(ref('IntakeConflictError'));
+        const o = operation(`/intake/{id}/${action}`, 'post');
+        expect(responseSchema(`/intake/{id}/${action}`, 'post', '200')).toEqual(ref('IntakeItem'));
+        expect(responseSchema(`/intake/{id}/${action}`, 'post', '409')).toEqual(ref('IntakeConflictError'));
       },
     );
 
@@ -3934,32 +3958,32 @@ describe('OpenAPI Specification', () => {
       ['accept', '`requested`', 'a caller who is not the requested DJ gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` and the caller is not the requested DJ.'],
       ['pass', '`requested`', 'a caller who is not the requested DJ gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` and the caller is not the requested DJ.'],
     ])('states the %s 403/409 precedence in the description and the 403 response', (action, state, who, forbiddenText) => {
-      const o = op(`/intake/{id}/${action}`, 'post');
-      const text = squash(o.description);
+      const o = operation(`/intake/{id}/${action}`, 'post');
+      const text = flat(o.description);
       expect(text).toContain('Precedence: a caller without the `reviews` grant the route requires gets a 403 in any state;');
       expect(text).toContain(`otherwise an item not in effective state ${state} answers 409 \`state_changed\`; otherwise ${who}`);
       expect(text).not.toContain('whoever calls');
-      const forbidden = squash(o.responses?.['403']?.description);
+      const forbidden = flat(o.responses?.['403']?.description);
       expect(forbidden).toContain(forbiddenText);
       expect(forbidden).toContain(`Otherwise an item not in effective state ${state} answers 409 \`state_changed\` instead`);
     });
 
     it('takes dj_id as the /request body', () => {
-      const schema = op('/intake/{id}/request', 'post').requestBody?.content?.['application/json']?.schema;
+      const schema = operation('/intake/{id}/request', 'post').requestBody?.content?.['application/json']?.schema;
       expect(schema).toEqual({
         type: 'object',
         required: ['dj_id'],
         properties: { dj_id: { type: 'string', description: expect.any(String) } },
       });
       const props = schema?.properties as { dj_id?: { description?: string } } | undefined;
-      const text = squash(props?.dj_id?.description);
+      const text = flat(props?.dj_id?.description);
       expect(text).toContain('`auth_user.id`');
       expect(text).toContain('`IntakeItem.requested_dj_id`');
       expect(text).not.toContain('legacy');
     });
 
     it('declares a 400 referencing ApiErrorResponse for a bad /request body', () => {
-      expect(body(op('/intake/{id}/request', 'post'), '400')).toEqual(ref('ApiErrorResponse'));
+      expect(responseSchema('/intake/{id}/request', 'post', '400')).toEqual(ref('ApiErrorResponse'));
     });
 
     it('words invalid_citation per the inclusive "submitted review" rule', () => {
@@ -7547,33 +7571,6 @@ describe('OpenAPI Specification', () => {
   describe('Catalog delete / restore declarations match the handlers (wxyc-shared#503)', () => {
     const restorePath = '/library/deleted/{batchId}/restore';
 
-    // These THROW on absence rather than asserting it, because
-    // `expect(...).toBeDefined()` does not narrow the type for the caller --
-    // it satisfies the runtime and leaves every subsequent access a
-    // strict-null error. A throw is also the right failure: a missing
-    // operation makes every assertion below it meaningless, so naming the
-    // path once beats a cascade of undefined-property failures.
-    function operation(path: string, method: string): Record<string, unknown> {
-      const item = (spec.paths as Record<string, Record<string, unknown> | undefined>)[path];
-      if (!item) throw new Error(`api.yaml declares no path ${path}`);
-      const op = item[method] as Record<string, unknown> | undefined;
-      if (!op) throw new Error(`api.yaml declares no ${method.toUpperCase()} on ${path}`);
-      return op;
-    }
-
-    function responseSchema(path: string, method: string, status: string): Record<string, unknown> {
-      const responses = operation(path, method).responses as Record<
-        string,
-        Record<string, unknown> | undefined
-      >;
-      const response = responses[status];
-      if (!response) throw new Error(`${method.toUpperCase()} ${path} declares no ${status}`);
-      const content = response.content as Record<string, Record<string, unknown> | undefined> | undefined;
-      const json = content?.['application/json'];
-      if (!json) throw new Error(`${method.toUpperCase()} ${path} ${status} declares no JSON body`);
-      return json.schema as Record<string, unknown>;
-    }
-
     // Matches `operation`'s throw-on-absence shape: a missing schema makes
     // every assertion below it meaningless, so naming it once beats a
     // cascade of undefined-property failures. Reaches a schema's OWN
@@ -7582,12 +7579,6 @@ describe('OpenAPI Specification', () => {
       const found = (spec.components.schemas as Record<string, Record<string, unknown> | undefined>)[name];
       if (!found) throw new Error(`api.yaml declares no schema ${name}`);
       return found;
-    }
-
-    /** The schema names a `oneOf` response branches over, in declaration order. */
-    function oneOfNames(schema: Record<string, unknown>): string[] {
-      const branches = (schema.oneOf as Array<{ $ref?: string }> | undefined) ?? [];
-      return branches.map((branch) => (branch.$ref ?? '').split('/').pop() ?? '');
     }
 
     describe('POST /library/deleted/{batchId}/restore', () => {
@@ -7640,8 +7631,7 @@ describe('OpenAPI Specification', () => {
       // even with this clause deleted.
       describe('the 409 description', () => {
         const description = () =>
-          String((operation(restorePath, 'post').responses as Record<string, { description: string }>)['409']?.description ?? '')
-            .replace(/\s+/g, ' ');
+          flat(operation(restorePath, 'post').responses?.['409']?.description);
         const missingReferenceClause = () => {
           const text = description();
           const at = text.indexOf('`missing_reference` \u2014');
@@ -7733,18 +7723,18 @@ describe('OpenAPI Specification', () => {
         expect(description).toContain('`nulled`');
         expect(description).toContain('`dropped`');
         // The hedge: the route must not state the drop as current behavior.
-        const flat = description.replace(/\s+/g, ' ');
-        expect(flat).toContain('lands ahead of WXYC/Backend-Service#2818');
-        expect(flat).toMatch(/carries no `deviations`, and a captured child whose `ON DELETE CASCADE` target is gone fails the restore with a 500 rather than being dropped/);
-        expect(flat).toContain('Once WXYC/Backend-Service#2818 deploys');
+        const text = flat(description);
+        expect(text).toContain('lands ahead of WXYC/Backend-Service#2818');
+        expect(text).toMatch(/carries no `deviations`, and a captured child whose `ON DELETE CASCADE` target is gone fails the restore with a 500 rather than being dropped/);
+        expect(text).toContain('Once WXYC/Backend-Service#2818 deploys');
         expect(description).not.toContain('The 200 does not say which references were nulled');
       });
 
       it('defines children as rows actually re-inserted, with dropped rows left uncounted', () => {
-        const flat = String(propertyOf('RestoredEntity', 'children')?.description).replace(/\s+/g, ' ');
-        expect(flat).toContain('actually re-inserted');
-        expect(flat).toContain('counts replayed rows rather than captured ones');
-        expect(flat).not.toContain('mirroring `CatalogDeleteEntity.children`');
+        const text = flat(String(propertyOf('RestoredEntity', 'children')?.description));
+        expect(text).toContain('actually re-inserted');
+        expect(text).toContain('counts replayed rows rather than captured ones');
+        expect(text).not.toContain('mirroring `CatalogDeleteEntity.children`');
       });
 
       it('names the kind enum as a component so Python does not emit a numbered Kind', () => {
@@ -7753,9 +7743,9 @@ describe('OpenAPI Specification', () => {
       });
 
       it('qualifies RestoreAlreadyRestoredRefusal for rows a restore dropped', () => {
-        const flat = String((spec.components.schemas.RestoreAlreadyRestoredRefusal as { description?: string }).description).replace(/\s+/g, ' ');
-        expect(flat).toContain('except any child rows the original restore dropped');
-        expect(flat).not.toContain('already fully restored');
+        const text = flat(String((spec.components.schemas.RestoreAlreadyRestoredRefusal as { description?: string }).description));
+        expect(text).toContain('except any child rows the original restore dropped');
+        expect(text).not.toContain('already fully restored');
       });
     });
 
@@ -8088,12 +8078,12 @@ describe('OpenAPI Specification', () => {
         // `true` means the kind and envelope allow an attempt, not that one can
         // succeed: missing_reference is permanent for a deleted artist or a
         // removed auth_user, so "can EVER bring this batch back" is false.
-        const flat = description.replace(/\s+/g, ' ');
-        expect(flat).toContain("allow a `POST /library/deleted/{batchId}/restore` attempt");
-        expect(flat).not.toMatch(/can EVER bring/);
-        expect(flat).toContain('`missing_reference` is PERMANENT today');
-        expect(flat).toContain('a removed `auth_user` referenced by `digital_asset.ripped_by`');
-        expect(flat).toContain('`already_restored` is terminal');
+        const text = flat(description);
+        expect(text).toContain("allow a `POST /library/deleted/{batchId}/restore` attempt");
+        expect(text).not.toMatch(/can EVER bring/);
+        expect(text).toContain('`missing_reference` is PERMANENT today');
+        expect(text).toContain('a removed `auth_user` referenced by `digital_asset.ripped_by`');
+        expect(text).toContain('`already_restored` is terminal');
       });
     });
 
@@ -8126,7 +8116,7 @@ describe('OpenAPI Specification', () => {
 
     describe('RestoreMissingReferenceRefusal (wxyc-shared#547)', () => {
       const schemaDescription = () =>
-        String((spec.components.schemas.RestoreMissingReferenceRefusal as { description?: string }).description).replace(/\s+/g, ' ');
+        flat(String((spec.components.schemas.RestoreMissingReferenceRefusal as { description?: string }).description));
 
       it('requires the refusal keys, with reason pinned to the single literal', () => {
         expect(requiredKeysOf('RestoreMissingReferenceRefusal').sort()).toEqual(
@@ -8148,7 +8138,7 @@ describe('OpenAPI Specification', () => {
       it('makes row_id nullable, required, and says how a keyless row is identified', () => {
         expect(propertyOf('RestoreMissingReferenceRefusal', 'row_id')?.nullable).toBe(true);
         expect(requiredKeysOf('RestoreMissingReferenceRefusal')).toContain('row_id');
-        const description = String(propertyOf('RestoreMissingReferenceRefusal', 'row_id')?.description).replace(/\s+/g, ' ');
+        const description = flat(String(propertyOf('RestoreMissingReferenceRefusal', 'row_id')?.description));
         expect(description).toContain('`null` for a row with no single-column primary key');
         expect(description).toContain('identified by `table`, `column` and `captured_value` together with the entity being restored');
         expect(propertyOf('RestoreDeviation', 'row_id')?.nullable).toBeUndefined();
@@ -8174,15 +8164,15 @@ describe('OpenAPI Specification', () => {
 
     describe('resolution_required does not promise the restore succeeds (wxyc-shared#547)', () => {
       it('RestoreResolutionRequiredRefusal says supplying resolution clears it but another refusal can follow', () => {
-        const description = String(
-          (spec.components.schemas.RestoreResolutionRequiredRefusal as { description?: string }).description
-        ).replace(/\s+/g, ' ');
+        const description = flat(
+          String((spec.components.schemas.RestoreResolutionRequiredRefusal as { description?: string }).description)
+        );
         expect(description).toContain('supplying `resolution` clears this refusal, though the retry can still meet another one');
         expect(description).not.toMatch(/restores successfully/i);
       });
 
       it('the route description says the same', () => {
-        const description = String(operation(restorePath, 'post').description).replace(/\s+/g, ' ');
+        const description = flat(String(operation(restorePath, 'post').description));
         expect(description).toContain('supplying `resolution` clears it, though the retry can still meet another refusal');
         expect(description).not.toMatch(/succeeds as soon as/i);
       });
@@ -8238,14 +8228,6 @@ describe('OpenAPI Specification', () => {
   // (Backend-Service#2665, #2667), so these assertions are the only thing
   // proving the shape before either handler exists.
   describe('Listener request replies (DJ replies)', () => {
-    function operation(path: string, method: string): Record<string, unknown> {
-      const item = (spec.paths as Record<string, Record<string, unknown> | undefined>)[path];
-      if (!item) throw new Error(`api.yaml declares no path ${path}`);
-      const op = item[method] as Record<string, unknown> | undefined;
-      if (!op) throw new Error(`api.yaml declares no ${method.toUpperCase()} on ${path}`);
-      return op;
-    }
-
     describe('GET /listener/request-replies', () => {
       const get = () => operation('/listener/request-replies', 'get');
 
@@ -8388,8 +8370,7 @@ describe('OpenAPI Specification', () => {
         /\b(?:in rotation|rotating)\b[^.]{0,40}?\b(?:when|while|at the time|as of)\b[^.]{0,40}?\b(?:air(?:ed|ing|s|time)?|played|broadcast)\b/i;
       const claims = stringsIn(spec.components.schemas.PlaylistSearchResult)
         .map((text) =>
-          text
-            .replace(/\s+/g, ' ')
+          flat(text)
             .replace(/not that it was in rotation when this entry aired/gi, '')
         )
         .filter((text) => claim.test(text));
@@ -8596,7 +8577,7 @@ describe('OpenAPI Specification', () => {
         // was never declared at all.
         expect(typeof description).toBe('string');
         expect(description?.length).toBeGreaterThan(0);
-        const collapsed = String(description).replace(/\s+/g, ' ').toLowerCase();
+        const collapsed = flat(String(description)).toLowerCase();
         expect(collapsed).not.toMatch(/wildcard/);
         expect(collapsed).not.toContain('*');
       }
@@ -8610,7 +8591,7 @@ describe('OpenAPI Specification', () => {
 
     it.each(PREFIXES)('both q descriptions name the %s prefix, case-sensitively', (prefix) => {
       for (const where of ['operation', 'PlaylistSearchParams'] as const) {
-        const description = String(qDescriptionAt(where)).replace(/\s+/g, ' ');
+        const description = flat(String(qDescriptionAt(where)));
         expect(description, `${where} description missing ${prefix}`).toContain(prefix);
       }
     });
@@ -8646,21 +8627,7 @@ describe('OpenAPI Specification', () => {
       required?: string[];
       properties?: Record<string, Record<string, unknown>>;
     };
-    type Op = {
-      description?: string;
-      parameters?: Array<Record<string, unknown>>;
-      responses?: Record<string, { content?: Record<string, { schema?: Record<string, unknown> }> } | undefined>;
-      'x-wxyc-service'?: string;
-    };
     const schema = (name: string) => spec.components.schemas[name] as Schema;
-    const op = (path: string, method: string): Op => {
-      const found = (spec.paths as Record<string, Record<string, Op> | undefined>)[path]?.[method];
-      if (!found) throw new Error(`api.yaml declares no ${method.toUpperCase()} ${path}`);
-      return found;
-    };
-    const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
-    const body = (o: Op, status: string): Record<string, unknown> | undefined =>
-      o.responses?.[status]?.content?.['application/json']?.schema;
 
     it.each([
       ['ReviewMedium', ['typed', 'handwritten', 'printed']],
@@ -8712,10 +8679,7 @@ describe('OpenAPI Specification', () => {
       ['get', '/reviews', 'reviews: read', '#2805'],
       ['get', '/reviews/{id}', 'reviews: read', '#2805'],
     ])('declares %s %s with its grant (%s) and delivering issue (%s)', (method, path, grant, issue) => {
-      const o = op(path, method);
-      expect(o['x-wxyc-service']).toBe('backend-service');
-      expect(o.description).toContain(grant);
-      expect(o.description).toContain(issue);
+      expectBackendRoute(path, method, { grant, issue });
     });
 
     it('declares /reviews/{id} with the shared ReviewId path parameter', () => {
@@ -8732,21 +8696,21 @@ describe('OpenAPI Specification', () => {
     });
 
     it('states the draft-visibility rule on the read paths', () => {
-      expect(op('/reviews', 'get').description).toMatch(/draft is visible only to its author/);
-      expect(op('/reviews', 'get').description).toMatch(/lists omit everyone else's drafts/);
-      expect(op('/reviews/{id}', 'get').description).toMatch(/draft[^.]*404|404[^.]*draft/);
-      expect(op('/reviews', 'get').parameters?.map((p) => p.name)).toEqual(
+      expect(operation('/reviews', 'get').description).toMatch(/draft is visible only to its author/);
+      expect(operation('/reviews', 'get').description).toMatch(/lists omit everyone else's drafts/);
+      expect(operation('/reviews/{id}', 'get').description).toMatch(/draft[^.]*404|404[^.]*draft/);
+      expect(operation('/reviews', 'get').parameters?.map((p) => p.name)).toEqual(
         expect.arrayContaining(['album_id', 'intake_item_id', 'mine'])
       );
     });
 
     it('serves Review from the read paths', () => {
-      expect(body(op('/reviews/{id}', 'get'), '200')).toEqual(ref('Review'));
-      expect(body(op('/reviews', 'get'), '200')).toEqual({ type: 'array', items: ref('Review') });
+      expect(responseSchema('/reviews/{id}', 'get', '200')).toEqual(ref('Review'));
+      expect(responseSchema('/reviews', 'get', '200')).toEqual({ type: 'array', items: ref('Review') });
     });
 
     it('re-declares GET /album-reviews with album_id, artist, page and a 100-capped limit', () => {
-      const o = op('/album-reviews', 'get');
+      const o = operation('/album-reviews', 'get');
       expect(o['x-wxyc-service']).toBe('backend-service');
       expect(o.description).toContain('album_reviews: read');
       const params = Object.fromEntries((o.parameters ?? []).map((p) => [p.name as string, p]));
@@ -8763,8 +8727,8 @@ describe('OpenAPI Specification', () => {
       expect(artist).toMatch(/whitespace\s+is\s+not\s+trimmed/);
       expect(artist).not.toMatch(/value\s+is\s+trimmed/);
       expect(artist).toMatch(/blank\s+or\s+whitespace-only\s+value,\s+a\s+repeated\s+parameter,\s+or\s+one\s+longer\s+than\s+256\s+characters\s+is\s+a\s+400/);
-      expect(body(o, '400')).toEqual(ref('ApiErrorResponse'));
-      expect(body(o, '200')).toEqual(ref('AlbumReviewsResponse'));
+      expect(responseSchema('/album-reviews', 'get', '400')).toEqual(ref('ApiErrorResponse'));
+      expect(responseSchema('/album-reviews', 'get', '200')).toEqual(ref('AlbumReviewsResponse'));
     });
 
     it('corrects the AlbumReview description to allow names inside the station only', () => {
