@@ -8955,7 +8955,9 @@ describe('OpenAPI Specification', () => {
     it('defines an item\'s intake review and the release\'s intake review, each with its tie-break', () => {
       const text = flat(operation('/reviews', 'get').description);
       expect(text).toContain("An item's intake review is the typed, submitted review with the earliest `submitted_at` among that intake item's reviews, ties broken by the lower `id`; an item with no typed, submitted review has none.");
-      expect(text).toContain("The release's intake review is the earliest of its filed items' intake reviews, by the same key (earliest `submitted_at`, ties broken by the lower `id`).");
+      expect(text).toContain("The release's intake review is the earliest of the intake reviews of the items filed or finalized as that release, by the same key (earliest `submitted_at`, ties broken by the lower `id`).");
+      expect(text).toContain("A release's list (`album_id`) holds the reviews whose `album_id` is that release (filing an intake item stamps its reviews with the release it was filed as, and they stay there once the item is `finalized`), plus, when an intake item filed or finalized as that release cites another release through `cited_album_id`, the cited release's reviews.");
+      expect(text).not.toContain("An album's list includes reviews reached through an intake item's `cited_album_id`.");
       expect(text).toContain('A release with no such review (handwritten-only, citation-only, or never filed through intake) has none.');
       expect(text).toContain("An item's intake review is the review that item's slip prints (`POST /intake/{id}/print`).");
     });
