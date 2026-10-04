@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.0.0');
+      expect(spec.info.version).toBe('11.1.0');
     });
 
     it('should have components section', () => {
@@ -8869,6 +8869,8 @@ describe('OpenAPI Specification', () => {
       expect(String(review.properties?.review?.description)).toMatch(/handwritten\s+review,\s+or\s+for\s+one\s+whose\s+OCR\s+text\s+is\s+still\s+pending/);
       expect(String(review.properties?.review?.description)).toMatch(/`null`,\s+never\s+an\s+empty\s+string/);
       expect(String(review.properties?.review?.description)).not.toMatch(/May be empty/);
+      expect(flat(review.properties?.review?.description as string)).toMatch(/May be `null` for a draft with no text yet, for a handwritten review/);
+      expect(flat(review.properties?.review?.description as string)).toMatch(/A `typed` review cannot be submitted while this is `null`/);
       expect(String(review.properties?.author?.description)).toMatch(/may be a real\s+name/);
       expect(String(review.properties?.author?.description)).toMatch(/not guaranteed PII-free/);
       expect(String(review.properties?.author?.description)).toMatch(/client\s+telemetry/);
@@ -9184,22 +9186,97 @@ describe('OpenAPI Specification', () => {
       expect(flat(fields.description)).toMatch(/draft may be saved with every text field `null`/);
     });
 
-    it('builds NewReviewRequest over ReviewFields with the subject, author and medium', () => {
+    it('builds NewReviewRequest over ReviewFields with the subject, author, account link and medium', () => {
       const request = schema('NewReviewRequest');
       expect(request.allOf?.[0]).toEqual(ref('ReviewFields'));
+      expect(propertyKeysOf('NewReviewRequest').sort()).toEqual([
+        'album_id', 'artist_blurb', 'author', 'author_user_id', 'buzzwords', 'credit', 'fcc', 'intake_item_id',
+        'medium', 'publish_apps', 'publish_instagram', 'publish_website', 'recommended_tracks', 'review',
+      ]);
+      expect(requiredKeysOf('NewReviewRequest')).toEqual([]);
       const own = request.allOf?.[1] as Schema;
-      expect(Object.keys(own.properties ?? {}).sort()).toEqual(['album_id', 'author', 'intake_item_id', 'medium']);
-      expect(own.required ?? []).toEqual([]);
-      expect(own.properties?.medium).toEqual(ref('ReviewMedium'));
       expect(own.properties?.author).toMatchObject({ type: 'string', maxLength: 128 });
+      expect(own.properties?.author_user_id).toMatchObject({ type: 'string' });
       expect(flat(request.description)).toMatch(/exactly one of `intake_item_id` and `album_id`/);
-      expect(flat(request.description)).toMatch(/`reviews: manage`[^.]*`author`[^.]*`medium`/);
+      expect(flat(request.description)).toMatch(/`reviews: manage`[^.]*`author`[^.]*`author_user_id`[^.]*`medium`/);
       expect(flat(request.description)).toMatch(/on-behalf review/);
       expect(flat(request.description)).toMatch(/`handwritten`/);
     });
 
-    it('builds ReviewPatch over ReviewFields alone', () => {
+    it('limits the request medium to the values a write path accepts, leaving Review.medium whole', () => {
+      const own = schema('NewReviewRequest').allOf?.[1] as Schema;
+      expect(own.properties?.medium).toMatchObject({ type: 'string', enum: ['typed', 'handwritten'] });
+      expect(schema('ReviewMedium').enum).toEqual(['typed', 'handwritten', 'printed']);
+      expect(schema('Review').properties?.medium).toEqual(ref('ReviewMedium'));
+    });
+
+    it('keeps the author snapshot and the credit choice apart on a DJ\'s own review', () => {
+      const text = flat(schema('NewReviewRequest').description);
+      expect(text).toMatch(/`author` to a snapshot of the account's display name at creation/);
+      expect(text).toMatch(/`author` is never the published credit; the `credit` choice decides that/);
+      expect(text).not.toMatch(/credited to their display name/);
+      expect(text).toMatch(/sets the account fields from the caller, so a client never sends them/);
+    });
+
+    it('lets only reviews: manage send author, the account link and medium', () => {
+      const own = schema('NewReviewRequest').allOf?.[1] as Schema;
+      for (const key of ['author', 'author_user_id', 'medium']) {
+        expect(flat(own.properties?.[key]?.description as string), key).toMatch(/^Only a caller with `reviews: manage` may send this\./);
+      }
+      expect(flat(own.properties?.author_user_id?.description as string)).toMatch(/links the reviewer's account/);
+    });
+
+    it('refuses consent on an on-behalf create with a 400', () => {
+      expect(flat(schema('NewReviewRequest').description)).toMatch(
+        /no publishing surface ticked and `credit` null[^.]*on-behalf create that sends any `publish_\*` as `true`, or a non-null `credit`, answers 400/
+      );
+      expect(flat(operation('/reviews', 'post').responses?.['400']?.description)).toMatch(
+        /on-behalf create that sends any `publish_\*` as `true` or a non-null `credit`/
+      );
+    });
+
+    it('builds ReviewPatch over ReviewFields alone, a field sent as null being cleared', () => {
       expect(schema('ReviewPatch').allOf).toEqual([ref('ReviewFields')]);
+      expect(propertyKeysOf('ReviewPatch').sort()).toEqual(propertyKeysOf('ReviewFields').sort());
+      expect(flat(schema('ReviewPatch').description)).toMatch(
+        /A key left out is unchanged; a text field or `credit` sent as `null` is cleared/
+      );
+    });
+
+    it('declares the on-behalf create rules: filed subject locked, author required, unknown account 400', () => {
+      const request = flat(schema('NewReviewRequest').description);
+      expect(request).toMatch(/`author` is required on an on-behalf create[^.]*cannot snapshot a display name for someone who is not the caller/);
+      expect(request).toMatch(/a missing or blank `author` answers 400, and so does an `author_user_id` that names no account/);
+      expect(request).toMatch(/on-behalf create naming an intake item in `filed` or `finalized` answers 409 `locked`[^.]*slip is printed at filing; a library-release subject is unaffected/);
+      expect(flat(schema('ReviewConflictReason').description)).toMatch(
+        /an on-behalf create naming an intake item in `filed` or `finalized` is refused with it too, because the slip is printed at filing[^()]*\(a library-release subject is unaffected\)/
+      );
+      const bad = flat(operation('/reviews', 'post').responses?.['400']?.description);
+      expect(bad).toMatch(/an on-behalf create with a missing or blank `author`/);
+      expect(bad).toMatch(/an `author_user_id` that names no account/);
+      const conflict = flat(operation('/reviews', 'post').responses?.['409']?.description);
+      expect(conflict).toMatch(/`locked`: an on-behalf create naming an intake item in `filed` or `finalized`/);
+      expect(conflict).toMatch(/or a subject that is neither an intake item nor a library release/);
+    });
+
+    it('keeps the nonexistent-subject case in the subject_not_held reason', () => {
+      expect(flat(schema('ReviewConflictReason').description)).toMatch(
+        /or the subject is neither an intake item nor a library release; an on-behalf create/
+      );
+    });
+
+    it('names who is refused on each write path', () => {
+      const forbidden = (path: string, method: string) => flat(operation(path, method).responses?.['403']?.description);
+      expect(forbidden('/reviews/{id}', 'patch')).toMatch(/may not edit this review/);
+      expect(forbidden('/reviews/{id}/submit', 'post')).toMatch(/may not submit this review/);
+      expect(forbidden('/reviews/{id}', 'delete')).toMatch(/may not delete this review/);
+      expect(forbidden('/reviews', 'post')).toMatch(/`reviews: manage` for `author`, `author_user_id`, `medium` or a handwritten review/);
+    });
+
+    it('declares the PATCH 400 for clearing the text of a submitted typed review', () => {
+      expect(flat(operation('/reviews/{id}', 'patch').responses?.['400']?.description)).toMatch(
+        /`review` of `null` that would leave a submitted `typed` review with no text/
+      );
     });
 
     it('declares the conflict reasons and the 409 body', () => {
@@ -9211,6 +9288,23 @@ describe('OpenAPI Specification', () => {
       for (const reason of ['locked', 'not_draft', 'subject_not_held', 'last_review']) {
         expect(reasons).toContain(`\`${reason}\``);
       }
+    });
+
+    it('says what each conflict reason means', () => {
+      const reasons = flat(schema('ReviewConflictReason').description);
+      expect(reasons).toMatch(/`locked`: the item's slip is printed, so only a music director may edit or delete the review/);
+      expect(reasons).toMatch(/`not_draft`: the review is already submitted \(submitting twice\)/);
+      expect(reasons).toMatch(
+        /`subject_not_held`: a DJ's `POST \/reviews` names an `intake_item_id` the caller does not currently hold \(effective state `checked_out` with `checked_out_by` the caller\)/
+      );
+      expect(reasons).toMatch(/an on-behalf create \(`reviews: manage`\) is exempt from the hold rule/);
+      expect(reasons).toMatch(/`last_review`: deleting the last submitted review of a filed or finalized intake item that has no citation/);
+      expect(flat(operation('/reviews', 'post').responses?.['409']?.description)).toMatch(
+        /does not hold \(an on-behalf create is exempt\)/
+      );
+      expect(flat(operation('/reviews/{id}', 'delete').description)).toMatch(
+        /`last_review` when it is the last submitted review of a filed or finalized intake item that has no citation/
+      );
     });
 
     it.each([
@@ -9280,6 +9374,9 @@ describe('OpenAPI Specification', () => {
       expect(description).toMatch(/`reviews: write` for your own review/);
       expect(description).toMatch(/`reviews: manage` to write on behalf of someone, or to record a handwritten review/);
       expect(description).toMatch(/creates a draft/i);
+      expect(flat(operation('/reviews', 'post').responses?.['400']?.description)).toMatch(
+        /both or neither of `intake_item_id` and `album_id`/
+      );
     });
   });
 });
