@@ -7732,7 +7732,7 @@ describe('OpenAPI Specification', () => {
       // surfaced as a decode error.
       it('requires the keys the handler emits, and never a bare `id`', () => {
         expect(requiredKeysOf('RestoredEntity').sort()).toEqual(
-          ['children', 'entity_id', 'entity_kind', 'relocated_code_number', 'table'].sort()
+          ['children', 'deviations', 'entity_id', 'entity_kind', 'relocated_code_number', 'table'].sort()
         );
         expect(propertyKeysOf('RestoredEntity')).not.toContain('id');
       });
@@ -7759,10 +7759,8 @@ describe('OpenAPI Specification', () => {
         }
       });
 
-      // Optional so a client built against this version still decodes a 200
-      // from a server that predates the field.
-      it('is an optional array on RestoredEntity, and the route points at it', () => {
-        expect(requiredKeysOf('RestoredEntity')).not.toContain('deviations');
+      it('is a required array on RestoredEntity, and the route points at it', () => {
+        expect(requiredKeysOf('RestoredEntity')).toContain('deviations');
         const deviations = propertyOf('RestoredEntity', 'deviations');
         expect(deviations?.type).toBe('array');
         expect(JSON.stringify(deviations?.items)).toContain('#/components/schemas/RestoreDeviation');
@@ -7775,12 +7773,22 @@ describe('OpenAPI Specification', () => {
         expect(text).not.toMatch(/ahead of WXYC\/Backend-Service#2818|until that deploys|Once WXYC\/Backend-Service#2818 deploys/);
         expect(text).toContain('`entities[].deviations` is always present');
         expect(description).not.toContain('The 200 does not say which references were nulled');
+        const hedge = /ahead of WXYC\/Backend-Service#2818|until that deploys|tolerate its absence|once WXYC\/Backend-Service#2818 deploys/i;
+        expect(flat(String(deviations?.description))).not.toMatch(hedge);
+        expect(flat(String((spec.components.schemas.RestoreDeviationKind as { description?: string }).description))).not.toMatch(hedge);
       });
 
       it('qualifies the play-history claims for legacy-linked plays (wxyc-shared#558)', () => {
         const restore = flat(String(operation(restorePath, 'post').description));
-        expect(restore).toContain('plays linked only through `album_id`/`rotation_id` do not come back');
-        expect(restore).toContain('`jobs/legacy-linkage-resolve`');
+                expect(restore).toContain('`jobs/legacy-linkage-resolve`');
+        expect(restore).toContain('the restore re-links no flowsheet play');
+        expect(restore).toContain('can get its `album_id` back from `jobs/legacy-linkage-resolve`');
+        expect(restore).toContain('not from the restore itself');
+        expect(restore).not.toMatch(/do not come back|are re-linked by/);
+        const counts = flat(String((spec.components.schemas.FlowsheetPlayCounts as { description?: string }).description));
+        expect(counts).not.toMatch(/permanently|guarantees no future/);
+        expect(counts).toContain('unless the batch is restored');
+        expect(flat(String(propertyOf('CatalogDeleteBatch', 'restorable')?.description))).toContain('global advisory restore lock');
         expect(restore).not.toContain('archived flowsheet plays do not re-link');
         expect(flat(String(operation('/library/{id}', 'delete').description))).toContain('stranded unless the batch is restored');
         expect(flat(String(propertyOf('FlowsheetPlayCounts', 'legacy_linked')?.description))).toContain('(unless the batch is restored)');

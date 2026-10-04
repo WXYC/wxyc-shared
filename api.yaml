@@ -5115,10 +5115,13 @@ components:
         naming this release, each counted in exactly one of `direct` /
         `rotation_linked` / `legacy_linked` — but a total would misstate
         what the delete actually does: the `legacy_linked` arm STRANDS
-        its plays permanently rather than unlinking them (the
-        delete-denylist guarantees no future release will ever carry
-        that legacy id again), while `direct` and `rotation_linked` are
-        merely unlinked. Summing collapses "permanently orphaned" into
+        its plays rather than unlinking them (the delete-denylist stops
+        any new release from taking that legacy id, so nothing re-links
+        them unless the batch is restored: a restore re-inserts the row
+        with its `legacy_release_id` and clears its denylist entry, and
+        `jobs/legacy-linkage-resolve` then re-links those plays on its
+        schedule), while `direct` and `rotation_linked` are merely
+        unlinked. Summing collapses "stranded unless restored" into
         the same number as "loses a link," which is precisely the
         distinction a librarian needs before deleting. Render the three
         arms separately; never render their sum.
@@ -5268,8 +5271,10 @@ components:
             for an unrestorable KIND is the hard guarantee: the endpoint
             refuses every such batch with `409 unrestorable_kind` before any
             row lock or write. A batch that reads `false` because its
-            envelope is missing its row passes that check, takes the lock,
-            and answers 500.
+            envelope is missing its row passes that check, takes the global
+            advisory restore lock (so it can instead answer 503
+            `lock_unavailable`), and answers 500, still before any row lock
+            or write.
         captured_at:
           type: string
           format: date-time
@@ -5334,6 +5339,7 @@ components:
         - entity_id
         - relocated_code_number
         - children
+        - deviations
       properties:
         entity_kind:
           type: string
@@ -14958,7 +14964,7 @@ paths:
         **Five things a restore does not put back**, and a client
         presenting it as undone should say so:
 
-        - plays linked only through `album_id`/`rotation_id` do not come back; tubafrenzy-era plays carrying `flowsheet.legacy_release_id` are re-linked by `jobs/legacy-linkage-resolve` within about 30 minutes, not by the restore itself;
+        - the restore re-links no flowsheet play: the `album_id`/`rotation_id` links that the delete cleared are not restored (the plays themselves never left), and a tubafrenzy-era play whose `flowsheet.legacy_release_id` matches the restored release's can get its `album_id` back from `jobs/legacy-linkage-resolve` on its schedule (about every 30 minutes), not from the restore itself;
 
         - the five excluded dependents above stay excluded;
 
