@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.15.0
+  version: 10.16.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -81,7 +81,11 @@ components:
       required: true
       schema:
         type: integer
-      description: The intake item's id.
+        minimum: 1
+        maximum: 2147483647
+      description: >-
+        The intake item's id. Must be a positive int4; a non-digit, zero or
+        larger value is a 400.
     ReviewId:
       name: id
       in: path
@@ -12643,6 +12647,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: The `{id}` is a malformed id (non-digit, zero, or past int4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
@@ -12677,7 +12687,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
         '400':
-          description: Validation failure, or both citations set non-null
+          description: Validation failure, a malformed id, or both citations set non-null
           content:
             application/json:
               schema:
@@ -12717,6 +12727,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntakeDeleteResponse'
+        '400':
+          description: The `{id}` is a malformed id (non-digit, zero, or past int4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
@@ -12752,6 +12768,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: The `{id}` is a malformed id (non-digit, zero, or past int4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
@@ -12776,9 +12798,9 @@ paths:
       x-wxyc-service: backend-service
       summary: Release a checked-out intake item
       description: >
-        Returns a checked-out item to the pool. Grant: `reviews: manage`, or the
-        DJ holding the item. Precedence: a caller without the `reviews` grant
-        the route requires gets a 403 in any state; otherwise an item not in
+        Returns a checked-out item to the pool. Grant: `reviews: write`; a
+        `reviews: manage` holder may release anyone's checkout. Precedence: a
+        caller without the `reviews: write` grant gets a 403 in any state; otherwise an item not in
         effective state `checked_out` answers 409 `state_changed`; otherwise a
         caller who is neither the holder nor a `reviews: manage` holder gets a
         403. Delivered by WXYC/Backend-Service#2798.
@@ -12791,12 +12813,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: The `{id}` is a malformed id (non-digit, zero, or past int4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
           description: >-
-            Caller has no `reviews` grant at the level this route requires,
-            in any state; or the item is in effective state `checked_out`
+            Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `checked_out`
             and the caller is neither the holder nor a `reviews: manage`
             holder. Otherwise an item not in effective state `checked_out`
             answers 409 `state_changed` instead
@@ -12821,7 +12848,9 @@ paths:
       summary: Ask a DJ to review an intake item
       description: >
         A music director asks a named DJ (`dj_id`) to review the item, moving it
-        to `requested`. Grant: `reviews: manage`. Delivered by
+        to `requested`. Grant: `reviews: manage`. The source state is effective
+        state `pool`. `dj_id` must name an account holding `reviews: write`, or
+        the request is a 400. Delivered by
         WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
@@ -12847,7 +12876,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
         '400':
-          description: Validation failure, such as a missing or invalid `dj_id`
+          description: >-
+            Validation failure, such as a malformed id or a missing or invalid
+            `dj_id` (including one that names no account holding `reviews: write`)
           content:
             application/json:
               schema:
@@ -12876,8 +12907,9 @@ paths:
       x-wxyc-service: backend-service
       summary: Withdraw a review request
       description: >
-        Returns a `requested` item to the pool. Grant: `reviews: manage`.
-        Delivered by WXYC/Backend-Service#2798.
+        Returns an effective `requested` item to the pool. A `requested` row
+        past its 7-day lapse is effectively `pool` and answers 409
+        `state_changed`. Grant: `reviews: manage`. Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
       responses:
@@ -12887,6 +12919,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: The `{id}` is a malformed id (non-digit, zero, or past int4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
@@ -12926,6 +12964,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: The `{id}` is a malformed id (non-digit, zero, or past int4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
@@ -12969,6 +13013,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: The `{id}` is a malformed id (non-digit, zero, or past int4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
@@ -13011,6 +13061,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntakeSlip'
+        '400':
+          description: The `{id}` is a malformed id (non-digit, zero, or past int4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
@@ -13026,6 +13082,108 @@ paths:
             `not_reviewed`: the item has no submitted typed review (a
             handwritten review is already on the sleeve); or `state_changed`:
             the item is not `filed` or `finalized`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeConflictError'
+
+  /intake/{id}/file:
+    parameters:
+      - $ref: '#/components/parameters/IntakeId'
+    post:
+      x-wxyc-service: backend-service
+      summary: File an intake item into the catalog
+      description: >
+        Files a reviewed item, either as a new release (`kind: new_release`,
+        the `POST /library/filings` payload) or against a release already in
+        the library (`kind: existing_release`). Grant: `reviews: manage`
+        **and** `catalog:write`. Returns the item with `album_id` (and
+        `rotation_id` when the new release entered rotation). The 409 is an
+        `IntakeConflictError` (`state_changed`, `not_reviewed`,
+        `invalid_citation`), or a `LibraryFilingConflictError` when the
+        new-release arm collides with the catalog. Delivered by
+        WXYC/Backend-Service#2803.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntakeFileRequest'
+      responses:
+        '200':
+          description: The filed item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: A malformed id, or a body that fails validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks `reviews: manage` or `catalog:write`'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            An `IntakeConflictError`, or a `LibraryFilingConflictError` when
+            the new-release arm collides with the catalog
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/IntakeConflictError'
+                  - $ref: '#/components/schemas/LibraryFilingConflictError'
+
+  /intake/{id}/finalize:
+    parameters:
+      - $ref: '#/components/parameters/IntakeId'
+    post:
+      x-wxyc-service: backend-service
+      summary: Mark a filed intake item shelved
+      description: >
+        Marks a filed item shelved. Grant: `catalog:write`. Call-number
+        changes go through `PATCH /library/{id}` first. Refused for a rotation
+        item until its kill date has passed: 409 `in_rotation`, the item stays
+        `filed`, and the message names the kill date. Delivered by
+        WXYC/Backend-Service#2804.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: The `{id}` is a malformed id (non-digit, zero, or past int4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `catalog:write` permission'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: "`state_changed`, or `in_rotation` while the kill date has not passed"
           content:
             application/json:
               schema:
