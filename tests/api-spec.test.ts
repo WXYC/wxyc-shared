@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.14.0');
+      expect(spec.info.version).toBe('10.15.0');
     });
 
     it('should have components section', () => {
@@ -7714,10 +7714,8 @@ describe('OpenAPI Specification', () => {
           expect(clause).not.toMatch(/restore or re-create/i);
         });
 
-        it('hedges that the same case is a 500 until WXYC/Backend-Service#2818 deploys', () => {
-          expect(missingReferenceClause()).toContain(
-            'Contract ahead of WXYC/Backend-Service#2818: until that deploys, the same case is a 500, so a consumer must tolerate its absence.'
-          );
+        it('carries no #2818 deploy hedge now that the server sends the body', () => {
+          expect(missingReferenceClause()).not.toMatch(/ahead of WXYC\/Backend-Service#2818|until that deploys|tolerate its absence/);
         });
       });
 
@@ -7772,12 +7770,23 @@ describe('OpenAPI Specification', () => {
         expect(description).toContain('entities[].deviations');
         expect(description).toContain('`nulled`');
         expect(description).toContain('`dropped`');
-        // The hedge: the route must not state the drop as current behavior.
+        // The deploy hedges are retired: the server populates `deviations` now.
         const text = flat(description);
-        expect(text).toContain('lands ahead of WXYC/Backend-Service#2818');
-        expect(text).toMatch(/carries no `deviations`, and a captured child whose `ON DELETE CASCADE` target is gone fails the restore with a 500 rather than being dropped/);
-        expect(text).toContain('Once WXYC/Backend-Service#2818 deploys');
+        expect(text).not.toMatch(/ahead of WXYC\/Backend-Service#2818|until that deploys|Once WXYC\/Backend-Service#2818 deploys/);
+        expect(text).toContain('`entities[].deviations` is always present');
         expect(description).not.toContain('The 200 does not say which references were nulled');
+      });
+
+      it('qualifies the play-history claims for legacy-linked plays (wxyc-shared#558)', () => {
+        const restore = flat(String(operation(restorePath, 'post').description));
+        expect(restore).toContain('plays linked only through `album_id`/`rotation_id` do not come back');
+        expect(restore).toContain('`jobs/legacy-linkage-resolve`');
+        expect(restore).not.toContain('archived flowsheet plays do not re-link');
+        expect(flat(String(operation('/library/{id}', 'delete').description))).toContain('stranded unless the batch is restored');
+        expect(flat(String(propertyOf('FlowsheetPlayCounts', 'legacy_linked')?.description))).toContain('(unless the batch is restored)');
+        const restorable = flat(String(propertyOf('CatalogDeleteBatch', 'restorable')?.description));
+        expect(restorable).not.toContain('is the hard guarantee');
+        expect(restorable).toContain('answers 500');
       });
 
       it('defines children as rows actually re-inserted, with dropped rows left uncounted', () => {
@@ -8194,7 +8203,7 @@ describe('OpenAPI Specification', () => {
         expect(propertyOf('RestoreDeviation', 'row_id')?.nullable).toBeUndefined();
       });
 
-      it("carries the schema's own description: first missing reference, nothing written, what clears it, the #2818 hedge", () => {
+      it("carries the schema's own description: first missing reference, nothing written, what clears it, no deploy hedge", () => {
         const description = schemaDescription();
         expect(description).toContain('whose delete rule is `NO ACTION`');
         expect(description).toContain('first missing reference the restore finds, so a retry can name another');
@@ -8206,8 +8215,7 @@ describe('OpenAPI Specification', () => {
         expect(description).not.toMatch(/names no operator remedy/i);
         expect(description).not.toMatch(/restoring the batch that deleted it/i);
         expect(description).toContain('Carries ids only, never names, as `RestoreDeviation` does.');
-        expect(description).toContain('Contract ahead of WXYC/Backend-Service#2818');
-        expect(description).toContain('the same case is an unexplained 500, so a consumer must tolerate its absence');
+        expect(description).not.toMatch(/ahead of WXYC\/Backend-Service#2818|until that deploys|tolerate its absence/);
         expect(description).not.toMatch(/restore or re-create/i);
       });
     });
