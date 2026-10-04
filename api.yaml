@@ -5075,7 +5075,9 @@ components:
             listing time, against an immutable capture, so a batch that reads
             `true` cannot go on to fail on a corrupt envelope; it can still
             answer `already_restored`, `resolution_required` (a shelf-slot
-            conflict a client must resolve), or `lock_unavailable`. `false` is
+            conflict a client must resolve), `lock_unavailable`, or
+            `missing_reference` (a restored row's `NO ACTION` reference
+            to a row deleted since). `false` is
             the hard guarantee: the endpoint refuses every such batch with
             `409 unrestorable_kind` before any row lock or write.
         captured_at:
@@ -5335,8 +5337,9 @@ components:
 
         **A 400 rather than a 409**, unlike the other refusals on this
         path, because the request is incomplete rather than in conflict
-        with server state: the same batch restores successfully the
-        moment `resolution` is supplied. Type this branch — a client that
+        with server state: supplying `resolution` clears this refusal,
+        though the retry can still meet another one (`missing_reference`,
+        for example). Type this branch — a client that
         falls back to the bare `ApiErrorResponse` shape here discards
         `conflicts` and has nothing to render the question from.
       required:
@@ -5450,11 +5453,23 @@ components:
       type: object
       description: >
         `POST /library/deleted/{batchId}/restore`'s 409 when a restored
-        row holds a reference with no `ON DELETE` action, or a NOT NULL
-        one, whose target no longer exists (WXYC/Backend-Service#2818).
-        Retryable once the target exists again; the snapshot is
-        untouched. Carries ids only, never names, as `RestoreDeviation`
-        does.
+        row holds a reference whose delete rule is `NO ACTION` (what a
+        foreign key with no `ON DELETE` clause means, so the delete would
+        have been refused rather than cascaded or nulled) and whose
+        target no longer exists (WXYC/Backend-Service#2818). It names the
+        first missing reference the restore finds, so a retry can name
+        another. Nothing was written and the snapshot is untouched. The
+        refusal clears only once a row with `captured_value`'s id exists
+        again in `target_table`, for example by first restoring the batch
+        that deleted it, where that batch is itself restorable. Where the
+        row cannot come back under that id the refusal is permanent: an
+        `artist` batch is refused as `unrestorable_kind`, and a
+        re-created artist gets a new id. Backend-Service#2818 names no
+        operator remedy for that case. Contract ahead of
+        WXYC/Backend-Service#2818: until that deploys the server never
+        sends this body and the same case is an unexplained 500, so a
+        consumer must tolerate its absence. Carries ids only, never
+        names, as `RestoreDeviation` does.
       required:
         - message
         - reason
@@ -5474,7 +5489,13 @@ components:
           description: The table of the captured row that holds the reference.
         row_id:
           type: integer
-          description: The captured row's primary key.
+          nullable: true
+          description: >
+            The captured row's primary key; `null` for a row with no
+            single-column primary key (`artist_library_crossreference`,
+            keyed only by its `(artist_id, library_id)` pair). Such a row
+            is identified by `table`, `column` and `captured_value`
+            together with the entity being restored.
         column:
           type: string
           description: The reference column whose target is missing.
@@ -14617,8 +14638,9 @@ paths:
         measurement found gives roughly 11x too many false collisions.
         The ask is a **400** `resolution_required` carrying every
         conflict (see `RestoreResolutionRequiredRefusal`), not a 409:
-        the request is incomplete, and the same batch succeeds as soon as
-        `resolution` is supplied.
+        the request is incomplete, and supplying `resolution` clears it,
+        though the retry can still meet another refusal, such as
+        `missing_reference`.
       tags:
         - Library
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
@@ -14698,13 +14720,19 @@ paths:
             `artist` batch today); permanent, not retryable, and
             `GET /library/deleted`'s `restorable` field already said so
             for the same batch. `missing_reference` — a restored row
-            holds a reference with no `ON DELETE` action, or a NOT NULL
-            one, whose target no longer exists (a release whose artist
-            was deleted, for example); retryable once the target exists
-            again (restore or re-create it first), and the snapshot is
-            untouched. Contract ahead of WXYC/Backend-Service#2818:
-            until that deploys, the same case is a 500, so a consumer
-            must tolerate its absence.
+            holds a `NO ACTION` reference (no `ON DELETE` clause) whose
+            target no longer exists (a release whose artist was deleted,
+            for example). It names the first missing reference the
+            restore finds, so a retry can name another; nothing was
+            written and the snapshot is untouched. It clears only once a
+            row with `captured_value`'s id exists again in
+            `target_table`, for example by first restoring the batch that
+            deleted it. Where it cannot come back under that id the
+            refusal is permanent, as for a deleted artist: an `artist`
+            batch is refused as `unrestorable_kind`, and a re-created
+            artist gets a new id. Contract ahead of
+            WXYC/Backend-Service#2818: until that deploys, the same case
+            is a 500, so a consumer must tolerate its absence.
           content:
             application/json:
               schema:

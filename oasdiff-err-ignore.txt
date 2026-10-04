@@ -38,3 +38,4 @@
 # claiming a count is wrong the moment someone appends an entry below it, and no
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
+post /library/deleted/{batchId}/restore added `#/components/schemas/RestoreMissingReferenceRefusal` to the response body `oneOf` list for the response status `409`
