@@ -12528,8 +12528,10 @@ paths:
       summary: Release a checked-out intake item
       description: >
         Returns a checked-out item to the pool. Grant: `reviews: manage`, or the
-        DJ holding the item. A caller who is neither gets a 403. Delivered by
-        WXYC/Backend-Service#2798.
+        DJ holding the item. A caller with neither gets a 403 only when the
+        item is in effective state `checked_out` (held by someone else); an
+        item in any other effective state, a filed item included, answers 409
+        `state_changed` whoever calls. Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
       responses:
@@ -12542,7 +12544,10 @@ paths:
         '401':
           description: No bearer token
         '403':
-          description: 'Caller holds neither the item nor `reviews: manage`'
+          description: >-
+            Caller holds neither the item nor `reviews: manage`, and the item is
+            in effective state `checked_out`. An item in any other effective
+            state answers 409 `state_changed` instead
         '404':
           description: No such intake item
           content:
@@ -12579,6 +12584,10 @@ paths:
               properties:
                 dj_id:
                   type: string
+                  description: >
+                    The requested DJ's account id, the `auth_user.id` that is
+                    stored as `IntakeItem.requested_dj_id`. It is a string, not
+                    the integer legacy DJ id that other `dj_id` fields carry.
       responses:
         '200':
           description: The updated item
@@ -12586,6 +12595,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: Validation failure, such as a missing or invalid `dj_id`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
@@ -12646,8 +12661,11 @@ paths:
       summary: Accept a review request
       description: >
         The requested DJ accepts, checking the item out to themself. Grant: the
-        requested DJ only; any other caller gets a 403. Delivered by
-        WXYC/Backend-Service#2798.
+        requested DJ only. A caller who is not the requested DJ gets a 403 only
+        when the item is in effective state `requested` (asked of someone
+        else); an item in any other effective state, an expired request or a
+        filed item included, answers 409 `state_changed` whoever calls.
+        Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
       responses:
@@ -12660,7 +12678,10 @@ paths:
         '401':
           description: No bearer token
         '403':
-          description: 'Caller is not the requested DJ'
+          description: >-
+            Caller is not the requested DJ, and the item is in effective state
+            `requested`. An item in any other effective state answers 409
+            `state_changed` instead
         '404':
           description: No such intake item
           content:
@@ -12682,8 +12703,11 @@ paths:
       summary: Pass on a review request
       description: >
         The requested DJ declines, returning the item to the pool and recording a
-        pass. Grant: the requested DJ only; any other caller gets a 403.
-        Delivered by WXYC/Backend-Service#2798.
+        pass. Grant: the requested DJ only. A caller who is not the requested DJ
+        gets a 403 only when the item is in effective state `requested` (asked
+        of someone else); an item in any other effective state, an expired
+        request or a filed item included, answers 409 `state_changed` whoever
+        calls. Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
       responses:
@@ -12696,7 +12720,10 @@ paths:
         '401':
           description: No bearer token
         '403':
-          description: 'Caller is not the requested DJ'
+          description: >-
+            Caller is not the requested DJ, and the item is in effective state
+            `requested`. An item in any other effective state answers 409
+            `state_changed` instead
         '404':
           description: No such intake item
           content:

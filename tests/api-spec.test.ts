@@ -3819,9 +3819,14 @@ describe('OpenAPI Specification', () => {
     type Op = {
       description?: string;
       requestBody?: { content?: Record<string, { schema?: Record<string, unknown> }> };
-      responses?: Record<string, { content?: Record<string, { schema?: Record<string, unknown> }> } | undefined>;
+      responses?: Record<
+        string,
+        { description?: string; content?: Record<string, { schema?: Record<string, unknown> }> } | undefined
+      >;
       'x-wxyc-service'?: string;
     };
+    // YAML folds `>` descriptions, so compare on single-spaced text
+    const squash = (text?: string): string => (text ?? '').replace(/\s+/g, ' ').trim();
     const op = (path: string, method: string): Op => {
       const found = (spec.paths as Record<string, Record<string, Op> | undefined>)[path]?.[method];
       if (!found) throw new Error(`api.yaml declares no ${method.toUpperCase()} ${path}`);
@@ -3895,18 +3900,18 @@ describe('OpenAPI Specification', () => {
       expect(body(op('/intake', 'get'), '400')).toEqual(ref('ApiErrorResponse'));
     });
 
-    // method, path, grant named in the description, delivering issue
+    // path, grant clause in the description, delivering issue (all POST)
     it.each([
       ['/intake/{id}/checkout', 'reviews: write', '#2798'],
-      ['/intake/{id}/release', 'reviews: manage', '#2798'],
+      ['/intake/{id}/release', 'Grant: `reviews: manage`, or the DJ holding the item.', '#2798'],
       ['/intake/{id}/request', 'reviews: manage', '#2798'],
       ['/intake/{id}/cancel-request', 'reviews: manage', '#2798'],
-      ['/intake/{id}/accept', 'requested DJ', '#2798'],
-      ['/intake/{id}/pass', 'requested DJ', '#2798'],
+      ['/intake/{id}/accept', 'Grant: the requested DJ only.', '#2798'],
+      ['/intake/{id}/pass', 'Grant: the requested DJ only.', '#2798'],
     ])('declares post %s with its grant (%s) and delivering issue (%s)', (path, grant, issue) => {
       const o = op(path, 'post');
       expect(o['x-wxyc-service']).toBe('backend-service');
-      expect(o.description).toContain(grant);
+      expect(squash(o.description)).toContain(grant);
       expect(o.description).toContain(issue);
       expect(
         (spec.paths as Record<string, { parameters?: unknown[] }>)[path]?.parameters,
@@ -3922,8 +3927,17 @@ describe('OpenAPI Specification', () => {
       },
     );
 
-    it.each(['release', 'accept', 'pass'])('declares a 403 for a non-holder on %s', (action) => {
-      expect(op(`/intake/{id}/${action}`, 'post').responses?.['403']).toBeDefined();
+    // 403 only in the state the action needs, else 409 state_changed (BS#2798)
+    it.each([
+      ['release', 'Caller holds neither the item nor `reviews: manage`, and the item is in effective state `checked_out`.'],
+      ['accept', 'Caller is not the requested DJ, and the item is in effective state `requested`.'],
+      ['pass', 'Caller is not the requested DJ, and the item is in effective state `requested`.'],
+    ])('scopes the %s 403 to the right effective state and sends other states to 409', (action, who) => {
+      const o = op(`/intake/{id}/${action}`, 'post');
+      const forbidden = squash(o.responses?.['403']?.description);
+      expect(forbidden).toContain(who);
+      expect(forbidden).toContain('any other effective state answers 409 `state_changed`');
+      expect(squash(o.description)).toContain('whoever calls');
     });
 
     it('takes dj_id as the /request body', () => {
@@ -3931,8 +3945,17 @@ describe('OpenAPI Specification', () => {
       expect(schema).toEqual({
         type: 'object',
         required: ['dj_id'],
-        properties: { dj_id: { type: 'string' } },
+        properties: { dj_id: { type: 'string', description: expect.any(String) } },
       });
+      const props = schema?.properties as { dj_id?: { description?: string } } | undefined;
+      const text = squash(props?.dj_id?.description);
+      expect(text).toContain('`auth_user.id`');
+      expect(text).toContain('`IntakeItem.requested_dj_id`');
+      expect(text).toContain('not the integer legacy DJ id');
+    });
+
+    it('declares a 400 referencing ApiErrorResponse for a bad /request body', () => {
+      expect(body(op('/intake/{id}/request', 'post'), '400')).toEqual(ref('ApiErrorResponse'));
     });
 
     it('words invalid_citation per the inclusive "submitted review" rule', () => {
