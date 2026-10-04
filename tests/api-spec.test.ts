@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.17.0');
+      expect(spec.info.version).toBe('11.0.0');
     });
 
     it('should have components section', () => {
@@ -2834,6 +2834,8 @@ describe('OpenAPI Specification', () => {
         'rotation_card_bin_mismatch',
         'card_not_highest_in_bin',
         'card_has_active_rotations',
+        'review_required',
+        'rotation_not_eligible',
       ]);
       // One source of truth for the string, pinned by equality rather than
       // composed — OpenAPI enums do not merge cleanly across two
@@ -3536,6 +3538,7 @@ describe('OpenAPI Specification', () => {
           'disc_quantity',
           'alternate_artist_name',
           'album_artist',
+          'from_rotation_id',
         ].sort()
       );
       for (const field of albumCreateFieldKeys) {
@@ -3681,6 +3684,7 @@ describe('OpenAPI Specification', () => {
         'artist_code_conflict',
         'artist_name_conflict',
         'rotation_card_bin_mismatch',
+        'review_required',
       ]);
       const error = spec.components.schemas.LibraryFilingConflictError as {
         required?: string[];
@@ -8951,5 +8955,58 @@ describe('OpenAPI Specification', () => {
       expect(text).not.toMatch(/one-per-album|author-owned|several per album/);
       expect(text).toMatch(/many\s+per\s+release/);
     });
+  });
+
+  describe('review-required contract (#539)', () => {
+    const schema = (name: string) => spec.components.schemas[name] as Record<string, unknown> & { description?: string };
+    const conflictEnum = (name: string) => (schema(name) as { enum?: string[] }).enum;
+
+    it('declares from_rotation_id on AddAlbumRequest as an optional integer', () => {
+      expect(propertyOf('AddAlbumRequest', 'from_rotation_id')?.type).toBe('integer');
+      expect(requiredKeysOf('AddAlbumRequest')).not.toContain('from_rotation_id');
+    });
+
+    it('makes the POST /library/rotation body a oneOf of the album and typed-text arms', () => {
+      const body = (operation('/library/rotation', 'post').requestBody as {
+        content: Record<string, { schema: Record<string, unknown> }>;
+      }).content['application/json']!.schema;
+      expect(body).toEqual(ref('AddRotationBody'));
+      expect(oneOfNames(schema('AddRotationBody') as Record<string, unknown>)).toEqual([
+        'AddRotationRequest',
+        'AddRotationTypedTextRequest',
+      ]);
+      expect(requiredKeysOf('AddRotationTypedTextRequest').sort()).toEqual(['album_title', 'artist_name', 'rotation_bin']);
+      expect(propertyOf('AddRotationTypedTextRequest', 'moved_from_rotation_id')?.type).toBe('integer');
+      expect(propertyOf('AddRotationTypedTextRequest', 'album_id')).toBeUndefined();
+      for (const name of ['AddRotationRequest', 'AddRotationTypedTextRequest']) {
+        expect(propertyOf(name, 'rotation_bin')).toBeDefined();
+      }
+    });
+
+    it.each([
+      ['LibraryAddConflictReason', ['review_required', 'rotation_not_eligible']],
+      ['LibraryFilingConflictReason', ['review_required']],
+      ['RotationConflictReason', ['review_required', 'rotation_not_eligible']],
+    ])('%s carries the new conflict values', (name, added) => {
+      expect(conflictEnum(name)).toEqual(expect.arrayContaining(added));
+    });
+
+    it('declares the POST /library 409 with LibraryAddConflictError', () => {
+      expect(responseSchema('/library', 'post', '409')).toEqual(ref('LibraryAddConflictError'));
+      expect(propertyOf('LibraryAddConflictError', 'reason')).toEqual(ref('LibraryAddConflictReason'));
+    });
+
+    it('says RotationConflictReason raises the new values only on POST /library/rotation', () => {
+      expect(flat(schema('RotationConflictReason').description)).toMatch(
+        /`review_required` and `rotation_not_eligible` are raised only by `POST \/library\/rotation`/
+      );
+    });
+
+    it.each(['album_title', 'label', 'alternate_artist_name', 'album_artist'])(
+      'bounds AlbumCreateFields.%s at 128',
+      (field) => {
+        expect(propertyOf('AlbumCreateFields', field)?.maxLength).toBe(128);
+      }
+    );
   });
 });
