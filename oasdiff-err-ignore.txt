@@ -38,15 +38,3 @@
 # claiming a count is wrong the moment someone appends an entry below it, and no
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
-
-# wxyc-shared#547: POST /library/deleted/{batchId}/restore's 409 `oneOf` gains
-# `RestoreMissingReferenceRefusal` (`reason: missing_reference`). oasdiff files
-# any closed-`oneOf` addition as an ERR, but nothing in practice can break on
-# this one. Restore is music-director tooling; its only consumer is dj-site,
-# which reads the body through structural TypeScript types and maps an
-# unrecognized 409 `reason` to its `unknown` fallback, and no Swift or Kotlin
-# client calls the route. The server answers this exact case today with an
-# unexplained 500, so no client has a working behavior to lose. Owner decision
-# 2026-10-03: land as non-breaking with a minor bump. This entry is scoped to
-# the `main`..PR diff and is pruned once the change lands on `main`.
-post /library/deleted/{batchId}/restore added `#/components/schemas/RestoreMissingReferenceRefusal` to the response body `oneOf` list for the response status `409`
