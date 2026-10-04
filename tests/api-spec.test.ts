@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.10.0');
+      expect(spec.info.version).toBe('10.11.0');
     });
 
     it('should have components section', () => {
@@ -3893,6 +3893,46 @@ describe('OpenAPI Specification', () => {
 
     it('declares a 400 referencing ApiErrorResponse for an unknown state value', () => {
       expect(body(op('/intake', 'get'), '400')).toEqual(ref('ApiErrorResponse'));
+    });
+
+    // method, path, grant named in the description, delivering issue
+    it.each([
+      ['/intake/{id}/checkout', 'reviews: write', '#2798'],
+      ['/intake/{id}/release', 'reviews: manage', '#2798'],
+      ['/intake/{id}/request', 'reviews: manage', '#2798'],
+      ['/intake/{id}/cancel-request', 'reviews: manage', '#2798'],
+      ['/intake/{id}/accept', 'requested DJ', '#2798'],
+      ['/intake/{id}/pass', 'requested DJ', '#2798'],
+    ])('declares post %s with its grant (%s) and delivering issue (%s)', (path, grant, issue) => {
+      const o = op(path, 'post');
+      expect(o['x-wxyc-service']).toBe('backend-service');
+      expect(o.description).toContain(grant);
+      expect(o.description).toContain(issue);
+      expect(
+        (spec.paths as Record<string, { parameters?: unknown[] }>)[path]?.parameters,
+      ).toContainEqual({ $ref: '#/components/parameters/IntakeId' });
+    });
+
+    it.each(['checkout', 'release', 'request', 'cancel-request', 'accept', 'pass'])(
+      'returns the updated IntakeItem or a 409 IntakeConflictError from %s',
+      (action) => {
+        const o = op(`/intake/{id}/${action}`, 'post');
+        expect(body(o, '200')).toEqual(ref('IntakeItem'));
+        expect(body(o, '409')).toEqual(ref('IntakeConflictError'));
+      },
+    );
+
+    it.each(['release', 'accept', 'pass'])('declares a 403 for a non-holder on %s', (action) => {
+      expect(op(`/intake/{id}/${action}`, 'post').responses?.['403']).toBeDefined();
+    });
+
+    it('takes dj_id as the /request body', () => {
+      const schema = op('/intake/{id}/request', 'post').requestBody?.content?.['application/json']?.schema;
+      expect(schema).toEqual({
+        type: 'object',
+        required: ['dj_id'],
+        properties: { dj_id: { type: 'string' } },
+      });
     });
 
     it('words invalid_citation per the inclusive "submitted review" rule', () => {
