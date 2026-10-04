@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.16.0');
+      expect(spec.info.version).toBe('10.17.0');
     });
 
     it('should have components section', () => {
@@ -8908,7 +8908,11 @@ describe('OpenAPI Specification', () => {
       expect(text).toMatch(/`mine=false` means the same as omitting `mine`/);
       expect(text).toMatch(/not paginated: a bare array/);
       expect(text).toMatch(/malformed filter value[^.]*400/);
+      expect(text).toMatch(/malformed filter value \(`album_id` or `intake_item_id` not a positive int4, or a `mine` other than `true`\/`false`\)/);
       expect(responseSchema('/reviews', 'get', '400')).toEqual(ref('ApiErrorResponse'));
+      expect(operation('/reviews', 'get').responses?.['400']?.description).toBe(
+        '`album_id` or `intake_item_id` is not a positive int4, or `mine` is not `true` or `false`'
+      );
     });
 
     it('serves Review from the read paths', () => {
