@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.13.0
+  version: 10.14.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4271,6 +4271,60 @@ components:
         locked:
           type: boolean
           description: Computed. The item's slip has been printed, so only music directors may edit. Always `false` for a review attached to `album_id` alone, which has no item and no slip.
+
+    IntakeSlip:
+      type: object
+      description: >
+        The printable review slip for an intake item: the item's identity
+        plus the printed review's text. Each review field is nullable exactly
+        as on `Review`. `fcc` is for the station's own slip and is never
+        published outside it.
+      required:
+        - artist_name
+        - album_title
+        - record_label
+        - buzzwords
+        - artist_blurb
+        - review
+        - author
+        - submitted_at
+        - recommended_tracks
+        - fcc
+      properties:
+        artist_name:
+          type: string
+          maxLength: 128
+        album_title:
+          type: string
+          maxLength: 128
+        record_label:
+          type: string
+          nullable: true
+          maxLength: 128
+        buzzwords:
+          type: string
+          nullable: true
+        artist_blurb:
+          type: string
+          nullable: true
+        review:
+          type: string
+          nullable: true
+        author:
+          type: string
+          maxLength: 128
+          nullable: true
+          description: The printed review's `Review.author`, with the same station-only caveat; never for client telemetry.
+        submitted_at:
+          type: string
+          format: date-time
+          nullable: true
+        recommended_tracks:
+          type: string
+          nullable: true
+        fcc:
+          type: string
+          nullable: true
 
     # Legacy rotation schema (for backward compatibility with existing endpoints)
     Rotation:
@@ -12931,6 +12985,47 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: "`state_changed`: the item is not in a state that allows this transition"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeConflictError'
+
+  /intake/{id}/print:
+    parameters:
+      - $ref: '#/components/parameters/IntakeId'
+    post:
+      x-wxyc-service: backend-service
+      summary: Print an intake item's review slip
+      description: >
+        Grant: `reviews: manage`. Stamps `printed_at` and `printed_by` (a
+        reprint updates both) and returns the slip. When the item has more
+        than one submitted typed review, the earliest submitted typed review
+        prints, the one `GET /reviews?album_id=` sorts first as the intake
+        review. Delivered by WXYC/Backend-Service#2804.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The slip
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeSlip'
+        '401':
+          description: No bearer token
+        '403':
+          description: "Caller lacks the `reviews: manage` grant"
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >-
+            `not_reviewed`: the item has no submitted typed review (a
+            handwritten review is already on the sleeve); or `state_changed`:
+            the item is not `filed` or `finalized`
           content:
             application/json:
               schema:
