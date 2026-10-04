@@ -8900,6 +8900,17 @@ describe('OpenAPI Specification', () => {
       );
     });
 
+    it('states the GET /reviews filter rules', () => {
+      const text = flat(operation('/reviews', 'get').description);
+      expect(text).toMatch(/request with no filter returns every review the caller may see, under the same visibility rules/);
+      expect(text).toMatch(/[Ss]everal filters combine with AND/);
+      expect(text).toMatch(/`mine=true` returns the caller's own reviews and drafts, plus the reviews they recorded on someone's behalf/);
+      expect(text).toMatch(/`mine=false` means the same as omitting `mine`/);
+      expect(text).toMatch(/not paginated: a bare array/);
+      expect(text).toMatch(/malformed filter value[^.]*400/);
+      expect(responseSchema('/reviews', 'get', '400')).toEqual(ref('ApiErrorResponse'));
+    });
+
     it('serves Review from the read paths', () => {
       expect(responseSchema('/reviews/{id}', 'get', '200')).toEqual(ref('Review'));
       expect(responseSchema('/reviews', 'get', '200')).toEqual({ type: 'array', items: ref('Review') });

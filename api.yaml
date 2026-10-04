@@ -13265,7 +13265,14 @@ paths:
       description: >
         Grant: `reviews: read`. Delivered by WXYC/Backend-Service#2805.
         Filter by `album_id`, `intake_item_id` or
-        `mine=true`. A draft is visible only to its author and to whoever
+        `mine`. A request with no filter returns every review the caller may
+        see, under the same visibility rules that apply with a filter. Several
+        filters combine with AND. `mine=true` returns the caller's own reviews
+        and drafts, plus the reviews they recorded on someone's behalf;
+        `mine=false` means the same as omitting `mine`. The list is not
+        paginated: a bare array, as `GET /intake` is. A malformed filter value
+        (a non-integer or out-of-range id, or a `mine` that is not a boolean)
+        is a 400. A draft is visible only to its author and to whoever
         recorded it; lists omit everyone else's drafts. An album's list
         includes reviews reached through an intake item's `cited_album_id`:
         the intake review first, then newest. The `intake_item_id` list is
@@ -13294,6 +13301,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Review'
+        '400':
+          description: A malformed filter value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
