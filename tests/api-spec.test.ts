@@ -3884,7 +3884,7 @@ describe('OpenAPI Specification', () => {
         in: 'path',
         required: true,
         schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
-        description: "The intake item's id. Must be a positive int4; a non-digit, zero or larger value is a 400.",
+        description: "The intake item's id. Must be a positive int4; a non-digit value, zero, or a value past 2147483647 is a 400.",
       };
       expect(params.IntakeId).toEqual(expected);
       const pathItem = (spec.paths as Record<string, { parameters?: unknown[] }>)['/intake/{id}']!;
@@ -4041,27 +4041,39 @@ describe('OpenAPI Specification', () => {
     });
 
     // Derived from the path prefix, not from a `$ref` to IntakeId: a new /intake/{id}/... route that declares
-    // its `id` inline would otherwise slip past both the parameter check and the 400 check.
+    // its `id` inline would otherwise slip past both the parameter check and the 400 check. `spec` is
+    // populated in `beforeAll`, so the list is built inside the tests.
     const intakeIdOperations = (): Array<[string, string]> =>
       Object.entries(spec.paths as Record<string, Record<string, unknown>>)
         .filter(([path]) => path === '/intake/{id}' || path.startsWith('/intake/{id}/'))
         .flatMap(([path, item]) =>
-          ['get', 'put', 'post', 'patch', 'delete'].filter((m) => m in item).map((m): [string, string] => [path, m]),
+          ['get', 'put', 'post', 'patch', 'delete'].filter((m) => m in item).map((m): [string, string] => [m, path]),
         );
 
-    it('finds the /intake/{id} operations the derived checks below cover', () => {
-      expect(intakeIdOperations().length).toBeGreaterThanOrEqual(10);
+    it('finds the /intake/{id} operations, including PATCH, /request, /file and /print', () => {
+      const ops = intakeIdOperations();
+      expect(ops).toContainEqual(['patch', '/intake/{id}']);
+      expect(ops).toContainEqual(['post', '/intake/{id}/request']);
+      expect(ops).toContainEqual(['post', '/intake/{id}/file']);
+      expect(ops).toContainEqual(['post', '/intake/{id}/print']);
+      expect(ops.length).toBeGreaterThanOrEqual(12);
     });
 
-    it('uses the shared IntakeId parameter, and declares the malformed-id 400, on every /intake/{id} operation', () => {
-      const paths = spec.paths as Record<string, { parameters?: unknown[] } & Record<string, unknown>>;
-      const idRef = { $ref: '#/components/parameters/IntakeId' };
-      for (const [path, method] of intakeIdOperations()) {
+    it('uses the shared IntakeId parameter on every /intake/{id} operation', () => {
+      const paths = spec.paths as Record<string, { parameters?: unknown[] }>;
+      for (const [method, path] of intakeIdOperations()) {
         const o = operation(path, method) as { parameters?: unknown[] };
         const declared = [...(paths[path]?.parameters ?? []), ...(o.parameters ?? [])];
-        expect(declared, `${method.toUpperCase()} ${path} IntakeId`).toContainEqual(idRef);
-        expect(responseSchema(path, method, '400'), `${method.toUpperCase()} ${path} 400`).toEqual(ref('ApiErrorResponse'));
-        expect(flat(operation(path, method).responses?.['400']?.description), `${method.toUpperCase()} ${path} 400 text`).toContain('malformed id');
+        expect(declared, `${method} ${path}`).toContainEqual({ $ref: '#/components/parameters/IntakeId' });
+      }
+    });
+
+    it('declares the malformed-id 400 on every /intake/{id} operation', () => {
+      for (const [method, path] of intakeIdOperations()) {
+        expect(responseSchema(path, method, '400'), `${method} ${path}`).toEqual(ref('ApiErrorResponse'));
+        expect(flat(operation(path, method).responses?.['400']?.description), `${method} ${path}`).toContain(
+          'malformed id',
+        );
       }
     });
 
@@ -4082,7 +4094,7 @@ describe('OpenAPI Specification', () => {
 
     describe('POST /intake/{id}/file and /finalize (BS#2803, BS#2804)', () => {
       it('declares /file with both grants and the IntakeFileRequest body', () => {
-        expectBackendRoute('/intake/{id}/file', 'post', { grant: 'reviews: manage` **and** `catalog:write', issue: '#2803' });
+        expectBackendRoute('/intake/{id}/file', 'post', { grant: 'reviews: manage` **and** `catalog: write', issue: '#2803' });
         const o = operation('/intake/{id}/file', 'post');
         expect(o.requestBody?.content?.['application/json']?.schema).toEqual(ref('IntakeFileRequest'));
         expect(responseSchema('/intake/{id}/file', 'post', '200')).toEqual(ref('IntakeItem'));
@@ -4095,12 +4107,56 @@ describe('OpenAPI Specification', () => {
         ]);
       });
 
-      it('declares /finalize with catalog:write and an IntakeConflictError 409 that reaches in_rotation', () => {
-        expectBackendRoute('/intake/{id}/finalize', 'post', { grant: 'catalog:write', issue: '#2804' });
+      it('declares /finalize with catalog: write and an IntakeConflictError 409 that reaches in_rotation', () => {
+        expectBackendRoute('/intake/{id}/finalize', 'post', { grant: 'catalog: write', issue: '#2804' });
         expect(responseSchema('/intake/{id}/finalize', 'post', '200')).toEqual(ref('IntakeItem'));
         expect(responseSchema('/intake/{id}/finalize', 'post', '409')).toEqual(ref('IntakeConflictError'));
         expect(flat(operation('/intake/{id}/finalize', 'post').description)).toContain('`in_rotation`');
         expect((spec.components.schemas.IntakeConflictReason as { enum?: string[] }).enum).toContain('in_rotation');
+      });
+
+      it('states /file source states, both paths, and the 409 reasons without invalid_citation', () => {
+        const o = operation('/intake/{id}/file', 'post');
+        const text = flat(o.description);
+        expect(text).toContain('Files an item that has a submitted review (effective state `reviewed`) or a valid citation; a cited item may still be in `pool`.');
+        expect(text).toContain('An item with neither is 409 `not_reviewed`, and an item already filed is 409 `state_changed`.');
+        expect(text).toContain('The 409 is an `IntakeConflictError` (`state_changed`, `not_reviewed`)');
+        expect(text).not.toContain('invalid_citation');
+        expect(text).toContain('`catalog: write`');
+        expect(text).not.toContain('catalog:write');
+        const conflict = flat(o.responses?.['409']?.description);
+        expect(conflict).toContain('`not_reviewed`: the item has neither a submitted review nor a valid citation');
+        expect(conflict).not.toContain('invalid_citation');
+      });
+
+      it('answers a nonexistent existing_release album_id with the 400, like the filing bench', () => {
+        const o = operation('/intake/{id}/file', 'post');
+        expect(flat(o.description)).toContain('an `existing_release` `album_id` that names no library release is a 400, not a 404');
+        expect(flat(o.responses?.['400']?.description)).toContain('an `existing_release` `album_id` that names no library release');
+        expect(flat(o.responses?.['404']?.description)).toBe('No such intake item');
+      });
+
+      it('words both new 403s in the house pattern', () => {
+        expect(flat(operation('/intake/{id}/file', 'post').responses?.['403']?.description)).toBe(
+          'Caller lacks the `reviews: manage` or `catalog: write` permission',
+        );
+        expect(flat(operation('/intake/{id}/finalize', 'post').responses?.['403']?.description)).toBe(
+          'Caller lacks the `catalog: write` permission',
+        );
+      });
+
+      it('defines the /finalize in_rotation refusal by the release\'s rotation rows (BS#2804)', () => {
+        const rule =
+          'while the item\'s release has a rotation row, found by `album_id` and not by `rotation_id`, whose `kill_date` is null or after today (station date)';
+        const text = flat(operation('/intake/{id}/finalize', 'post').description);
+        expect(text).toContain(rule);
+        expect(text).toContain('the message names the latest kill date, or says that no kill date is set');
+        expect(flat(operation('/intake/{id}/finalize', 'post').responses?.['409']?.description)).toContain(
+          'rotation row whose kill date is null or after today (station date)',
+        );
+        const reason = flat((spec.components.schemas.IntakeConflictReason as { description?: string }).description);
+        expect(reason).toContain('(found by `album_id`, not by `rotation_id`) whose `kill_date` is null or after today, station date');
+        expect(reason).toContain('names the latest kill date, or says that no kill date is set');
       });
 
       it.each(['file', 'finalize'])('takes the shared IntakeId parameter on %s', (action) => {
