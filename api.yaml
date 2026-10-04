@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.10.0
+  version: 10.11.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -12480,6 +12480,231 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: "`already_filed`"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeConflictError'
+
+  /intake/{id}/checkout:
+    parameters:
+      - $ref: '#/components/parameters/IntakeId'
+    post:
+      x-wxyc-service: backend-service
+      summary: Check an intake item out
+      description: >
+        A DJ takes the item from the pool to review it. Grant: `reviews: write`.
+        Delivered by WXYC/Backend-Service#2798.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: write` permission'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: "`state_changed`: the item is not in a state that allows this transition"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeConflictError'
+
+  /intake/{id}/release:
+    parameters:
+      - $ref: '#/components/parameters/IntakeId'
+    post:
+      x-wxyc-service: backend-service
+      summary: Release a checked-out intake item
+      description: >
+        Returns a checked-out item to the pool. Grant: `reviews: manage`, or the
+        DJ holding the item. A caller who is neither gets a 403. Delivered by
+        WXYC/Backend-Service#2798.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller holds neither the item nor `reviews: manage`'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: "`state_changed`: the item is not in a state that allows this transition"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeConflictError'
+
+  /intake/{id}/request:
+    parameters:
+      - $ref: '#/components/parameters/IntakeId'
+    post:
+      x-wxyc-service: backend-service
+      summary: Ask a DJ to review an intake item
+      description: >
+        A music director asks a named DJ (`dj_id`) to review the item, moving it
+        to `requested`. Grant: `reviews: manage`. Delivered by
+        WXYC/Backend-Service#2798.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - dj_id
+              properties:
+                dj_id:
+                  type: string
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: manage` permission'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: "`state_changed`: the item is not in a state that allows this transition"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeConflictError'
+
+  /intake/{id}/cancel-request:
+    parameters:
+      - $ref: '#/components/parameters/IntakeId'
+    post:
+      x-wxyc-service: backend-service
+      summary: Withdraw a review request
+      description: >
+        Returns a `requested` item to the pool. Grant: `reviews: manage`.
+        Delivered by WXYC/Backend-Service#2798.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: manage` permission'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: "`state_changed`: the item is not in a state that allows this transition"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeConflictError'
+
+  /intake/{id}/accept:
+    parameters:
+      - $ref: '#/components/parameters/IntakeId'
+    post:
+      x-wxyc-service: backend-service
+      summary: Accept a review request
+      description: >
+        The requested DJ accepts, checking the item out to themself. Grant: the
+        requested DJ only; any other caller gets a 403. Delivered by
+        WXYC/Backend-Service#2798.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller is not the requested DJ'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: "`state_changed`: the item is not in a state that allows this transition"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeConflictError'
+
+  /intake/{id}/pass:
+    parameters:
+      - $ref: '#/components/parameters/IntakeId'
+    post:
+      x-wxyc-service: backend-service
+      summary: Pass on a review request
+      description: >
+        The requested DJ declines, returning the item to the pool and recording a
+        pass. Grant: the requested DJ only; any other caller gets a 403.
+        Delivered by WXYC/Backend-Service#2798.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller is not the requested DJ'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: "`state_changed`: the item is not in a state that allows this transition"
           content:
             application/json:
               schema:
