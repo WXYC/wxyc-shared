@@ -3906,8 +3906,8 @@ describe('OpenAPI Specification', () => {
       ['/intake/{id}/release', 'Grant: `reviews: manage`, or the DJ holding the item.', '#2798'],
       ['/intake/{id}/request', 'reviews: manage', '#2798'],
       ['/intake/{id}/cancel-request', 'reviews: manage', '#2798'],
-      ['/intake/{id}/accept', 'Grant: the requested DJ only.', '#2798'],
-      ['/intake/{id}/pass', 'Grant: the requested DJ only.', '#2798'],
+      ['/intake/{id}/accept', 'Grant: `reviews: write`, and only the requested DJ.', '#2798'],
+      ['/intake/{id}/pass', 'Grant: `reviews: write`, and only the requested DJ.', '#2798'],
     ])('declares post %s with its grant (%s) and delivering issue (%s)', (path, grant, issue) => {
       const o = op(path, 'post');
       expect(o['x-wxyc-service']).toBe('backend-service');
@@ -3927,17 +3927,21 @@ describe('OpenAPI Specification', () => {
       },
     );
 
-    // 403 only in the state the action needs, else 409 state_changed (BS#2798)
+    // Precedence (BS#2798, ADR 0006): no `reviews` grant is a 403 in any state; then a wrong
+    // effective state is a 409; then a caller who is not the holder / requested DJ is a 403.
     it.each([
-      ['release', 'Caller holds neither the item nor `reviews: manage`, and the item is in effective state `checked_out`.'],
-      ['accept', 'Caller is not the requested DJ, and the item is in effective state `requested`.'],
-      ['pass', 'Caller is not the requested DJ, and the item is in effective state `requested`.'],
-    ])('scopes the %s 403 to the right effective state and sends other states to 409', (action, who) => {
+      ['release', '`checked_out`', 'a caller who is neither the holder nor a `reviews: manage` holder gets a 403.', 'Caller has no `reviews` grant at the level this route requires, in any state; or the item is in effective state `checked_out` and the caller is neither the holder nor a `reviews: manage` holder.'],
+      ['accept', '`requested`', 'a caller who is not the requested DJ gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` and the caller is not the requested DJ.'],
+      ['pass', '`requested`', 'a caller who is not the requested DJ gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` and the caller is not the requested DJ.'],
+    ])('states the %s 403/409 precedence in the description and the 403 response', (action, state, who, forbiddenText) => {
       const o = op(`/intake/{id}/${action}`, 'post');
+      const text = squash(o.description);
+      expect(text).toContain('Precedence: a caller without the `reviews` grant the route requires gets a 403 in any state;');
+      expect(text).toContain(`otherwise an item not in effective state ${state} answers 409 \`state_changed\`; otherwise ${who}`);
+      expect(text).not.toContain('whoever calls');
       const forbidden = squash(o.responses?.['403']?.description);
-      expect(forbidden).toContain(who);
-      expect(forbidden).toContain('any other effective state answers 409 `state_changed`');
-      expect(squash(o.description)).toContain('whoever calls');
+      expect(forbidden).toContain(forbiddenText);
+      expect(forbidden).toContain(`Otherwise an item not in effective state ${state} answers 409 \`state_changed\` instead`);
     });
 
     it('takes dj_id as the /request body', () => {
@@ -3951,7 +3955,7 @@ describe('OpenAPI Specification', () => {
       const text = squash(props?.dj_id?.description);
       expect(text).toContain('`auth_user.id`');
       expect(text).toContain('`IntakeItem.requested_dj_id`');
-      expect(text).toContain('not the integer legacy DJ id');
+      expect(text).not.toContain('legacy');
     });
 
     it('declares a 400 referencing ApiErrorResponse for a bad /request body', () => {

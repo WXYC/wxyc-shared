@@ -12528,10 +12528,11 @@ paths:
       summary: Release a checked-out intake item
       description: >
         Returns a checked-out item to the pool. Grant: `reviews: manage`, or the
-        DJ holding the item. A caller with neither gets a 403 only when the
-        item is in effective state `checked_out` (held by someone else); an
-        item in any other effective state, a filed item included, answers 409
-        `state_changed` whoever calls. Delivered by WXYC/Backend-Service#2798.
+        DJ holding the item. Precedence: a caller without the `reviews` grant
+        the route requires gets a 403 in any state; otherwise an item not in
+        effective state `checked_out` answers 409 `state_changed`; otherwise a
+        caller who is neither the holder nor a `reviews: manage` holder gets a
+        403. Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
       responses:
@@ -12545,9 +12546,11 @@ paths:
           description: No bearer token
         '403':
           description: >-
-            Caller holds neither the item nor `reviews: manage`, and the item is
-            in effective state `checked_out`. An item in any other effective
-            state answers 409 `state_changed` instead
+            Caller has no `reviews` grant at the level this route requires,
+            in any state; or the item is in effective state `checked_out`
+            and the caller is neither the holder nor a `reviews: manage`
+            holder. Otherwise an item not in effective state `checked_out`
+            answers 409 `state_changed` instead
         '404':
           description: No such intake item
           content:
@@ -12585,9 +12588,8 @@ paths:
                 dj_id:
                   type: string
                   description: >
-                    The requested DJ's account id, the `auth_user.id` that is
-                    stored as `IntakeItem.requested_dj_id`. It is a string, not
-                    the integer legacy DJ id that other `dj_id` fields carry.
+                    The requested DJ's account id: the `auth_user.id` that is
+                    stored as `IntakeItem.requested_dj_id`. It is a string.
       responses:
         '200':
           description: The updated item
@@ -12660,12 +12662,12 @@ paths:
       x-wxyc-service: backend-service
       summary: Accept a review request
       description: >
-        The requested DJ accepts, checking the item out to themself. Grant: the
-        requested DJ only. A caller who is not the requested DJ gets a 403 only
-        when the item is in effective state `requested` (asked of someone
-        else); an item in any other effective state, an expired request or a
-        filed item included, answers 409 `state_changed` whoever calls.
-        Delivered by WXYC/Backend-Service#2798.
+        The requested DJ accepts, checking the item out to themself. Grant:
+        `reviews: write`, and only the requested DJ. Precedence: a caller
+        without the `reviews` grant the route requires gets a 403 in any state;
+        otherwise an item not in effective state `requested` answers 409
+        `state_changed`; otherwise a caller who is not the requested DJ gets a
+        403. Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
       responses:
@@ -12679,9 +12681,10 @@ paths:
           description: No bearer token
         '403':
           description: >-
-            Caller is not the requested DJ, and the item is in effective state
-            `requested`. An item in any other effective state answers 409
-            `state_changed` instead
+            Caller lacks the `reviews: write` grant, in any state; or the
+            item is in effective state `requested` and the caller is not the
+            requested DJ. Otherwise an item not in effective state
+            `requested` answers 409 `state_changed` instead
         '404':
           description: No such intake item
           content:
@@ -12702,12 +12705,12 @@ paths:
       x-wxyc-service: backend-service
       summary: Pass on a review request
       description: >
-        The requested DJ declines, returning the item to the pool and recording a
-        pass. Grant: the requested DJ only. A caller who is not the requested DJ
-        gets a 403 only when the item is in effective state `requested` (asked
-        of someone else); an item in any other effective state, an expired
-        request or a filed item included, answers 409 `state_changed` whoever
-        calls. Delivered by WXYC/Backend-Service#2798.
+        The requested DJ declines, returning the item to the pool and recording
+        a pass. Grant: `reviews: write`, and only the requested DJ. Precedence:
+        a caller without the `reviews` grant the route requires gets a 403 in
+        any state; otherwise an item not in effective state `requested` answers
+        409 `state_changed`; otherwise a caller who is not the requested DJ gets
+        a 403. Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
       responses:
@@ -12721,9 +12724,10 @@ paths:
           description: No bearer token
         '403':
           description: >-
-            Caller is not the requested DJ, and the item is in effective state
-            `requested`. An item in any other effective state answers 409
-            `state_changed` instead
+            Caller lacks the `reviews: write` grant, in any state; or the
+            item is in effective state `requested` and the caller is not the
+            requested DJ. Otherwise an item not in effective state
+            `requested` answers 409 `state_changed` instead
         '404':
           description: No such intake item
           content:
