@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.14.0
+  version: 10.15.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -5151,7 +5151,7 @@ components:
             Plays naming the release only by a bare
             `flowsheet.legacy_release_id`, awaiting
             `jobs/legacy-linkage-resolve`. Deleting STRANDS whatever is
-            still in this arm at delete time permanently rather than
+            still in this arm at delete time (unless the batch is restored) rather than
             unlinking it — see the schema description above for why
             this is exactly the count that must never be folded into a
             total.
@@ -5265,8 +5265,11 @@ components:
             its captured id (a deleted artist, or a removed `auth_user`
             referenced by `digital_asset.ripped_by`), so a `true` batch can
             be listed with a live Restore that will never succeed. `false`
-            is the hard guarantee: the endpoint refuses every such batch with
-            `409 unrestorable_kind` before any row lock or write.
+            for an unrestorable KIND is the hard guarantee: the endpoint
+            refuses every such batch with `409 unrestorable_kind` before any
+            row lock or write. A batch that reads `false` because its
+            envelope is missing its row passes that check, takes the lock,
+            and answers 500.
         captured_at:
           type: string
           format: date-time
@@ -5377,20 +5380,14 @@ components:
           description: >
             The departures from the snapshot in this entity's replay, one
             `RestoreDeviation` per nulled reference or dropped child row.
-            Lands ahead of WXYC/Backend-Service#2818, which populates it
-            (empty when nothing departed). Until that deploys the 200
-            carries no `deviations`, and a captured child whose
-            `ON DELETE CASCADE` target is gone fails the restore with a
-            500 rather than being dropped; a consumer must tolerate its
-            absence.
+            Always present on the 200 (empty when nothing departed).
 
     RestoreDeviationKind:
       type: string
       enum: [nulled, dropped]
       description: >
         `nulled`: a nullable `ON DELETE SET NULL` reference whose target
-        was deleted after the batch came back NULL. `dropped`: once
-        WXYC/Backend-Service#2818 deploys, a captured child row whose
+        was deleted after the batch came back NULL. `dropped`: a captured child row whose
         `ON DELETE CASCADE` target is neither live nor restored by this
         batch is left out of the replay. Named rather than left as an
         inline enum on `RestoreDeviation.kind` so the Python generator
@@ -5651,10 +5648,7 @@ components:
         back, so it is permanent short of an operator re-inserting that
         row: an `artist` batch is refused as `unrestorable_kind`, a
         re-created artist gets a new id, and a removed `auth_user` is
-        not re-issued its id. Contract ahead of
-        WXYC/Backend-Service#2818: until that deploys the server never
-        sends this body and the same case is an unexplained 500, so a
-        consumer must tolerate its absence. Carries ids only, never
+        not re-issued its id. Carries ids only, never
         names, as `RestoreDeviation` does.
       required:
         - message
@@ -14753,7 +14747,7 @@ paths:
         rotation entry (`flowsheet.rotation_id` -> `rotation.album_id`)
         just loses its link; a play linked only by a bare
         `flowsheet.legacy_release_id` awaiting the linkage-resolve cron
-        is stranded permanently, since the delete-denylist means no
+        is stranded unless the batch is restored, since the delete-denylist means no
         future library row will ever carry that legacy id for the
         resolver to join to. `GET /library/{id}/flowsheet-play-counts`
         is the pre-delete read that surfaces this to the librarian
@@ -14931,8 +14925,7 @@ paths:
       description: >
         WXYC/Backend-Service#2585. Restores a `catalog_delete_snapshot`
         batch: the parent row plus its captured children, re-inserted
-        under their ORIGINAL primary keys inside one transaction. Once
-        WXYC/Backend-Service#2818 deploys (see below), a captured child
+        under their ORIGINAL primary keys inside one transaction. A captured child
         whose `ON DELETE CASCADE` target is neither live nor restored by
         this batch is left out of the replay and reported rather than
         re-inserted.
@@ -14965,7 +14958,7 @@ paths:
         **Five things a restore does not put back**, and a client
         presenting it as undone should say so:
 
-        - archived flowsheet plays do not re-link to the restored release;
+        - plays linked only through `album_id`/`rotation_id` do not come back; tubafrenzy-era plays carrying `flowsheet.legacy_release_id` are re-linked by `jobs/legacy-linkage-resolve` within about 30 minutes, not by the restore itself;
 
         - the five excluded dependents above stay excluded;
 
@@ -14976,7 +14969,7 @@ paths:
         - a captured child row whose `ON DELETE CASCADE` target is gone is left out of the replay, because the delete it would have cascaded from already happened. For example, a release that sat in a DJ's bin restores without the bin row after that DJ's account was removed. Each one is reported in `entities[].deviations` as a `dropped` `RestoreDeviation` and is not counted in `entities[].children`.
 
 
-        `entities[].deviations` lands ahead of WXYC/Backend-Service#2818, which populates it. Until that deploys the 200 carries no `deviations`, and a captured child whose `ON DELETE CASCADE` target is gone fails the restore with a 500 rather than being dropped.
+        `entities[].deviations` is always present on the 200, empty when nothing departed.
 
 
         Restoring into a taken call code ASKS rather than silently
@@ -15085,9 +15078,7 @@ paths:
             so it is permanent short of an operator re-inserting that
             row, as for a deleted artist (an `artist` batch is refused as
             `unrestorable_kind`, and a re-created artist gets a new id) or
-            a removed `auth_user`. Contract ahead of
-            WXYC/Backend-Service#2818: until that deploys, the same case
-            is a 500, so a consumer must tolerate its absence.
+            a removed `auth_user`.
           content:
             application/json:
               schema:
