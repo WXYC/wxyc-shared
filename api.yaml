@@ -4406,7 +4406,11 @@ components:
         review:
           type: string
           nullable: true
-          description: May be empty for a handwritten review, or for one whose OCR text is still pending.
+          description: >
+            `null`, never an empty string: a blank value is stored as `null`.
+            `null` for a draft with no text yet, for a handwritten review, or
+            for one whose OCR text is still pending. A `typed` review cannot be
+            submitted while this is `null`.
         recommended_tracks:
           type: string
           nullable: true
@@ -4491,6 +4495,99 @@ components:
         fcc:
           type: string
           nullable: true
+
+    ReviewFields:
+      type: object
+      description: >
+        The fields of the station's printed slip, plus publishing consent,
+        shared by `NewReviewRequest` and `ReviewPatch`. None is required. An
+        empty text field is `null`, never `""`: a blank or whitespace-only
+        value is stored and returned as `null`. A draft may be saved with
+        every text field `null`; submitting is where `review` text is
+        required (see `POST /reviews/{id}/submit`).
+      properties:
+        buzzwords:
+          type: string
+          nullable: true
+        artist_blurb:
+          type: string
+          nullable: true
+        review:
+          type: string
+          nullable: true
+        recommended_tracks:
+          type: string
+          nullable: true
+        fcc:
+          type: string
+          nullable: true
+          description: FCC notes. Never published outside the station.
+        publish_website:
+          type: boolean
+        publish_apps:
+          type: boolean
+        publish_instagram:
+          type: boolean
+        credit:
+          allOf:
+            - $ref: '#/components/schemas/ReviewCredit'
+          nullable: true
+          description: How the author asks to be credited. `null` clears the choice.
+
+    NewReviewRequest:
+      allOf:
+        - $ref: '#/components/schemas/ReviewFields'
+        - type: object
+          properties:
+            intake_item_id:
+              type: integer
+            album_id:
+              type: integer
+            author:
+              type: string
+              maxLength: 128
+              description: >
+                Only a caller with `reviews: manage` may send this. The
+                reviewer's name as typed, free text (see `Review.author`).
+            medium:
+              $ref: '#/components/schemas/ReviewMedium'
+      description: >
+        Creates a draft. Send exactly one of `intake_item_id` and `album_id`.
+        A caller with `reviews: manage` may also send `author` and `medium`,
+        which makes it an on-behalf review: the account fields stay empty and
+        the caller is recorded as the one who recorded it. A `handwritten`
+        review is recorded the same way. Without them, the review is the
+        caller's own, `typed`, and credited to their display name.
+
+    ReviewPatch:
+      allOf:
+        - $ref: '#/components/schemas/ReviewFields'
+      description: Any subset of the `ReviewFields`. A key left out is unchanged; a text field or `credit` sent as `null` is cleared.
+
+    ReviewConflictReason:
+      type: string
+      enum: [locked, not_draft, subject_not_held, last_review]
+      description: >
+        Discriminator for the review 409s, pairing with `ReviewConflictError`
+        the way `IntakeConflictReason` pairs with `IntakeConflictError`.
+        `locked`: the item's slip is printed, so only a music director may
+        edit or delete the review. `not_draft`: the review is already
+        submitted (submitting twice). `subject_not_held`: the subject is
+        neither an intake item nor a library release. `last_review`: deleting
+        the last submitted review of a filed intake item that has no
+        citation, which would leave a post-cutover release with no review.
+
+    ReviewConflictError:
+      type: object
+      description: The review 409 body, following `IntakeConflictError`.
+      required:
+        - message
+        - reason
+      properties:
+        message:
+          type: string
+        reason:
+          $ref: '#/components/schemas/ReviewConflictReason'
 
     # Legacy rotation schema (for backward compatibility with existing endpoints)
     Rotation:
@@ -13486,6 +13583,46 @@ paths:
           description: No bearer token
         '403':
           description: 'Caller lacks the `reviews: read` permission'
+    post:
+      x-wxyc-service: backend-service
+      summary: Create a review draft
+      description: >
+        Grant: `reviews: write` for your own review, `reviews: manage` to
+        write on behalf of someone, or to record a handwritten review. Creates
+        a draft; see `NewReviewRequest`. Delivered by
+        WXYC/Backend-Service#2802 (the on-behalf and handwritten shape:
+        WXYC/Backend-Service#2805).
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewReviewRequest'
+      responses:
+        '200':
+          description: The new draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '400':
+          description: Validation failure, including both or neither of `intake_item_id` and `album_id`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the grant for what was asked: `reviews: write`, or `reviews: manage` for `author`, `medium` or a handwritten review'
+        '409':
+          description: "`subject_not_held`"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewConflictError'
 
   /reviews/{id}:
     parameters:
@@ -13516,6 +13653,131 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+    patch:
+      x-wxyc-service: backend-service
+      summary: Edit a review
+      description: >
+        Grant: `reviews: write`, or `reviews: manage` for any review.
+        Who may do this: the author while a draft, or submitted and not yet
+        printed; for a library-release review, the author always;
+        `reviews: manage` always. A draft the caller may not see is a 404.
+        Delivered by WXYC/Backend-Service#2802.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewPatch'
+      responses:
+        '200':
+          description: The updated review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '400':
+          description: Validation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks `reviews: write`, or may not edit this review'
+        '404':
+          description: No such review, or a draft the caller may not see
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: "`locked`"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewConflictError'
+    delete:
+      x-wxyc-service: backend-service
+      summary: Delete a review
+      description: >
+        Grant: `reviews: write`, or `reviews: manage` for any review.
+        Who may do this: the author while a draft, or submitted and not yet
+        printed; for a library-release review, the author always;
+        `reviews: manage` always. A draft the caller may not see is a 404.
+        Refused with `last_review` when it is the last submitted review of a
+        filed intake item that has no citation. Delivered by
+        WXYC/Backend-Service#2802.
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Deleted; no body
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks `reviews: write`, or may not delete this review'
+        '404':
+          description: No such review, or a draft the caller may not see
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: "`locked` or `last_review`"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewConflictError'
+
+  /reviews/{id}/submit:
+    parameters:
+      - $ref: '#/components/parameters/ReviewId'
+    post:
+      x-wxyc-service: backend-service
+      summary: Submit a draft review
+      description: >
+        Grant: `reviews: write`, or `reviews: manage` for any review.
+        Who may do this: the author while a draft, or submitted and not yet
+        printed; for a library-release review, the author always;
+        `reviews: manage` always. A draft the caller may not see is a 404.
+        Submitting an intake review notifies the music directors; a
+        library-release review notifies nobody. A `typed` review needs
+        non-null `review` text; a handwritten review may be submitted with no
+        text. Delivered by WXYC/Backend-Service#2802.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The submitted review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '400':
+          description: A `typed` review with a `null` `review`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks `reviews: write`, or may not submit this review'
+        '404':
+          description: No such review, or a draft the caller may not see
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: "`not_draft`"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewConflictError'
 
   /library/query:
     get:

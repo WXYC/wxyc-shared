@@ -8867,6 +8867,8 @@ describe('OpenAPI Specification', () => {
       expect(String(schema('ReviewMedium').description)).not.toMatch(/differ|author_user_id/);
       expect(String(schema('ReviewMedium').description)).toMatch(/`handwritten`\s+review\s+with\s+no\s+text/);
       expect(String(review.properties?.review?.description)).toMatch(/handwritten\s+review,\s+or\s+for\s+one\s+whose\s+OCR\s+text\s+is\s+still\s+pending/);
+      expect(String(review.properties?.review?.description)).toMatch(/`null`,\s+never\s+an\s+empty\s+string/);
+      expect(String(review.properties?.review?.description)).not.toMatch(/May be empty/);
       expect(String(review.properties?.author?.description)).toMatch(/may be a real\s+name/);
       expect(String(review.properties?.author?.description)).toMatch(/not guaranteed PII-free/);
       expect(String(review.properties?.author?.description)).toMatch(/client\s+telemetry/);
@@ -9150,5 +9152,134 @@ describe('OpenAPI Specification', () => {
         expect(propertyOf('AlbumCreateFields', field)?.maxLength).toBe(128);
       }
     );
+  });
+
+  describe('In-app review write paths (WXYC/Backend-Service#2791 slice 2b, #554)', () => {
+    type Schema = {
+      description?: string;
+      enum?: string[];
+      required?: string[];
+      allOf?: Array<Record<string, unknown>>;
+      properties?: Record<string, Record<string, unknown>>;
+    };
+    const schema = (name: string) => spec.components.schemas[name] as Schema;
+    const requestSchema = (path: string, method: string) =>
+      operation(path, method).requestBody?.content?.['application/json']?.schema;
+
+    it('declares ReviewFields as the nine editable fields, all optional, text and credit nullable', () => {
+      const fields = schema('ReviewFields');
+      expect(Object.keys(fields.properties ?? {}).sort()).toEqual([
+        'artist_blurb', 'buzzwords', 'credit', 'fcc', 'publish_apps', 'publish_instagram',
+        'publish_website', 'recommended_tracks', 'review',
+      ]);
+      expect(fields.required ?? []).toEqual([]);
+      for (const key of ['buzzwords', 'artist_blurb', 'review', 'recommended_tracks', 'fcc', 'credit']) {
+        expect(fields.properties?.[key]?.nullable, `${key} nullable`).toBe(true);
+      }
+      for (const key of ['publish_website', 'publish_apps', 'publish_instagram']) {
+        expect(fields.properties?.[key]).toMatchObject({ type: 'boolean' });
+      }
+      expect(fields.properties?.credit).toMatchObject({ allOf: [ref('ReviewCredit')] });
+      expect(flat(fields.description)).toMatch(/empty text field is `null`, never `""`: a blank or whitespace-only value is stored and returned as `null`/);
+      expect(flat(fields.description)).toMatch(/draft may be saved with every text field `null`/);
+    });
+
+    it('builds NewReviewRequest over ReviewFields with the subject, author and medium', () => {
+      const request = schema('NewReviewRequest');
+      expect(request.allOf?.[0]).toEqual(ref('ReviewFields'));
+      const own = request.allOf?.[1] as Schema;
+      expect(Object.keys(own.properties ?? {}).sort()).toEqual(['album_id', 'author', 'intake_item_id', 'medium']);
+      expect(own.required ?? []).toEqual([]);
+      expect(own.properties?.medium).toEqual(ref('ReviewMedium'));
+      expect(own.properties?.author).toMatchObject({ type: 'string', maxLength: 128 });
+      expect(flat(request.description)).toMatch(/exactly one of `intake_item_id` and `album_id`/);
+      expect(flat(request.description)).toMatch(/`reviews: manage`[^.]*`author`[^.]*`medium`/);
+      expect(flat(request.description)).toMatch(/on-behalf review/);
+      expect(flat(request.description)).toMatch(/`handwritten`/);
+    });
+
+    it('builds ReviewPatch over ReviewFields alone', () => {
+      expect(schema('ReviewPatch').allOf).toEqual([ref('ReviewFields')]);
+    });
+
+    it('declares the conflict reasons and the 409 body', () => {
+      expect(schema('ReviewConflictReason').enum).toEqual(['locked', 'not_draft', 'subject_not_held', 'last_review']);
+      const error = schema('ReviewConflictError');
+      expect(error.required).toEqual(['message', 'reason']);
+      expect(error.properties?.reason).toEqual(ref('ReviewConflictReason'));
+      const reasons = flat(schema('ReviewConflictReason').description);
+      for (const reason of ['locked', 'not_draft', 'subject_not_held', 'last_review']) {
+        expect(reasons).toContain(`\`${reason}\``);
+      }
+    });
+
+    it.each([
+      ['post', '/reviews', 'reviews: write'],
+      ['patch', '/reviews/{id}', 'reviews: write'],
+      ['post', '/reviews/{id}/submit', 'reviews: write'],
+      ['delete', '/reviews/{id}', 'reviews: write'],
+    ])('declares %s %s with its grant (%s) and delivering issue', (method, path, grant) => {
+      expectBackendRoute(path, method, { grant, issue: 'WXYC/Backend-Service#2802' });
+      expect(flat(operation(path, method).description)).toContain('`reviews: manage`');
+    });
+
+    it('declares /reviews/{id}/submit with the shared ReviewId path parameter', () => {
+      const pathItem = (spec.paths as Record<string, { parameters?: unknown[] }>)['/reviews/{id}/submit']!;
+      expect(pathItem.parameters).toContainEqual({ $ref: '#/components/parameters/ReviewId' });
+    });
+
+    it('takes the request bodies from the review schemas and returns Review', () => {
+      expect(requestSchema('/reviews', 'post')).toEqual(ref('NewReviewRequest'));
+      expect(requestSchema('/reviews/{id}', 'patch')).toEqual(ref('ReviewPatch'));
+      expect(responseSchema('/reviews', 'post', '200')).toEqual(ref('Review'));
+      expect(responseSchema('/reviews/{id}', 'patch', '200')).toEqual(ref('Review'));
+      expect(responseSchema('/reviews/{id}/submit', 'post', '200')).toEqual(ref('Review'));
+      expect(operation('/reviews/{id}', 'delete').responses?.['204']).toBeDefined();
+    });
+
+    it.each([
+      ['post', '/reviews', ['400', '401', '403', '409']],
+      ['patch', '/reviews/{id}', ['400', '401', '403', '404', '409']],
+      ['post', '/reviews/{id}/submit', ['400', '401', '403', '404', '409']],
+      ['delete', '/reviews/{id}', ['401', '403', '404', '409']],
+    ])('declares the refusals of %s %s', (method, path, statuses) => {
+      expect(Object.keys(operation(path, method).responses ?? {}).sort()).toEqual(
+        ['200', '204'].filter((s) => s in (operation(path, method).responses ?? {})).concat(statuses).sort()
+      );
+      expect(responseSchema(path, method, '409')).toEqual(ref('ReviewConflictError'));
+      if (statuses.includes('404')) expect(responseSchema(path, method, '404')).toEqual(ref('ApiErrorResponse'));
+    });
+
+    it('names the conflict reasons each route can raise', () => {
+      const conflict = (path: string, method: string) => flat(operation(path, method).responses?.['409']?.description);
+      expect(conflict('/reviews', 'post')).toContain('`subject_not_held`');
+      expect(conflict('/reviews/{id}', 'patch')).toContain('`locked`');
+      expect(conflict('/reviews/{id}/submit', 'post')).toContain('`not_draft`');
+      expect(conflict('/reviews/{id}', 'delete')).toContain('`locked`');
+      expect(conflict('/reviews/{id}', 'delete')).toContain('`last_review`');
+    });
+
+    it('states the draft-visibility 404 and the editing rules on the write paths', () => {
+      for (const [path, method] of [['/reviews/{id}', 'patch'], ['/reviews/{id}/submit', 'post'], ['/reviews/{id}', 'delete']]) {
+        expect(flat(operation(path!, method!).description), `${method} ${path}`).toMatch(/draft[^.]*404|404[^.]*draft/);
+        expect(flat(operation(path!, method!).description), `${method} ${path}`).toMatch(/the author while a draft/);
+        expect(flat(operation(path!, method!).description), `${method} ${path}`).toMatch(/for a library-release review, the author always/);
+      }
+    });
+
+    it('declares the submit 400 for a typed review with no review text, and the notification rule', () => {
+      const submit = operation('/reviews/{id}/submit', 'post');
+      expect(flat(submit.responses?.['400']?.description)).toMatch(/`typed` review with a `null` `review`/);
+      expect(flat(submit.description)).toMatch(/handwritten review may be submitted with no text/);
+      expect(flat(submit.description)).toMatch(/intake review notifies the music directors/);
+      expect(flat(submit.description)).toMatch(/library-release review notifies nobody/);
+    });
+
+    it('states how POST /reviews handles on-behalf and handwritten reviews', () => {
+      const description = flat(operation('/reviews', 'post').description);
+      expect(description).toMatch(/`reviews: write` for your own review/);
+      expect(description).toMatch(/`reviews: manage` to write on behalf of someone, or to record a handwritten review/);
+      expect(description).toMatch(/creates a draft/i);
+    });
   });
 });
