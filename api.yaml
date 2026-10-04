@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.12.0
+  version: 10.13.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -82,6 +82,13 @@ components:
       schema:
         type: integer
       description: The intake item's id.
+    ReviewId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: The review's id.
 
   schemas:
     # ===================
@@ -4147,6 +4154,115 @@ components:
             station or for client telemetry (analytics properties, error
             breadcrumbs, logs).
 
+    ReviewMedium:
+      type: string
+      enum: [typed, handwritten, printed]
+      description: How the review was written; `handwritten` and `printed` are entered on the author's behalf.
+
+    ReviewStatus:
+      type: string
+      enum: [draft, submitted]
+
+    ReviewCredit:
+      type: string
+      enum: [dj_name, real_name, none]
+      description: How the author asked to be credited if the review is ever published.
+
+    Review:
+      type: object
+      description: >
+        An in-app DJ album review, the station's printed slip plus publishing
+        consent. Attached to an intake item or to a library release (at least
+        one of `intake_item_id` and `album_id` is set). FCC notes (`fcc`) are
+        never published outside the station. In v1 the service stores consent
+        (`publish_*`, `credit`) and publishes nothing.
+      required:
+        - id
+        - album_id
+        - intake_item_id
+        - author
+        - author_user_id
+        - recorded_by_user_id
+        - medium
+        - status
+        - buzzwords
+        - artist_blurb
+        - review
+        - recommended_tracks
+        - fcc
+        - publish_website
+        - publish_apps
+        - publish_instagram
+        - credit
+        - add_date
+        - submitted_at
+        - last_modified
+        - locked
+      properties:
+        id:
+          type: integer
+        album_id:
+          type: integer
+          nullable: true
+        intake_item_id:
+          type: integer
+          nullable: true
+        author:
+          type: string
+          maxLength: 128
+          description: >
+            For an account holder, a snapshot of their display name; for an
+            on-behalf review, what the music director typed.
+        author_user_id:
+          type: string
+          nullable: true
+        recorded_by_user_id:
+          type: string
+          nullable: true
+        medium:
+          $ref: '#/components/schemas/ReviewMedium'
+        status:
+          $ref: '#/components/schemas/ReviewStatus'
+        buzzwords:
+          type: string
+          nullable: true
+        artist_blurb:
+          type: string
+          nullable: true
+        review:
+          type: string
+          nullable: true
+          description: May be empty for a handwritten review.
+        recommended_tracks:
+          type: string
+          nullable: true
+        fcc:
+          type: string
+          nullable: true
+        publish_website:
+          type: boolean
+        publish_apps:
+          type: boolean
+        publish_instagram:
+          type: boolean
+        credit:
+          allOf:
+            - $ref: '#/components/schemas/ReviewCredit'
+          nullable: true
+        add_date:
+          type: string
+          format: date-time
+        submitted_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_modified:
+          type: string
+          format: date-time
+        locked:
+          type: boolean
+          description: Computed. The item's slip has been printed, so only music directors may edit.
+
     # Legacy rotation schema (for backward compatibility with existing endpoints)
     Rotation:
       type: object
@@ -6265,9 +6381,9 @@ components:
         Distinct from ADR 0006's in-app Review model (one-per-album,
         author-owned, `/reviews`): submissions here are append-only, may
         number several per album, and identify albums by free text with a
-        best-effort `album_id` link. Reviewer identity is deliberately not
-        exposed — the form promised reviewers their names would not be
-        shared.
+        best-effort `album_id` link. The reviewer's name is withheld by this
+        endpoint today. The station allows reviewer names inside the station
+        (dj-site, the DJ apps); they are never shown outside it.
       required:
         - id
         - album_id
@@ -12809,6 +12925,124 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntakeConflictError'
+
+  /album-reviews:
+    get:
+      x-wxyc-service: backend-service
+      summary: List archived Google Form album reviews
+      description: >
+        Grant: `album_reviews: read`. Ordered by `submitted_at` descending.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: album_id
+          in: query
+          schema:
+            type: integer
+        - name: artist
+          in: query
+          schema:
+            type: string
+        - name: page
+          description: Page number (1-indexed).
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: A page of reviews
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlbumReviewsResponse'
+        '400':
+          description: '`page`, `limit`, `album_id` or `artist` is invalid'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `album_reviews: read` permission'
+
+  /reviews:
+    get:
+      x-wxyc-service: backend-service
+      summary: List in-app reviews
+      description: >
+        Grant: `reviews: read`. Filter by `album_id`, `intake_item_id` or
+        `mine=true`. A draft is visible only to its author and to whoever
+        recorded it; lists omit everyone else's drafts. An album's list
+        includes reviews reached through an intake item's `cited_album_id`:
+        the intake review first, then newest. The `intake_item_id` list is
+        what the music director reads before filing.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: album_id
+          in: query
+          schema:
+            type: integer
+        - name: intake_item_id
+          in: query
+          schema:
+            type: integer
+        - name: mine
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: The visible reviews
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Review'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: read` permission'
+
+  /reviews/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ReviewId'
+    get:
+      x-wxyc-service: backend-service
+      summary: Get one review
+      description: >
+        Grant: `reviews: read`. A draft is visible only to its author and to
+        whoever recorded it; to anyone else this is a 404.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: read` permission'
+        '404':
+          description: No such review, or a draft the caller may not see
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /library/query:
     get:
