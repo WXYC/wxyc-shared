@@ -2944,9 +2944,10 @@ components:
       type: object
       description: >
         Every `AddAlbumRequest` field except the artist ones (`artist_name`,
-        `artist_id`) — extracted so `POST /library/filings` (#454) can
-        compose it with a top-level `artist` block without also accepting a
-        second, conflicting artist reference nested inside `release`.
+        `artist_id`) and `from_rotation_id`, which belongs to `POST /library`
+        alone — extracted so `POST /library/filings` (#454) can compose it
+        with a top-level `artist` block without also accepting a second,
+        conflicting artist reference nested inside `release`.
 
         At least one of `label` or `label_id` must be provided (BS#2410; the
         rotation-import plan's D5). With `label_id` alone, Backend resolves
@@ -3017,17 +3018,23 @@ components:
           type: string
           maxLength: 128
           description: >
-            varchar(128); over 128 code points is a 400.
+            varchar(128). On `POST /library`, over 128 code points is a 400.
+            `POST /library/filings` does not read this field from `release`, so
+            there it is accepted and stored as nothing whatever its length;
+            the bound is declared on the shared schema, not enforced by that
+            endpoint.
 
     AddAlbumRequest:
       description: >
-        `AlbumCreateFields` plus the artist reference pair. The label rule
-        travels with it: at least one of `label` or `label_id` must be
-        provided, or the request is a 400 (BS#2410) — restated here, not
-        only on `AlbumCreateFields`, because the Swift and Kotlin
-        generators flatten `allOf` into a standalone type whose doc comment
-        is this description, leaving no link to the composed schema's own
-        text. See `AlbumCreateFields` for the full `label`/`label_id`
+        `AlbumCreateFields` plus the artist reference pair and
+        `from_rotation_id`, the import link that only `POST /library`
+        accepts. The label rule travels with it: at least one of `label` or
+        `label_id` must be provided, or the request is a 400 (BS#2410) —
+        restated here, not only on `AlbumCreateFields`, because the Swift
+        and Kotlin generators flatten `allOf` into a standalone type whose
+        doc comment is this description, leaving no link to the composed
+        schema's own text. See `AlbumCreateFields` for the full
+        `label`/`label_id`
         resolution semantics (which value wins for the denormalized
         `library.label` column, dangling-`label_id` handling).
       allOf:
@@ -3045,10 +3052,18 @@ components:
                 before the cutover date (or moved from one that was). This
                 request creates the release for that row and links it in the
                 same transaction, so the import is one request rather than
-                `POST /library` then `PATCH /library/rotation/{id}/link`, and
+                `POST /library` then
+                `PATCH /library/rotation/{rotation_id}/link`, and
                 cannot be replayed to mint more library rows. Omit it for an
-                ordinary add. A row that is linked, killed, or not legacy is a
-                409 `rotation_not_eligible`.
+                ordinary add. A row that is linked or not legacy is a 409
+                `rotation_not_eligible`; a killed row is importable, since
+                killed rows are most of the import queue. Declared ahead of
+                the Backend-Service implementation
+                (WXYC/Backend-Service#2810): the deployed backend silently
+                drops this key and answers 201 without linking the row, so a
+                client must not rely on the link, or drop its
+                `PATCH /library/rotation/{rotation_id}/link` request, until
+                that lands.
 
     Label:
       type: object
@@ -3622,9 +3637,16 @@ components:
       description: >
         The typed-text arm of `POST /library/rotation`: a rotation row for a
         record not yet in the library, identified by `artist_name` and
-        `album_title` instead of `album_id`. Backend-Service has always
-        accepted this shape. After the cutover date it is accepted only with
-        `moved_from_rotation_id`, and only when that source row is legacy.
+        `album_title` instead of `album_id`. Backend-Service has accepted this
+        shape since WXYC/Backend-Service#2109, which relaxed
+        WXYC/Backend-Service#1380's `album_id` requirement. After the cutover
+        date it is accepted only with `moved_from_rotation_id`, and only when
+        that source row is legacy. Mutually exclusive with
+        `AddRotationRequest`: a body that carries `album_id` is not this arm
+        (see `AddRotationBody`).
+      not:
+        required:
+          - album_id
       allOf:
         - $ref: '#/components/schemas/RotationCreateFields'
         - type: object
@@ -3634,10 +3656,22 @@ components:
           properties:
             artist_name:
               type: string
+              maxLength: 128
+              description: >
+                `rotation.artist_name`, varchar(128); over 128 code points is
+                a 400.
             album_title:
               type: string
+              maxLength: 128
+              description: >
+                `rotation.album_title`, varchar(128); over 128 code points is
+                a 400.
             record_label:
               type: string
+              maxLength: 128
+              description: >
+                `rotation.record_label`, varchar(128); over 128 code points
+                is a 400.
             format_id:
               type: integer
             label_id:
@@ -3647,17 +3681,34 @@ components:
               description: >
                 The unlinked rotation row this one replaces in a cross-bin
                 move; Backend-Service kills it in the same transaction. The
-                source must be a typed-text row added on or before the cutover
-                date, or moved from one; otherwise the request is a 409
-                `rotation_not_eligible`.
+                source must be an active typed-text row (`kill_date` null or
+                in the future) added on or before the cutover date, or moved
+                from one; otherwise the request is a 409
+                `rotation_not_eligible`. Declared ahead of the
+                Backend-Service implementation (WXYC/Backend-Service#2810):
+                the deployed backend silently drops this key, so the new row
+                is added and the source row is left active in its old bin. A
+                client must not rely on the kill until that lands.
 
     AddRotationBody:
       description: >
         The `POST /library/rotation` request body: `AddRotationRequest` when
         `album_id` names a release already in the library,
         `AddRotationTypedTextRequest` when the record is identified by typed
-        text. Not discriminated — the arms are told apart by `album_id`
-        (required on the first, absent on the second).
+        text. Not discriminated, and the arms are disjoint by one rule: the
+        presence of `album_id` selects the album arm. The typed-text arm
+        carries `not: {required: [album_id]}`, so a body with an `album_id`
+        plus typed-text fields matches only the album arm, and a body
+        without `album_id` matches only the typed-text arm; without that
+        rule a body carrying both would match both arms and be invalid under
+        `oneOf`. Backend-Service treats an explicit `album_id: null` as
+        absent, but this contract does not admit it: omit the key. The
+        `not` rule is documentation the pipeline does not enforce. The
+        Kotlin generator collapses the union into one `AddRotationBody`
+        class with `albumId`, `artistName` and `albumTitle` all required, so
+        a Kotlin client cannot send the typed-text arm; no Kotlin client
+        calls this route today (Android and the DJ apps do not add rotation
+        rows).
       oneOf:
         - $ref: '#/components/schemas/AddRotationRequest'
         - $ref: '#/components/schemas/AddRotationTypedTextRequest'
@@ -3798,11 +3849,11 @@ components:
         `artist_name_conflict` are the exact strings the deployed
         `POST /library/artists` controller already answers with — the
         composite reuses that create path; `rotation_card_bin_mismatch` is
-        defined ahead of the Backend-Service implementation for the
-        rotation arm's card-bin invariant, the same string
+        the rotation arm's card-bin invariant, the same string
         `RotationConflictReason` declares for the direct
         `POST /library/rotation` and `DELETE /library/rotation/cards/{id}`
-        409s (WXYC/Backend-Service#2472, inherited by the composite per
+        409s (WXYC/Backend-Service#2472, delivered by
+        WXYC/Backend-Service#2482 and inherited by the composite per
         WXYC/Backend-Service#2474) — pinned equal by a spec test rather than
         composed, since OpenAPI enums do not merge cleanly across two
         purpose-built discriminators. `review_required` fires after the
@@ -3814,10 +3865,15 @@ components:
       description: >
         Discriminator for the `POST /library` 409. `review_required` fires
         after the cutover date for any insert not made through `POST
-        /intake/{id}/file`. `rotation_not_eligible` fires when
-        `from_rotation_id` names a row that is linked, killed, or not legacy —
-        neither added on or before the cutover date nor moved from a row that
-        was.
+        /intake/{id}/file`, except a `POST /library` whose `from_rotation_id`
+        names an eligible legacy row, which is accepted after the cutover
+        date. Both values are declared ahead of the Backend-Service
+        implementation (WXYC/Backend-Service#2791's review gate and
+        WXYC/Backend-Service#2810). `rotation_not_eligible` fires when
+        `from_rotation_id` names a
+        row that is linked or not legacy — neither added on or before the
+        cutover date nor moved from a row that was. A killed row is
+        importable.
 
     LibraryAddConflictError:
       type: object
@@ -3840,23 +3896,26 @@ components:
         the way `ShowAlreadyOpenErrorCode` pairs with `ShowAlreadyOpenError`.
         `rotation_card_bin_mismatch` is the single source of truth for the
         identically-named value `LibraryFilingConflictReason` carries for
-        the composite's rotation arm — see that schema's description. The
-        other two distinguish the card-delete guard's conjunctive halves: a
-        sibling card with a higher `number` (`card_not_highest_in_bin`) vs.
-        an active rotation row still assigned to this card
-        (`card_has_active_rotations`). All three values are declared ahead
-        of the Backend-Service implementation (WXYC/Backend-Service#2472,
-        delivered by its open PR WXYC/Backend-Service#2482): the deployed
-        backend has no rotation-card code path yet, so no endpoint raises
-        them today — each endpoint's 409 states what the deployed behavior
-        is meanwhile. `review_required` and `rotation_not_eligible` are raised
-        only by `POST /library/rotation`, never by the card delete.
-        `review_required` fires after the cutover date for any insert not made
-        through `POST /intake/{id}/file`, except re-rotating a release already
-        in the library. `rotation_not_eligible` fires on a move whose
+        the composite's rotation arm — see that schema's description.
+        `card_not_highest_in_bin` and `card_has_active_rotations`
+        distinguish the card-delete guard's conjunctive halves: a sibling
+        card with a higher `number` vs. an active rotation row still
+        assigned to this card. The three card values shipped with
+        WXYC/Backend-Service#2472 (delivered by WXYC/Backend-Service#2482,
+        merged 2026-09-14), which `POST /library/rotation` and `DELETE
+        /library/rotation/cards/{id}` now raise. `review_required` and
+        `rotation_not_eligible` are raised only by `POST /library/rotation`,
+        never by the card delete, and are declared ahead of the
+        Backend-Service implementation (WXYC/Backend-Service#2791's review
+        gate and WXYC/Backend-Service#2810). `review_required` fires after
+        the cutover date for any insert not made through `POST
+        /intake/{id}/file`, except re-rotating a release already in the
+        library and a typed-text add whose `moved_from_rotation_id` names an
+        eligible legacy row, which is accepted after the cutover date.
+        `rotation_not_eligible` fires on a move whose
         `moved_from_rotation_id` row is linked, killed, or not legacy —
         neither added on or before the cutover date nor moved from a row that
-        was.
+        was. A killed row is not an eligible move source.
 
     RotationConflictError:
       type: object
@@ -12611,9 +12670,13 @@ paths:
                 $ref: '#/components/schemas/Album'
         '409':
           description: >
-            `review_required` after the cutover date (no review basis), or
-            `rotation_not_eligible` when `from_rotation_id` names a row that
-            is linked, killed, or not legacy. See `LibraryAddConflictReason`.
+            `review_required` after the cutover date (no review basis, and no
+            eligible `from_rotation_id`), or `rotation_not_eligible` when
+            `from_rotation_id` names a row that is linked or not legacy; a
+            killed row is importable. Both are declared ahead of the
+            Backend-Service implementation (WXYC/Backend-Service#2791's
+            review gate and WXYC/Backend-Service#2810). See
+            `LibraryAddConflictReason`.
           content:
             application/json:
               schema:
@@ -12655,7 +12718,8 @@ paths:
           description: >
             A conflict from one of the composed writes, discriminated by
             `reason`. `review_required` after the cutover date, since a
-            filing is an insert not made through `POST /intake/{id}/file`. The artist create arm answers exactly as the deployed
+            filing is an insert not made through `POST /intake/{id}/file`.
+            The artist create arm answers exactly as the deployed
             `POST /library/artists` does: `artist_code_conflict` when the
             `(code_letters, genre_id, code_number)` triple is already taken
             (pick another code), `artist_name_conflict` when a genre-scoped
@@ -13890,18 +13954,15 @@ paths:
         '409':
           description: >
             `review_required` (after the cutover date, an insert not made
-            through `POST /intake/{id}/file` and not a re-rotation of a
-            release already in the library), `rotation_not_eligible` (the
-            `moved_from_rotation_id` row is linked, killed, or not legacy), or
+            through `POST /intake/{id}/file`, not a re-rotation of a release
+            already in the library, and not a typed-text add whose
+            `moved_from_rotation_id` names an eligible legacy row),
+            `rotation_not_eligible` (the `moved_from_rotation_id` row is
+            linked, killed, or not legacy; both are declared ahead of the
+            Backend-Service implementation, WXYC/Backend-Service#2810), or
             `rotation_card_bin_mismatch`: `card_id` names a card in a bin
-            other than `rotation_bin`
-            (WXYC/Backend-Service#2472). Declared ahead of the
-            Backend-Service implementation: the deployed endpoint's field
-            allowlist silently drops `card_id` and answers 200 with the
-            rotation filed to no card. #2472's open PR
-            (WXYC/Backend-Service#2482) delivers both `card_id` acceptance
-            and this 409, so a client must not rely on either until that
-            PR merges.
+            other than `rotation_bin` (WXYC/Backend-Service#2472, delivered
+            by WXYC/Backend-Service#2482).
           content:
             application/json:
               schema:
@@ -14176,11 +14237,9 @@ paths:
             rotation still on this card (`card_has_active_rotations`) — is
             refused with this status, discriminated by `reason`. Bins
             therefore shrink only from the top, which is what keeps
-            `RotationCard.number` contiguous 1..N. Declared ahead of the
-            Backend-Service implementation (WXYC/Backend-Service#2472,
-            delivered by its open PR WXYC/Backend-Service#2482): the
-            deployed backend registers no rotation-card routes yet, so
-            today this request 404s before any guard runs.
+            `RotationCard.number` contiguous 1..N. Delivered by
+            WXYC/Backend-Service#2472 (WXYC/Backend-Service#2482, merged
+            2026-09-14).
           content:
             application/json:
               schema:

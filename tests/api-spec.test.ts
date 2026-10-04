@@ -3507,7 +3507,7 @@ describe('OpenAPI Specification', () => {
       );
     });
 
-    it('recomposes AddAlbumRequest via allOf[AlbumCreateFields, artist fields] with an unchanged effective shape', () => {
+    it('recomposes AddAlbumRequest via allOf[AlbumCreateFields, artist and import-link fields]', () => {
       const schema = spec.components.schemas.AddAlbumRequest as { allOf?: Array<{ $ref?: string }> };
       expect(schema.allOf?.[0]?.$ref).toBe('#/components/schemas/AlbumCreateFields');
       // Closed-set equality, not a subset check: an added or dropped
@@ -8959,6 +8959,9 @@ describe('OpenAPI Specification', () => {
 
   describe('review-required contract (#539)', () => {
     const schema = (name: string) => spec.components.schemas[name] as Record<string, unknown> & { description?: string };
+    const conflict409 = (path: string) => flat(operation(path, 'post').responses?.['409']?.description);
+    const propText = (name: string, field: string) =>
+      flat(propertyOf(name, field)?.description as string | undefined);
     const conflictEnum = (name: string) => (schema(name) as { enum?: string[] }).enum;
 
     it('declares from_rotation_id on AddAlbumRequest as an optional integer', () => {
@@ -8983,12 +8986,151 @@ describe('OpenAPI Specification', () => {
       }
     });
 
-    it.each([
-      ['LibraryAddConflictReason', ['review_required', 'rotation_not_eligible']],
-      ['LibraryFilingConflictReason', ['review_required']],
-      ['RotationConflictReason', ['review_required', 'rotation_not_eligible']],
-    ])('%s carries the new conflict values', (name, added) => {
-      expect(conflictEnum(name)).toEqual(expect.arrayContaining(added));
+    it('makes the AddRotationBody arms disjoint on album_id, the IntakeItemPatch `not` idiom', () => {
+      // Without the rule, a body carrying both an album_id and the typed-text
+      // pair matches both arms and is invalid under oneOf, though
+      // Backend-Service accepts it as the album arm. No `kind`: the backend
+      // never reads one and deployed clients do not send one.
+      type Node = { required?: string[]; not?: Node; allOf?: Node[]; $ref?: string };
+      const resolve = (n: Node): Node => (n.$ref ? resolve(schema(n.$ref.split('/').pop()!) as Node) : n);
+      // Whether a body with these keys satisfies the arm's required/not structure.
+      const matches = (n: Node, keys: string[]): boolean => {
+        const node = resolve(n);
+        return (
+          (node.required ?? []).every((k) => keys.includes(k)) &&
+          (node.not ? !matches(node.not, keys) : true) &&
+          (node.allOf ?? []).every((child) => matches(child, keys))
+        );
+      };
+      const arms = (schema('AddRotationBody') as { oneOf: Node[] }).oneOf;
+      expect(arms.map((a) => a.$ref)).toEqual([
+        '#/components/schemas/AddRotationRequest',
+        '#/components/schemas/AddRotationTypedTextRequest',
+      ]);
+      expect((schema('AddRotationBody') as { discriminator?: unknown }).discriminator).toBeUndefined();
+      expect((schema('AddRotationTypedTextRequest') as Node).not).toEqual({ required: ['album_id'] });
+      const typed = ['rotation_bin', 'artist_name', 'album_title'];
+      // album_id plus typed-text fields: the album arm only.
+      expect(arms.map((arm) => matches(arm, ['album_id', ...typed]))).toEqual([true, false]);
+      // no album_id: the typed-text arm only.
+      expect(arms.map((arm) => matches(arm, typed))).toEqual([false, true]);
+      expect(arms.map((arm) => matches(arm, ['rotation_bin', 'album_id']))).toEqual([true, false]);
+      const text = flat(schema('AddRotationBody').description);
+      expect(text).toMatch(/presence of `album_id` selects the album arm/);
+      expect(text).toMatch(/explicit `album_id: null` as absent, but this contract does not admit it/);
+      expect(text).toMatch(/Kotlin generator collapses the union/);
+      expect(propertyOf('AddRotationTypedTextRequest', 'kind')).toBeUndefined();
+    });
+
+    it.each(['artist_name', 'album_title', 'record_label'])(
+      'bounds AddRotationTypedTextRequest.%s at 128 code points, matching rotation varchar(128)',
+      (field) => {
+        const prop = propertyOf('AddRotationTypedTextRequest', field);
+        expect(prop?.maxLength).toBe(128);
+        expect(flat(prop?.description as string | undefined)).toMatch(/over 128 code points is a 400/);
+      }
+    );
+
+    it('dates the typed-text arm from WXYC/Backend-Service#2109, not "always"', () => {
+      const text = flat(schema('AddRotationTypedTextRequest').description);
+      expect(text).toMatch(/since WXYC\/Backend-Service#2109/);
+      expect(text).not.toMatch(/has always accepted/);
+    });
+
+    it.each(['AddAlbumRequest', 'AlbumCreateFields'])(
+      '%s description names from_rotation_id instead of claiming only the artist fields differ',
+      (name) => {
+        expect(flat(schema(name).description)).toMatch(/`from_rotation_id`/);
+      }
+    );
+
+    it('hedges from_rotation_id and moved_from_rotation_id on WXYC/Backend-Service#2810', () => {
+      for (const [name, field] of [
+        ['AddAlbumRequest', 'from_rotation_id'],
+        ['AddRotationTypedTextRequest', 'moved_from_rotation_id'],
+      ] as const) {
+        const text = propText(name, field);
+        expect(text).toMatch(/Declared ahead of the Backend-Service implementation \(WXYC\/Backend-Service#2810\)/);
+        expect(text).toMatch(/silently drops this key/);
+      }
+    });
+
+    it('lets a killed row be imported but not moved, wherever the 409 is described', () => {
+      const importText = propText('AddAlbumRequest', 'from_rotation_id');
+      expect(importText).toMatch(/linked or not legacy is a 409 `rotation_not_eligible`/);
+      expect(importText).toMatch(/killed row is importable/);
+      expect(flat(schema('LibraryAddConflictReason').description)).toMatch(/linked or not legacy.*A killed row is importable/);
+      expect(flat(schema('LibraryAddConflictReason').description)).not.toMatch(/linked, killed/);
+      expect(conflict409('/library')).toMatch(/linked or not legacy; a killed row is importable/);
+      expect(conflict409('/library')).not.toMatch(/linked, killed/);
+      expect(propText('AddRotationTypedTextRequest', 'moved_from_rotation_id')).toMatch(/active typed-text row \(`kill_date` null or in the future\)/);
+      expect(flat(schema('RotationConflictReason').description)).toMatch(/linked, killed, or not legacy/);
+    });
+
+    it('states the legacy exceptions to review_required on every 409 that declares it', () => {
+      expect(flat(schema('LibraryAddConflictReason').description)).toMatch(
+        /except a `POST \/library` whose `from_rotation_id` names an eligible legacy row, which is accepted after the cutover date/
+      );
+      expect(flat(schema('RotationConflictReason').description)).toMatch(
+        /a typed-text add whose `moved_from_rotation_id` names an eligible legacy row, which is accepted after the cutover date/
+      );
+      expect(conflict409('/library/rotation')).toMatch(
+        /not a typed-text add whose `moved_from_rotation_id` names an eligible legacy row/
+      );
+      expect(conflict409('/library')).toMatch(/no eligible `from_rotation_id`/);
+    });
+
+    it('retires the stale "declared ahead" hedge on the card-bin 409 now that WXYC/Backend-Service#2482 has merged', () => {
+      const reason = flat(schema('RotationConflictReason').description);
+      expect(reason).not.toMatch(/All three values|no endpoint raises them today|The other two/);
+      expect(reason).toMatch(/merged 2026-09-14/);
+      const rotation409 = conflict409('/library/rotation');
+      expect(rotation409).not.toMatch(/must not rely on either until that PR merges/);
+      expect(rotation409).toMatch(/delivered by WXYC\/Backend-Service#2482/);
+    });
+
+    it('retires the stale card-delete and filings hedges now that WXYC/Backend-Service#2482 has merged', () => {
+      const del409 = flat(operation('/library/rotation/cards/{id}', 'delete').responses?.['409']?.description);
+      expect(del409).not.toMatch(/open PR|404s|Declared ahead/);
+      expect(del409).toMatch(/Delivered by WXYC\/Backend-Service#2472 \(WXYC\/Backend-Service#2482, merged 2026-09-14\)/);
+      const filings = flat(schema('LibraryFilingConflictReason').description);
+      expect(filings).not.toMatch(/defined ahead/);
+      expect(filings).toMatch(/delivered by WXYC\/Backend-Service#2482/);
+    });
+
+    it('hedges the POST /library 409 values on the unshipped gate and WXYC/Backend-Service#2810', () => {
+      for (const text of [
+        flat(schema('LibraryAddConflictReason').description),
+        conflict409('/library'),
+      ]) {
+        expect(text).toMatch(/declared ahead of the Backend-Service implementation \(WXYC\/Backend-Service#2791's review gate and WXYC\/Backend-Service#2810\)/);
+      }
+      expect(propText('AddAlbumRequest', 'from_rotation_id')).toMatch(/answers 201 without linking the row/);
+    });
+
+    it('names the link route by its real path parameter, {rotation_id}', () => {
+      expect(propText('AddAlbumRequest', 'from_rotation_id')).not.toMatch(/rotation\/\{id\}\/link/);
+      expect(propText('AddAlbumRequest', 'from_rotation_id')).toMatch(/PATCH \/library\/rotation\/\{rotation_id\}\/link/);
+    });
+
+    it('scopes the album_artist 400 to POST /library, since POST /library/filings never reads it', () => {
+      const text = propText('AlbumCreateFields', 'album_artist');
+      expect(text).toMatch(/On `POST \/library`, over 128 code points is a 400/);
+      expect(text).toMatch(/`POST \/library\/filings` does not read this field/);
+    });
+
+    it('closes LibraryAddConflictReason and LibraryFilingConflictReason like their sibling enums', () => {
+      expect(conflictEnum('LibraryAddConflictReason')).toEqual(['review_required', 'rotation_not_eligible']);
+      expect(conflictEnum('LibraryFilingConflictReason')).toEqual(
+        expect.arrayContaining(['review_required'])
+      );
+      expect(conflictEnum('RotationConflictReason')).toEqual(
+        expect.arrayContaining(['review_required', 'rotation_not_eligible'])
+      );
+    });
+
+    it('requires message and reason on LibraryAddConflictError', () => {
+      expect(requiredKeysOf('LibraryAddConflictError')).toEqual(['message', 'reason']);
     });
 
     it('declares the POST /library 409 with LibraryAddConflictError', () => {
