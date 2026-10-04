@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.13.0');
+      expect(spec.info.version).toBe('10.14.0');
     });
 
     it('should have components section', () => {
@@ -3984,6 +3984,56 @@ describe('OpenAPI Specification', () => {
 
     it('declares a 400 referencing ApiErrorResponse for a bad /request body', () => {
       expect(responseSchema('/intake/{id}/request', 'post', '400')).toEqual(ref('ApiErrorResponse'));
+    });
+
+    it('declares post /intake/{id}/print with its grant, delivering issue and IntakeId', () => {
+      expectBackendRoute('/intake/{id}/print', 'post', { grant: 'Grant: `reviews: manage`.', issue: '#2804' });
+      expect(
+        (spec.paths as Record<string, { parameters?: unknown[] }>)['/intake/{id}/print']?.parameters,
+      ).toContainEqual({ $ref: '#/components/parameters/IntakeId' });
+    });
+
+    it('states what print stamps and which review prints', () => {
+      const text = flat(operation('/intake/{id}/print', 'post').description);
+      expect(text).toContain('`printed_at` and `printed_by`');
+      expect(text).toContain('reprint');
+      expect(text).toContain('earliest submitted typed review');
+    });
+
+    it('returns an IntakeSlip and declares 401, 403, 404 and a 409 IntakeConflictError from print', () => {
+      const o = operation('/intake/{id}/print', 'post');
+      expect(responseSchema('/intake/{id}/print', 'post', '200')).toEqual(ref('IntakeSlip'));
+      expect(responseSchema('/intake/{id}/print', 'post', '404')).toEqual(ref('ApiErrorResponse'));
+      expect(responseSchema('/intake/{id}/print', 'post', '409')).toEqual(ref('IntakeConflictError'));
+      expect(o.responses?.['401']).toBeDefined();
+      expect(o.responses?.['403']).toBeDefined();
+    });
+
+    it('reaches not_reviewed and state_changed from print without adding a reason', () => {
+      const text = flat(operation('/intake/{id}/print', 'post').responses?.['409']?.description);
+      expect(text).toContain('`not_reviewed`');
+      expect(text).toContain('`state_changed`');
+      const reasons = (spec.components.schemas.IntakeConflictReason as { enum?: string[] }).enum;
+      expect(reasons).toContain('not_reviewed');
+      expect(reasons).toHaveLength(5);
+    });
+
+    it('shapes IntakeSlip from the item and the printed review, nullable as Review is', () => {
+      const slip = spec.components.schemas.IntakeSlip as {
+        required?: string[];
+        properties?: Record<string, { nullable?: boolean; type?: string; format?: string }>;
+      };
+      const fields = ['artist_name', 'album_title', 'record_label', 'buzzwords', 'artist_blurb', 'review', 'author', 'submitted_at', 'recommended_tracks', 'fcc'];
+      expect(Object.keys(slip.properties ?? {}).sort()).toEqual([...fields].sort());
+      expect([...(slip.required ?? [])].sort()).toEqual([...fields].sort());
+      const review = spec.components.schemas.Review as { properties: Record<string, { nullable?: boolean }> };
+      for (const f of fields.slice(3)) {
+        expect(slip.properties?.[f]?.nullable, f).toBe(review.properties[f]?.nullable);
+      }
+      expect(slip.properties?.record_label?.nullable).toBe(true);
+      expect(slip.properties?.artist_name?.nullable).toBeUndefined();
+      expect(slip.properties?.album_title?.nullable).toBeUndefined();
+      expect(slip.properties?.submitted_at).toMatchObject({ type: 'string', format: 'date-time' });
     });
 
     it('words invalid_citation per the inclusive "submitted review" rule', () => {
