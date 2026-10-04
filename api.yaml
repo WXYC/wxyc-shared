@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 10.11.0
+  version: 10.12.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -5049,8 +5049,10 @@ components:
         restorable:
           type: boolean
           description: >
-            Whether `POST /library/deleted/{batchId}/restore` can EVER bring
-            this batch back (WXYC/Backend-Service#2616), computed off the same
+            Whether this batch's kind and captured envelope allow a
+            `POST /library/deleted/{batchId}/restore` attempt
+            (WXYC/Backend-Service#2616), not whether an attempt can succeed.
+            It is computed off the same
             restore-plan set the restore's `409 unrestorable_kind` refusal
             reads, so the two cannot drift.
 
@@ -5077,8 +5079,14 @@ components:
             answer `already_restored`, `resolution_required` (a shelf-slot
             conflict a client must resolve), `lock_unavailable`, or
             `missing_reference` (a restored row's `NO ACTION` reference
-            to a row deleted since). `false` is
-            the hard guarantee: the endpoint refuses every such batch with
+            to a row deleted since). `already_restored` is terminal (the
+            batch is back); `resolution_required` and `lock_unavailable`
+            clear on a retry; `missing_reference` is PERMANENT today,
+            because no declared endpoint puts the missing row back under
+            its captured id (a deleted artist, or a removed `auth_user`
+            referenced by `digital_asset.ripped_by`), so a `true` batch can
+            be listed with a live Restore that will never succeed. `false`
+            is the hard guarantee: the endpoint refuses every such batch with
             `409 unrestorable_kind` before any row lock or write.
         captured_at:
           type: string
@@ -5460,12 +5468,11 @@ components:
         first missing reference the restore finds, so a retry can name
         another. Nothing was written and the snapshot is untouched. The
         refusal clears only once a row with `captured_value`'s id exists
-        again in `target_table`, for example by first restoring the batch
-        that deleted it, where that batch is itself restorable. Where the
-        row cannot come back under that id the refusal is permanent: an
-        `artist` batch is refused as `unrestorable_kind`, and a
-        re-created artist gets a new id. Backend-Service#2818 names no
-        operator remedy for that case. Contract ahead of
+        again in `target_table`, and today no declared endpoint puts one
+        back, so it is permanent short of an operator re-inserting that
+        row: an `artist` batch is refused as `unrestorable_kind`, a
+        re-created artist gets a new id, and a removed `auth_user` is
+        not re-issued its id. Contract ahead of
         WXYC/Backend-Service#2818: until that deploys the server never
         sends this body and the same case is an unexplained 500, so a
         consumer must tolerate its absence. Carries ids only, never
@@ -14726,11 +14733,11 @@ paths:
             restore finds, so a retry can name another; nothing was
             written and the snapshot is untouched. It clears only once a
             row with `captured_value`'s id exists again in
-            `target_table`, for example by first restoring the batch that
-            deleted it. Where it cannot come back under that id the
-            refusal is permanent, as for a deleted artist: an `artist`
-            batch is refused as `unrestorable_kind`, and a re-created
-            artist gets a new id. Contract ahead of
+            `target_table`, and today no declared endpoint puts one back,
+            so it is permanent short of an operator re-inserting that
+            row, as for a deleted artist (an `artist` batch is refused as
+            `unrestorable_kind`, and a re-created artist gets a new id) or
+            a removed `auth_user`. Contract ahead of
             WXYC/Backend-Service#2818: until that deploys, the same case
             is a 500, so a consumer must tolerate its absence.
           content:

@@ -171,7 +171,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('10.11.0');
+      expect(spec.info.version).toBe('10.12.0');
     });
 
     it('should have components section', () => {
@@ -7669,7 +7669,9 @@ describe('OpenAPI Specification', () => {
         it('says what clears it, and that it is permanent where the row cannot return under its id', () => {
           const clause = missingReferenceClause();
           expect(clause).toContain("It clears only once a row with `captured_value`'s id exists again in `target_table`");
-          expect(clause).toContain('the refusal is permanent, as for a deleted artist');
+          expect(clause).toContain('so it is permanent short of an operator re-inserting that row, as for a deleted artist');
+          expect(clause).toContain('or a removed `auth_user`');
+          expect(clause).not.toMatch(/restoring the batch that deleted it/i);
           expect(clause).toContain('a re-created artist gets a new id');
           expect(clause).not.toMatch(/restore or re-create/i);
         });
@@ -8084,6 +8086,16 @@ describe('OpenAPI Specification', () => {
         for (const outcome of ['already_restored', 'resolution_required', 'lock_unavailable', 'missing_reference']) {
           expect(description).toContain(`\`${outcome}\``);
         }
+
+        // `true` means the kind and envelope allow an attempt, not that one can
+        // succeed: missing_reference is permanent for a deleted artist or a
+        // removed auth_user, so "can EVER bring this batch back" is false.
+        const flat = description.replace(/\s+/g, ' ');
+        expect(flat).toContain("allow a `POST /library/deleted/{batchId}/restore` attempt");
+        expect(flat).not.toMatch(/can EVER bring/);
+        expect(flat).toContain('`missing_reference` is PERMANENT today');
+        expect(flat).toContain('a removed `auth_user` referenced by `digital_asset.ripped_by`');
+        expect(flat).toContain('`already_restored` is terminal');
       });
     });
 
@@ -8150,7 +8162,12 @@ describe('OpenAPI Specification', () => {
         expect(description).toContain('first missing reference the restore finds, so a retry can name another');
         expect(description).toContain('Nothing was written and the snapshot is untouched.');
         expect(description).toContain("The refusal clears only once a row with `captured_value`'s id exists again in `target_table`");
-        expect(description).toContain('the refusal is permanent');
+        expect(description).toContain('so it is permanent short of an operator re-inserting that row');
+        expect(description).toContain('a removed `auth_user` is not re-issued its id');
+        expect(description).not.toMatch(/NOT NULL/);
+        expect(description).not.toMatch(/names no operator remedy/i);
+        expect(description).not.toMatch(/restoring the batch that deleted it/i);
+        expect(description).toContain('Carries ids only, never names, as `RestoreDeviation` does.');
         expect(description).toContain('Contract ahead of WXYC/Backend-Service#2818');
         expect(description).toContain('the same case is an unexplained 500, so a consumer must tolerate its absence');
         expect(description).not.toMatch(/restore or re-create/i);
