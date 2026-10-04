@@ -84,8 +84,8 @@ components:
         minimum: 1
         maximum: 2147483647
       description: >-
-        The intake item's id. Must be a positive int4; a non-digit, zero or
-        larger value is a 400.
+        The intake item's id. Must be a positive int4; a non-digit value, zero,
+        or a value past 2147483647 is a 400.
     ReviewId:
       name: id
       in: path
@@ -4119,9 +4119,11 @@ components:
         catalogued on the cutover date counts as before it), or a cited form
         submission dated, in station time, after the cutover date
         (WXYC/Backend-Service#2797). `already_filed`: delete or patch after
-        filing. `in_rotation`: finalize of a filed item whose rotation row's
-        kill date has not yet passed (WXYC/Backend-Service#2804); the item
-        stays `filed`, and the message names the kill date.
+        filing. `in_rotation`: finalize of a filed item while its release has a
+        rotation row (found by `album_id`, not by `rotation_id`) whose
+        `kill_date` is null or after today, station date
+        (WXYC/Backend-Service#2804); the item stays `filed`, and the message
+        names the latest kill date, or says that no kill date is set.
 
     IntakeConflictError:
       type: object
@@ -13094,15 +13096,18 @@ paths:
       x-wxyc-service: backend-service
       summary: File an intake item into the catalog
       description: >
-        Files a reviewed item, either as a new release (`kind: new_release`,
+        Files an item that has a submitted review (effective state `reviewed`)
+        or a valid citation; a cited item may still be in `pool`. An item with
+        neither is 409 `not_reviewed`, and an item already filed is 409
+        `state_changed`. Files either as a new release (`kind: new_release`,
         the `POST /library/filings` payload) or against a release already in
-        the library (`kind: existing_release`). Grant: `reviews: manage`
-        **and** `catalog:write`. Returns the item with `album_id` (and
-        `rotation_id` when the new release entered rotation). The 409 is an
-        `IntakeConflictError` (`state_changed`, `not_reviewed`,
-        `invalid_citation`), or a `LibraryFilingConflictError` when the
-        new-release arm collides with the catalog. Delivered by
-        WXYC/Backend-Service#2803.
+        the library (`kind: existing_release`); an `existing_release`
+        `album_id` that names no library release is a 400, not a 404. Grant:
+        `reviews: manage` **and** `catalog: write`. Returns the item with
+        `album_id` (and `rotation_id` when the new release entered rotation).
+        The 409 is an `IntakeConflictError` (`state_changed`, `not_reviewed`),
+        or a `LibraryFilingConflictError` when the new-release arm collides
+        with the catalog. Delivered by WXYC/Backend-Service#2803.
       security:
         - BearerAuth: []
       requestBody:
@@ -13119,7 +13124,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
         '400':
-          description: A malformed id, or a body that fails validation
+          description: >-
+            A malformed id, or a body that fails validation, including an
+            `existing_release` `album_id` that names no library release
           content:
             application/json:
               schema:
@@ -13127,7 +13134,7 @@ paths:
         '401':
           description: No bearer token
         '403':
-          description: 'Caller lacks `reviews: manage` or `catalog:write`'
+          description: 'Caller lacks the `reviews: manage` or `catalog: write` permission'
         '404':
           description: No such intake item
           content:
@@ -13136,8 +13143,10 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: >
-            An `IntakeConflictError`, or a `LibraryFilingConflictError` when
-            the new-release arm collides with the catalog
+            An `IntakeConflictError` (`not_reviewed`: the item has neither a
+            submitted review nor a valid citation; `state_changed`: the item is
+            already filed), or a `LibraryFilingConflictError` when the
+            new-release arm collides with the catalog
           content:
             application/json:
               schema:
@@ -13152,10 +13161,12 @@ paths:
       x-wxyc-service: backend-service
       summary: Mark a filed intake item shelved
       description: >
-        Marks a filed item shelved. Grant: `catalog:write`. Call-number
-        changes go through `PATCH /library/{id}` first. Refused for a rotation
-        item until its kill date has passed: 409 `in_rotation`, the item stays
-        `filed`, and the message names the kill date. Delivered by
+        Marks a filed item shelved. Grant: `catalog: write`. Call-number
+        changes go through `PATCH /library/{id}` first. Refused with 409
+        `in_rotation` while the item's release has a rotation row, found by
+        `album_id` and not by `rotation_id`, whose `kill_date` is null or after
+        today (station date); the item stays `filed`, and the message names the
+        latest kill date, or says that no kill date is set. Delivered by
         WXYC/Backend-Service#2804.
       security:
         - BearerAuth: []
@@ -13175,7 +13186,7 @@ paths:
         '401':
           description: No bearer token
         '403':
-          description: 'Caller lacks the `catalog:write` permission'
+          description: 'Caller lacks the `catalog: write` permission'
         '404':
           description: No such intake item
           content:
@@ -13183,7 +13194,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
-          description: "`state_changed`, or `in_rotation` while the kill date has not passed"
+          description: >-
+            `state_changed`, or `in_rotation` while the item's release has a
+            rotation row whose kill date is null or after today (station date)
           content:
             application/json:
               schema:
