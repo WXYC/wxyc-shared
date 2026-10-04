@@ -7785,7 +7785,7 @@ describe('OpenAPI Specification', () => {
         expect(flat(String(operation('/library/{id}', 'delete').description))).toContain('stranded unless the batch is restored');
         expect(flat(String(propertyOf('FlowsheetPlayCounts', 'legacy_linked')?.description))).toContain('(unless the batch is restored)');
         const restorable = flat(String(propertyOf('CatalogDeleteBatch', 'restorable')?.description));
-        expect(restorable).not.toContain('is the hard guarantee');
+        expect(restorable).toContain('for an unrestorable KIND is the hard guarantee');
         expect(restorable).toContain('answers 500');
       });
 
