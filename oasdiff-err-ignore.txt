@@ -38,36 +38,3 @@
 # claiming a count is wrong the moment someone appends an entry below it, and no
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
-
-# wxyc-shared#539 (info.version 11.0.0, a planned major). Scoped to exactly
-# these findings; each is intentional and rides this one release.
-#
-# Enum additions to the 409 `reason` of POST /library/filings, POST
-# /library/rotation, and DELETE /library/rotation/cards/{id} (the last because
-# it shares RotationConflictReason; Backend-Service never raises the new values
-# there, and the description says so). Only dj-site calls these endpoints and it
-# adopts this release in a later slice of the review-required epic
-# (WXYC/Backend-Service#2791).
-post /library/filings added the new `review_required` enum value to the `reason` response property for the response status `409`
-post /library/rotation added the new `review_required` enum value to the `reason` response property for the response status `409`
-post /library/rotation added the new `rotation_not_eligible` enum value to the `reason` response property for the response status `409`
-delete /library/rotation/cards/{id} added the new `review_required` enum value to the `reason` response property for the response status `409`
-delete /library/rotation/cards/{id} added the new `rotation_not_eligible` enum value to the `reason` response property for the response status `409`
-#
-# POST /intake/{id}/file (WXYC/Backend-Service#2803, merged to this spec in
-# wxyc-shared#561) reuses LibraryFilingConflictError for its 409, so it
-# inherits the new `review_required` value. Intake filing is the gate's
-# exception and Backend-Service never raises it there; only dj-site calls the
-# route and it adopts this release in a later slice of the epic.
-post /intake/{id}/file added the new `review_required` enum value to the `oneOf[#/components/schemas/LibraryFilingConflictError]/reason` response property for the response status `409`
-#
-# maxLength: 128 on the AlbumCreateFields text fields, which reach POST
-# /library/filings via `release`. They are varchar(128) columns and
-# WXYC/Backend-Service#2844 enforces the bound on album_title, label and
-# alternate_artist_name (filings never reads release.album_artist, so its
-# bound is declared but not enforced there); declaring it here rides the
-# major instead of forcing another one on the next contract slice.
-post /library/filings the `release/album_artist` request property's maxLength was set to `128`
-post /library/filings the `release/album_title` request property's maxLength was set to `128`
-post /library/filings the `release/alternate_artist_name` request property's maxLength was set to `128`
-post /library/filings the `release/label` request property's maxLength was set to `128`
