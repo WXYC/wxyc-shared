@@ -14753,9 +14753,11 @@ paths:
         rotation entry (`flowsheet.rotation_id` -> `rotation.album_id`)
         just loses its link; a play linked only by a bare
         `flowsheet.legacy_release_id` awaiting the linkage-resolve cron
-        is stranded unless the batch is restored, since the delete-denylist means no
-        future library row will ever carry that legacy id for the
-        resolver to join to. `GET /library/{id}/flowsheet-play-counts`
+        is stranded unless the batch is restored, since the delete-denylist
+        stops any new release from taking that legacy id, leaving the
+        resolver nothing to join to (a restore re-inserts the row with
+        its `legacy_release_id` and clears its denylist entry, after which
+        the resolver can re-link those plays). `GET /library/{id}/flowsheet-play-counts`
         is the pre-delete read that surfaces this to the librarian
         before the delete — call it first, since by the time this delete
         returns the confirmation screen has already been read.

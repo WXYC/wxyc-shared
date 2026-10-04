@@ -7780,21 +7780,25 @@ describe('OpenAPI Specification', () => {
 
       it('qualifies the play-history claims for legacy-linked plays (wxyc-shared#558)', () => {
         const restore = flat(String(operation(restorePath, 'post').description));
-                expect(restore).toContain('`jobs/legacy-linkage-resolve`');
         expect(restore).toContain('the restore re-links no flowsheet play');
         expect(restore).toContain('can get its `album_id` back from `jobs/legacy-linkage-resolve`');
         expect(restore).toContain('not from the restore itself');
+        expect(restore).toContain('tubafrenzy-era play whose `flowsheet.legacy_release_id`');
         expect(restore).not.toMatch(/do not come back|are re-linked by/);
         const counts = flat(String((spec.components.schemas.FlowsheetPlayCounts as { description?: string }).description));
         expect(counts).not.toMatch(/permanently|guarantees no future/);
         expect(counts).toContain('unless the batch is restored');
-        expect(flat(String(propertyOf('CatalogDeleteBatch', 'restorable')?.description))).toContain('global advisory restore lock');
         expect(restore).not.toContain('archived flowsheet plays do not re-link');
-        expect(flat(String(operation('/library/{id}', 'delete').description))).toContain('stranded unless the batch is restored');
+        const deleteText = flat(String(operation('/library/{id}', 'delete').description));
+        expect(deleteText).toContain('stranded unless the batch is restored');
+        expect(deleteText).not.toMatch(/will ever carry|guarantees no future/);
         expect(flat(String(propertyOf('FlowsheetPlayCounts', 'legacy_linked')?.description))).toContain('(unless the batch is restored)');
         const restorable = flat(String(propertyOf('CatalogDeleteBatch', 'restorable')?.description));
         expect(restorable).toContain('for an unrestorable KIND is the hard guarantee');
         expect(restorable).toContain('answers 500');
+        expect(restorable).toContain('global advisory restore lock');
+        expect(restorable).toContain('503 `lock_unavailable`');
+        expect(restorable).toContain('still before any row lock or write');
       });
 
       it('defines children as rows actually re-inserted, with dropped rows left uncounted', () => {
