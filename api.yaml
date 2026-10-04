@@ -4240,7 +4240,7 @@ components:
         review:
           type: string
           nullable: true
-          description: May be empty for a handwritten review.
+          description: May be empty for a handwritten review, or for one whose OCR text is still pending.
         recommended_tracks:
           type: string
           nullable: true
@@ -12954,7 +12954,7 @@ paths:
             type: integer
             minimum: 1
         - name: artist
-          description: Exact match on the submission's normalized artist name (case-insensitive, leading-"the"-insensitive); not a prefix or substring search. The value is trimmed, and a blank one is a 400.
+          description: Matched exactly against the stored artist name after normalization (a leading "The " and its whitespace are dropped, and case is ignored). It is not a prefix or substring search, and surrounding whitespace is not trimmed, so "Stereolab " matches nothing. A blank or whitespace-only value, a repeated parameter, or one longer than 256 characters is a 400.
           in: query
           schema:
             type: string

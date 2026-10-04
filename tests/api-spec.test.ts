@@ -8699,6 +8699,7 @@ describe('OpenAPI Specification', () => {
       expect(String(review.properties?.locked?.description)).toMatch(/Always\s+`false`\s+for\s+a\s+review\s+attached\s+to\s+`album_id`\s+alone/);
       expect(String(schema('ReviewMedium').description)).not.toMatch(/differ|author_user_id/);
       expect(String(schema('ReviewMedium').description)).toMatch(/`handwritten`\s+review\s+with\s+no\s+text/);
+      expect(String(review.properties?.review?.description)).toMatch(/handwritten\s+review,\s+or\s+for\s+one\s+whose\s+OCR\s+text\s+is\s+still\s+pending/);
       expect(String(review.properties?.author?.description)).toMatch(/may be a real\s+name/);
       expect(String(review.properties?.author?.description)).toMatch(/not guaranteed PII-free/);
       expect(String(review.properties?.author?.description)).toMatch(/client\s+telemetry/);
@@ -8756,8 +8757,12 @@ describe('OpenAPI Specification', () => {
       expect(params.artist?.schema).toMatchObject({ minLength: 1, maxLength: 256 });
       expect(o.description).toMatch(/not\s+filtered\s+by\s+`social_consent`/);
       expect(o.description).toMatch(/rows\s+with\s+no\s+review\s+body\s+are\s+excluded/);
-      expect(String(params.artist?.description)).toMatch(/Exact\s+match[^.]*not\s+a\s+prefix\s+or\s+substring\s+search/);
-      expect(String(params.artist?.description)).toMatch(/blank\s+one\s+is\s+a\s+400/);
+      const artist = String(params.artist?.description);
+      expect(artist).toMatch(/matched\s+exactly[^.]*after\s+normalization/i);
+      expect(artist).toMatch(/not\s+a\s+prefix\s+or\s+substring\s+search/);
+      expect(artist).toMatch(/whitespace\s+is\s+not\s+trimmed/);
+      expect(artist).not.toMatch(/value\s+is\s+trimmed/);
+      expect(artist).toMatch(/blank\s+or\s+whitespace-only\s+value,\s+a\s+repeated\s+parameter,\s+or\s+one\s+longer\s+than\s+256\s+characters\s+is\s+a\s+400/);
       expect(body(o, '400')).toEqual(ref('ApiErrorResponse'));
       expect(body(o, '200')).toEqual(ref('AlbumReviewsResponse'));
     });
