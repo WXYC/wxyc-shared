@@ -6635,9 +6635,9 @@ describe('OpenAPI Specification', () => {
       expect(lml).toEqual([...LML_OPERATIONS].sort());
     });
 
-    // Set out as a closed list so the audit is re-runnable: a
-    // re-declaration at any of these paths fails here and sends the author back
-    // to the probe rather than to a 404 in a generated client.
+    // Set out as a closed list so the audit is re-runnable: a re-declaration at
+    // any of these paths fails here and sends the author back to the probe
+    // rather than to a 404 in a generated client.
     //
     // Some were real routes declared at the wrong path and were corrected, not
     // deleted (see the companion assertion below). The rest were never built:
@@ -7414,9 +7414,10 @@ describe('OpenAPI Specification', () => {
     // vendored Swift trees. Deleting one breaks a build somewhere, so an entry
     // leaves only when a declared path makes its schema reachable.
     //
-    // Most entries are plain imports -- the `Discogs*` family from library-metadata-lookup's `discogs/models.py` (which imports
-    // them from `generated.api_models` and re-aliases them) and from
-    // Backend-Service's `shared/lml-client`, `HealthCheckResponse` from both
+    // Most entries are plain imports -- the `Discogs*` family from
+    // library-metadata-lookup's `discogs/models.py` (which imports them from
+    // `generated.api_models` and re-aliases them) and from Backend-Service's
+    // `shared/lml-client`, `HealthCheckResponse` from both
     // Backend-Service apps' health handlers, `PlaylistSearchParams` from three
     // dj-site modules. Three are not, and each would read as deletable to a
     // grep that only looked for imports:
@@ -8683,7 +8684,7 @@ describe('OpenAPI Specification', () => {
         expect(review.required, key).toContain(key);
       }
       const nullable = [
-        'album_id', 'intake_item_id', 'author_user_id', 'recorded_by_user_id', 'buzzwords',
+        'author', 'album_id', 'intake_item_id', 'author_user_id', 'recorded_by_user_id', 'buzzwords',
         'artist_blurb', 'review', 'recommended_tracks', 'fcc', 'credit', 'submitted_at',
       ];
       for (const key of columns) {
@@ -8693,6 +8694,11 @@ describe('OpenAPI Specification', () => {
       expect(review.properties?.add_date).toMatchObject({ type: 'string', format: 'date' });
       expect(review.properties?.submitted_at).toMatchObject({ format: 'date-time' });
       expect(review.properties?.last_modified).toMatchObject({ format: 'date-time' });
+      expect(String(review.properties?.recorded_by_user_id?.description)).toMatch(/music\s+director\s+who\s+recorded/);
+      expect(String(review.properties?.credit?.description)).toMatch(/`null`\s+means\s+no\s+choice[^.]*`none`\s+means\s+the\s+author\s+chose\s+no\s+name/);
+      expect(String(review.properties?.locked?.description)).toMatch(/Always\s+`false`\s+for\s+a\s+review\s+attached\s+to\s+`album_id`\s+alone/);
+      expect(String(schema('ReviewMedium').description)).not.toMatch(/differ|author_user_id/);
+      expect(String(schema('ReviewMedium').description)).toMatch(/`handwritten`\s+review\s+with\s+no\s+text/);
       expect(String(review.properties?.author?.description)).toMatch(/may be a real\s+name/);
       expect(String(review.properties?.author?.description)).toMatch(/not guaranteed PII-free/);
       expect(String(review.properties?.author?.description)).toMatch(/client\s+telemetry/);
@@ -8748,7 +8754,10 @@ describe('OpenAPI Specification', () => {
       expect(params.page?.schema).toMatchObject({ minimum: 1, default: 1 });
       expect(params.album_id?.schema).toMatchObject({ minimum: 1 });
       expect(params.artist?.schema).toMatchObject({ minLength: 1, maxLength: 256 });
-      expect(o.description).toMatch(/not filtered by `social_consent`/);
+      expect(o.description).toMatch(/not\s+filtered\s+by\s+`social_consent`/);
+      expect(o.description).toMatch(/rows\s+with\s+no\s+review\s+body\s+are\s+excluded/);
+      expect(String(params.artist?.description)).toMatch(/Exact\s+match[^.]*not\s+a\s+prefix\s+or\s+substring\s+search/);
+      expect(String(params.artist?.description)).toMatch(/blank\s+one\s+is\s+a\s+400/);
       expect(body(o, '400')).toEqual(ref('ApiErrorResponse'));
       expect(body(o, '200')).toEqual(ref('AlbumReviewsResponse'));
     });

@@ -4157,7 +4157,7 @@ components:
     ReviewMedium:
       type: string
       enum: [typed, handwritten, printed]
-      description: How the review was written. On-behalf is shown by `recorded_by_user_id` differing from `author_user_id` (or `author_user_id` being null), not by `medium`; an on-behalf review may be `typed` or `handwritten`, and `printed` is for the later OCR backfill.
+      description: How the review was written. A music director may record a `handwritten` review with no text, and a `typed` or `handwritten` review on someone's behalf; `printed` is for the later OCR backfill.
 
     ReviewStatus:
       type: string
@@ -4210,8 +4210,10 @@ components:
         author:
           type: string
           maxLength: 128
+          nullable: true
           description: >
-            For an account holder's own review, a snapshot of their display
+            Null only on a row that predates the in-app model (the column
+            has never been NOT NULL). For an account holder's own review, a snapshot of their display
             name, the public-safe value. For a handwritten or on-behalf review
             it is what the music director typed: free text that may be a real
             name, so it is not guaranteed PII-free. Shown only inside the
@@ -4224,7 +4226,7 @@ components:
         recorded_by_user_id:
           type: string
           nullable: true
-          description: The account that entered the review, which for an on-behalf review is the music director. Draft visibility names it (a draft is visible to whoever recorded it).
+          description: For an on-behalf or handwritten review, the music director who recorded it. Draft visibility names it (a draft is visible to its author and to whoever recorded it).
         medium:
           $ref: '#/components/schemas/ReviewMedium'
         status:
@@ -6388,9 +6390,10 @@ components:
         Distinct from the in-app `Review` model (`/reviews`: many per
         release, each attached to an intake item or a library release and
         locked at print): submissions here are append-only and identify
-        albums by free text with a best-effort `album_id` link. The reviewer's name is withheld by this
-        endpoint today. The station allows reviewer names inside the station
-        (dj-site, the DJ apps); they are never shown outside it.
+        albums by free text with a best-effort `album_id` link. The
+        reviewer's name is withheld by this endpoint today. The station
+        allows reviewer names inside the station (dj-site, the DJ apps);
+        they are never shown outside it.
       required:
         - id
         - album_id
@@ -12951,7 +12954,7 @@ paths:
             type: integer
             minimum: 1
         - name: artist
-          description: Exact match on the submission's normalized artist name (case-insensitive, leading-"the"-insensitive); not a prefix or substring search.
+          description: Exact match on the submission's normalized artist name (case-insensitive, leading-"the"-insensitive); not a prefix or substring search. The value is trimmed, and a blank one is a 400.
           in: query
           schema:
             type: string
