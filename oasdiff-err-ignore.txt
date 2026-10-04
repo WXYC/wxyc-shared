@@ -54,9 +54,18 @@ post /library/rotation added the new `rotation_not_eligible` enum value to the `
 delete /library/rotation/cards/{id} added the new `review_required` enum value to the `reason` response property for the response status `409`
 delete /library/rotation/cards/{id} added the new `rotation_not_eligible` enum value to the `reason` response property for the response status `409`
 #
+# POST /intake/{id}/file (WXYC/Backend-Service#2803, merged to this spec in
+# wxyc-shared#561) reuses LibraryFilingConflictError for its 409, so it
+# inherits the new `review_required` value. Intake filing is the gate's
+# exception and Backend-Service never raises it there; only dj-site calls the
+# route and it adopts this release in a later slice of the epic.
+post /intake/{id}/file added the new `review_required` enum value to the `oneOf[#/components/schemas/LibraryFilingConflictError]/reason` response property for the response status `409`
+#
 # maxLength: 128 on the AlbumCreateFields text fields, which reach POST
 # /library/filings via `release`. They are varchar(128) columns and
-# WXYC/Backend-Service#2844 enforces the bound; declaring it here rides the
+# WXYC/Backend-Service#2844 enforces the bound on album_title, label and
+# alternate_artist_name (filings never reads release.album_artist, so its
+# bound is declared but not enforced there); declaring it here rides the
 # major instead of forcing another one on the next contract slice.
 post /library/filings the `release/album_artist` request property's maxLength was set to `128`
 post /library/filings the `release/album_title` request property's maxLength was set to `128`
