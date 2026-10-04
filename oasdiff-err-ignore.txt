@@ -38,3 +38,14 @@
 # claiming a count is wrong the moment someone appends an entry below it, and no
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
+#
+# int4 bounds on the GET /reviews album_id and intake_item_id filters
+# (WXYC/wxyc-shared#566). The route and its "not a positive int4 is a 400" rule
+# shipped in #564 and no client has sent a value outside the bound: ids are
+# serial int4 columns, so zero, negative and past-int4 values never matched a
+# row. Backend-Service builds the route on parseInt4PathId, which answers 400
+# for them. The path-parameter bounds on ReviewId are not flagged here.
+get /reviews for the `query` request parameter `album_id`, the max was set to `2147483647.00`
+get /reviews for the `query` request parameter `album_id`, the min was set to `1.00`
+get /reviews for the `query` request parameter `intake_item_id`, the max was set to `2147483647.00`
+get /reviews for the `query` request parameter `intake_item_id`, the min was set to `1.00`

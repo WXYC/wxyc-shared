@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.1.0');
+      expect(spec.info.version).toBe('11.2.0');
     });
 
     it('should have components section', () => {
@@ -4044,18 +4044,19 @@ describe('OpenAPI Specification', () => {
       expect(slip.properties?.submitted_at).toMatchObject({ type: 'string', format: 'date-time' });
     });
 
-    // Derived from the path prefix, not from a `$ref` to IntakeId: a new /intake/{id}/... route that declares
-    // its `id` inline would otherwise slip past both the parameter check and the 400 check. `spec` is
-    // populated in `beforeAll`, so the list is built inside the tests.
-    const intakeIdOperations = (): Array<[string, string]> =>
+    // Derived from the path prefix, not from a `$ref` to the id parameter: a new /intake/{id}/... or
+    // /reviews/{id}/... route that declares its `id` inline would otherwise slip past both the parameter check
+    // and the 400 check. `spec` is populated in `beforeAll`, so the list is built inside the tests.
+    const idFamilies: Array<[string, string]> = [['/intake/{id}', 'IntakeId'], ['/reviews/{id}', 'ReviewId']];
+    const idOperations = (prefix: string): Array<[string, string]> =>
       Object.entries(spec.paths as Record<string, Record<string, unknown>>)
-        .filter(([path]) => path === '/intake/{id}' || path.startsWith('/intake/{id}/'))
+        .filter(([path]) => path === prefix || path.startsWith(`${prefix}/`))
         .flatMap(([path, item]) =>
           ['get', 'put', 'post', 'patch', 'delete'].filter((m) => m in item).map((m): [string, string] => [m, path]),
         );
 
     it('finds the /intake/{id} operations, including PATCH, /request, /file and /print', () => {
-      const ops = intakeIdOperations();
+      const ops = idOperations('/intake/{id}');
       expect(ops).toContainEqual(['patch', '/intake/{id}']);
       expect(ops).toContainEqual(['post', '/intake/{id}/request']);
       expect(ops).toContainEqual(['post', '/intake/{id}/file']);
@@ -4063,21 +4064,49 @@ describe('OpenAPI Specification', () => {
       expect(ops.length).toBeGreaterThanOrEqual(12);
     });
 
-    it('uses the shared IntakeId parameter on every /intake/{id} operation', () => {
-      const paths = spec.paths as Record<string, { parameters?: unknown[] }>;
-      for (const [method, path] of intakeIdOperations()) {
-        const o = operation(path, method) as { parameters?: unknown[] };
-        const declared = [...(paths[path]?.parameters ?? []), ...(o.parameters ?? [])];
-        expect(declared, `${method} ${path}`).toContainEqual({ $ref: '#/components/parameters/IntakeId' });
-      }
+    it('finds the /reviews/{id} operations, including DELETE and /submit', () => {
+      const ops = idOperations('/reviews/{id}');
+      expect(ops).toContainEqual(['get', '/reviews/{id}']);
+      expect(ops).toContainEqual(['patch', '/reviews/{id}']);
+      expect(ops).toContainEqual(['delete', '/reviews/{id}']);
+      expect(ops).toContainEqual(['post', '/reviews/{id}/submit']);
     });
 
-    it('declares the malformed-id 400 on every /intake/{id} operation', () => {
-      for (const [method, path] of intakeIdOperations()) {
-        expect(responseSchema(path, method, '400'), `${method} ${path}`).toEqual(ref('ApiErrorResponse'));
-        expect(flat(operation(path, method).responses?.['400']?.description), `${method} ${path}`).toContain(
-          'malformed id',
-        );
+    describe.each(idFamilies)('%s', (prefix, param) => {
+      it(`uses the shared ${param} parameter on every operation`, () => {
+        const paths = spec.paths as Record<string, { parameters?: unknown[] }>;
+        for (const [method, path] of idOperations(prefix)) {
+          const o = operation(path, method) as { parameters?: unknown[] };
+          const declared = [...(paths[path]?.parameters ?? []), ...(o.parameters ?? [])];
+          expect(declared, `${method} ${path}`).toContainEqual({ $ref: `#/components/parameters/${param}` });
+        }
+      });
+
+      it('declares the malformed-id 400 on every operation', () => {
+        for (const [method, path] of idOperations(prefix)) {
+          expect(responseSchema(path, method, '400'), `${method} ${path}`).toEqual(ref('ApiErrorResponse'));
+          expect(flat(operation(path, method).responses?.['400']?.description), `${method} ${path}`).toContain(
+            'malformed id',
+          );
+        }
+      });
+
+      it(`bounds ${param} to a positive int4 and says a bad value is a 400`, () => {
+        const p = (spec.components as unknown as { parameters: Record<string, { schema: unknown; description: string }> })
+          .parameters[param]!;
+        expect(p.schema).toEqual({ type: 'integer', minimum: 1, maximum: 2147483647 });
+        expect(flat(p.description)).toContain('a non-digit value, zero, or a value past 2147483647 is a 400');
+      });
+    });
+
+    it('bounds the GET /reviews album_id and intake_item_id filters to a positive int4', () => {
+      const params = operation('/reviews', 'get').parameters as Array<{ name: string; schema: unknown }>;
+      for (const name of ['album_id', 'intake_item_id']) {
+        expect(params.find((q) => q.name === name)?.schema, name).toEqual({
+          type: 'integer',
+          minimum: 1,
+          maximum: 2147483647,
+        });
       }
     });
 
@@ -8892,8 +8921,9 @@ describe('OpenAPI Specification', () => {
         name: 'id',
         in: 'path',
         required: true,
-        schema: { type: 'integer' },
-        description: "The review's id.",
+        schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+        description:
+          "The review's id. Must be a positive int4; a non-digit value, zero, or a value past 2147483647 is a 400.",
       });
       const pathItem = (spec.paths as Record<string, { parameters?: unknown[] }>)['/reviews/{id}']!;
       expect(pathItem.parameters).toContainEqual({ $ref: '#/components/parameters/ReviewId' });
@@ -9335,7 +9365,7 @@ describe('OpenAPI Specification', () => {
       ['post', '/reviews', ['400', '401', '403', '409']],
       ['patch', '/reviews/{id}', ['400', '401', '403', '404', '409']],
       ['post', '/reviews/{id}/submit', ['400', '401', '403', '404', '409']],
-      ['delete', '/reviews/{id}', ['401', '403', '404', '409']],
+      ['delete', '/reviews/{id}', ['400', '401', '403', '404', '409']],
     ])('declares the refusals of %s %s', (method, path, statuses) => {
       expect(Object.keys(operation(path, method).responses ?? {}).sort()).toEqual(
         ['200', '204'].filter((s) => s in (operation(path, method).responses ?? {})).concat(statuses).sort()
