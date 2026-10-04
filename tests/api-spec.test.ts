@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.2.0');
+      expect(spec.info.version).toBe('11.3.0');
     });
 
     it('should have components section', () => {
@@ -4001,11 +4001,10 @@ describe('OpenAPI Specification', () => {
       ).toContainEqual({ $ref: '#/components/parameters/IntakeId' });
     });
 
-    it('states what print stamps and which review prints', () => {
+    it('states what print stamps', () => {
       const text = flat(operation('/intake/{id}/print', 'post').description);
       expect(text).toContain('`printed_at` and `printed_by`');
       expect(text).toContain('reprint');
-      expect(text).toContain('earliest submitted typed review');
     });
 
     it('returns an IntakeSlip and declares 401, 403, 404 and a 409 IntakeConflictError from print', () => {
@@ -8951,6 +8950,31 @@ describe('OpenAPI Specification', () => {
       expect(operation('/reviews', 'get').responses?.['400']?.description).toBe(
         '`album_id` or `intake_item_id` is not a positive int4, or `mine` is not `true` or `false`'
       );
+    });
+
+    it('defines an item\'s intake review and the release\'s intake review, each with its tie-break', () => {
+      const text = flat(operation('/reviews', 'get').description);
+      expect(text).toContain("An item's intake review is the typed, submitted review with the earliest `submitted_at` among that intake item's reviews, ties broken by the lower `id`; an item with no typed, submitted review has none.");
+      expect(text).toContain("The release's intake review is the earliest of its filed items' intake reviews, by the same key (earliest `submitted_at`, ties broken by the lower `id`).");
+      expect(text).toContain('A release with no such review (handwritten-only, citation-only, or never filed through intake) has none.');
+      expect(text).toContain("An item's intake review is the review that item's slip prints (`POST /intake/{id}/print`).");
+    });
+
+    it('orders every GET /reviews list by one key, drafts by last_modified, with explicit tie-break directions', () => {
+      const text = flat(operation('/reviews', 'get').description);
+      expect(text).toContain("Any list filtered by `album_id` puts the release's intake review first, then every other visible review, including those reached through `cited_album_id`, in the order below.");
+      expect(text).toContain('Every other list uses that order throughout.');
+      expect(text).toContain('`submitted_at` descending (newest first); a draft the caller can see (their own, or one they recorded) sorts by its `last_modified` in that position; ties are broken by `id` descending.');
+      expect(text).toContain('That tie-break is part of the order for the no-filter, `mine`, `intake_item_id` and `album_id` lists alike.');
+      expect(text).not.toMatch(/a caller's own draft by/);
+    });
+
+    it('has POST /intake/{id}/print refer to the item\'s intake review instead of restating the rule', () => {
+      const text = flat(operation('/intake/{id}/print', 'post').description);
+      expect(text).toContain("It prints the item's intake review (see `GET /reviews`).");
+      expect(text).not.toContain('more than one');
+      expect(text).not.toContain("release's intake review");
+      expect(text).not.toMatch(/earliest|submitted typed review|sorts first/);
     });
 
     it('serves Review from the read paths', () => {
