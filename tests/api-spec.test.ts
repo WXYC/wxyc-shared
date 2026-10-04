@@ -6635,15 +6635,15 @@ describe('OpenAPI Specification', () => {
       expect(lml).toEqual([...LML_OPERATIONS].sort());
     });
 
-    // The closed list. Set out as a closed list so the audit is re-runnable: a
+    // Set out as a closed list so the audit is re-runnable: a
     // re-declaration at any of these paths fails here and sends the author back
     // to the probe rather than to a 404 in a generated client.
     //
-    // Six were real routes declared at the wrong path and were corrected, not
-    // deleted (see the companion assertion below). Eleven were never built —
-    // eight unbuilt features and three survivals of the Cognito era, whose
+    // Some were real routes declared at the wrong path and were corrected, not
+    // deleted (see the companion assertion below). The rest were never built:
+    // unbuilt features and survivals of the Cognito era, whose
     // `cognito_user_name` query parameter names an auth system Backend has not
-    // run for years.
+    // run for years. `/album-reviews` left this list when the route shipped.
     const UNREACHABLE_PATHS = [
       '/djs',
       '/djs/register',
@@ -7411,11 +7411,10 @@ describe('OpenAPI Specification', () => {
 
     // Imported by hand-written code in at least one consumer, found by
     // sweeping every consumer repo for references outside `generated/` and the
-    // vendored Swift trees. Deleting one breaks a build somewhere, so this
-    // list is permanent and is not expected to shrink.
+    // vendored Swift trees. Deleting one breaks a build somewhere, so an entry
+    // leaves only when a declared path makes its schema reachable.
     //
-    // Most entries are plain imports -- the `Discogs*`
-    // family from library-metadata-lookup's `discogs/models.py` (which imports
+    // Most entries are plain imports -- the `Discogs*` family from library-metadata-lookup's `discogs/models.py` (which imports
     // them from `generated.api_models` and re-aliases them) and from
     // Backend-Service's `shared/lml-client`, `HealthCheckResponse` from both
     // Backend-Service apps' health handlers, `PlaylistSearchParams` from three
@@ -8649,7 +8648,6 @@ describe('OpenAPI Specification', () => {
     type Op = {
       description?: string;
       parameters?: Array<Record<string, unknown>>;
-      requestBody?: { content?: Record<string, { schema?: Record<string, unknown> }> };
       responses?: Record<string, { content?: Record<string, { schema?: Record<string, unknown> }> } | undefined>;
       'x-wxyc-service'?: string;
     };
@@ -8660,7 +8658,8 @@ describe('OpenAPI Specification', () => {
       return found;
     };
     const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
-    const body = (o: Op, status: string) => o.responses?.[status]?.content?.['application/json']?.schema;
+    const body = (o: Op, status: string): Record<string, unknown> | undefined =>
+      o.responses?.[status]?.content?.['application/json']?.schema;
 
     it.each([
       ['ReviewMedium', ['typed', 'handwritten', 'printed']],
@@ -8672,32 +8671,63 @@ describe('OpenAPI Specification', () => {
 
     it('requires every Review column and keeps nullable ones in the required set', () => {
       const review = schema('Review');
-      for (const key of [
+      const columns = [
         'id', 'album_id', 'intake_item_id', 'author', 'author_user_id', 'recorded_by_user_id',
         'medium', 'status', 'buzzwords', 'artist_blurb', 'review', 'recommended_tracks', 'fcc',
         'publish_website', 'publish_apps', 'publish_instagram', 'credit', 'add_date',
         'submitted_at', 'last_modified', 'locked',
-      ]) {
+      ];
+      // A closed set: a new column (a real-name field, say) must be added here on purpose.
+      expect(Object.keys(review.properties ?? {}).sort()).toEqual([...columns].sort());
+      for (const key of columns) {
         expect(review.required, key).toContain(key);
-        expect(review.properties?.[key], key).toBeDefined();
       }
+      const nullable = [
+        'album_id', 'intake_item_id', 'author_user_id', 'recorded_by_user_id', 'buzzwords',
+        'artist_blurb', 'review', 'recommended_tracks', 'fcc', 'credit', 'submitted_at',
+      ];
+      for (const key of columns) {
+        expect(review.properties?.[key]?.nullable === true, `${key} nullable`).toBe(nullable.includes(key));
+      }
+      // reviews.add_date is a Postgres `date`; date-time would decode a day early west of UTC.
+      expect(review.properties?.add_date).toMatchObject({ type: 'string', format: 'date' });
+      expect(review.properties?.submitted_at).toMatchObject({ format: 'date-time' });
+      expect(review.properties?.last_modified).toMatchObject({ format: 'date-time' });
+      expect(String(review.properties?.author?.description)).toMatch(/may be a real\s+name/);
+      expect(String(review.properties?.author?.description)).toMatch(/not guaranteed PII-free/);
+      expect(String(review.properties?.author?.description)).toMatch(/client\s+telemetry/);
       expect(review.properties?.author?.maxLength).toBe(128);
       expect(review.description).toMatch(/never published outside the station/);
       expect(review.description).toMatch(/stores consent/);
     });
 
     it.each([
-      ['get', '/reviews', 'reviews: read'],
-      ['get', '/reviews/{id}', 'reviews: read'],
-    ])('declares %s %s with its grant (%s)', (method, path, grant) => {
+      ['get', '/reviews', 'reviews: read', '#2805'],
+      ['get', '/reviews/{id}', 'reviews: read', '#2805'],
+    ])('declares %s %s with its grant (%s) and delivering issue (%s)', (method, path, grant, issue) => {
       const o = op(path, method);
       expect(o['x-wxyc-service']).toBe('backend-service');
       expect(o.description).toContain(grant);
+      expect(o.description).toContain(issue);
+    });
+
+    it('declares /reviews/{id} with the shared ReviewId path parameter', () => {
+      const params = (spec.components as unknown as { parameters: Record<string, unknown> }).parameters;
+      expect(params.ReviewId).toEqual({
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: { type: 'integer' },
+        description: "The review's id.",
+      });
+      const pathItem = (spec.paths as Record<string, { parameters?: unknown[] }>)['/reviews/{id}']!;
+      expect(pathItem.parameters).toContainEqual({ $ref: '#/components/parameters/ReviewId' });
     });
 
     it('states the draft-visibility rule on the read paths', () => {
       expect(op('/reviews', 'get').description).toMatch(/draft is visible only to its author/);
-      expect(op('/reviews/{id}', 'get').description).toMatch(/404/);
+      expect(op('/reviews', 'get').description).toMatch(/lists omit everyone else's drafts/);
+      expect(op('/reviews/{id}', 'get').description).toMatch(/draft[^.]*404|404[^.]*draft/);
       expect(op('/reviews', 'get').parameters?.map((p) => p.name)).toEqual(
         expect.arrayContaining(['album_id', 'intake_item_id', 'mine'])
       );
@@ -8716,6 +8746,9 @@ describe('OpenAPI Specification', () => {
       expect(Object.keys(params).sort()).toEqual(['album_id', 'artist', 'limit', 'page']);
       expect((params.limit?.schema as { maximum?: number }).maximum).toBe(100);
       expect(params.page?.schema).toMatchObject({ minimum: 1, default: 1 });
+      expect(params.album_id?.schema).toMatchObject({ minimum: 1 });
+      expect(params.artist?.schema).toMatchObject({ minLength: 1, maxLength: 256 });
+      expect(o.description).toMatch(/not filtered by `social_consent`/);
       expect(body(o, '400')).toEqual(ref('ApiErrorResponse'));
       expect(body(o, '200')).toEqual(ref('AlbumReviewsResponse'));
     });
@@ -8726,6 +8759,8 @@ describe('OpenAPI Specification', () => {
       expect(text).toMatch(/withheld\s+by\s+this\s+endpoint/);
       expect(text).toMatch(/inside\s+the\s+station/);
       expect(text).toMatch(/never\s+shown\s+outside/);
+      expect(text).not.toMatch(/one-per-album|author-owned|several per album/);
+      expect(text).toMatch(/many\s+per\s+release/);
     });
   });
 });
