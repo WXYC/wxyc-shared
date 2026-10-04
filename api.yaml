@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.2.0
+  version: 11.3.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -13358,10 +13358,9 @@ paths:
       summary: Print an intake item's review slip
       description: >
         Grant: `reviews: manage`. Stamps `printed_at` and `printed_by` (a
-        reprint updates both) and returns the slip. When the item has more
-        than one submitted typed review, the earliest submitted typed review
-        prints, the one `GET /reviews?album_id=` sorts first as the intake
-        review. Delivered by WXYC/Backend-Service#2804.
+        reprint updates both) and returns the slip. It prints the item's
+        intake review (see `GET /reviews`). Delivered by
+        WXYC/Backend-Service#2804.
       security:
         - BearerAuth: []
       responses:
@@ -13582,9 +13581,26 @@ paths:
         (`album_id` or `intake_item_id` not a positive int4, or a `mine` other than `true`/`false`)
         is a 400. A draft is visible only to its author and to whoever
         recorded it; lists omit everyone else's drafts. An album's list
-        includes reviews reached through an intake item's `cited_album_id`:
-        the intake review first, then newest. The `intake_item_id` list is
-        what the music director reads before filing.
+        includes reviews reached through an intake item's `cited_album_id`.
+        An item's intake review is the typed, submitted review with the
+        earliest `submitted_at` among that intake item's reviews, ties broken
+        by the lower `id`; an item with no typed, submitted review has none.
+        The release's intake review is the earliest of its filed items'
+        intake reviews, by the same key (earliest `submitted_at`, ties broken
+        by the lower `id`). A release with no such review (handwritten-only,
+        citation-only, or never filed through intake) has none. An item's
+        intake review is the review that item's slip prints
+        (`POST /intake/{id}/print`). Any list filtered by `album_id` puts the
+        release's intake review first, then every other visible review,
+        including those reached through `cited_album_id`, in the order below.
+        Every other list uses that order throughout. The order is
+        `submitted_at` descending (newest first); a draft the caller can see
+        (their own, or one they recorded) sorts by its `last_modified` in that
+        position; ties are broken by `id` descending. That tie-break is part
+        of the order for the no-filter, `mine`, `intake_item_id` and
+        `album_id` lists alike.
+        The `intake_item_id` list is what the music director reads before
+        filing.
       security:
         - BearerAuth: []
       parameters:
