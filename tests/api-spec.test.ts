@@ -7611,8 +7611,8 @@ describe('OpenAPI Specification', () => {
       });
 
       // A 400, not a 409: the request is incomplete rather than in conflict
-      // with server state, and the same batch succeeds the moment `resolution`
-      // is supplied. The branch must be typed -- collapsing it to the bare
+      // with server state, and supplying `resolution` clears it (though the
+      // retry can still meet another refusal). The branch must be typed -- collapsing it to the bare
       // error shape discards `conflicts` and leaves the screen nothing to ask
       // the question from.
       it('declares the slot-conflict refusal on the 400, alongside the malformed-request shape', () => {
@@ -7636,12 +7636,49 @@ describe('OpenAPI Specification', () => {
         ]);
       });
 
-      it('describes the 409 as four refusals and says the missing-reference one is retryable and lands ahead of #2818', () => {
-        const description = (operation(restorePath, 'post').responses as Record<string, { description: string }>)['409']?.description ?? '';
-        expect(description).toContain('Four different refusals');
-        expect(description).toContain('missing_reference');
-        expect(description).toContain('retryable');
-        expect(description).toContain('WXYC/Backend-Service#2818');
+      // The missing_reference clause is sliced out of the 409 description
+      // before it is matched: the unrestorable_kind sentence already says
+      // "permanent, not retryable", so whole-description matching passes
+      // even with this clause deleted.
+      describe('the 409 description', () => {
+        const description = () =>
+          String((operation(restorePath, 'post').responses as Record<string, { description: string }>)['409']?.description ?? '')
+            .replace(/\s+/g, ' ');
+        const missingReferenceClause = () => {
+          const text = description();
+          const at = text.indexOf('`missing_reference` \u2014');
+          expect(at).toBeGreaterThan(-1);
+          return text.slice(at);
+        };
+
+        it('counts four refusals', () => {
+          expect(description()).toContain('Four different refusals');
+        });
+
+        it('limits the trigger to NO ACTION references, leaving CASCADE ones to the dropped deviation', () => {
+          expect(missingReferenceClause()).toContain('holds a `NO ACTION` reference (no `ON DELETE` clause)');
+          expect(missingReferenceClause()).not.toMatch(/NOT NULL/);
+        });
+
+        it('says it names the first missing reference, and that nothing was written', () => {
+          expect(missingReferenceClause()).toContain(
+            'It names the first missing reference the restore finds, so a retry can name another; nothing was written and the snapshot is untouched.'
+          );
+        });
+
+        it('says what clears it, and that it is permanent where the row cannot return under its id', () => {
+          const clause = missingReferenceClause();
+          expect(clause).toContain("It clears only once a row with `captured_value`'s id exists again in `target_table`");
+          expect(clause).toContain('the refusal is permanent, as for a deleted artist');
+          expect(clause).toContain('a re-created artist gets a new id');
+          expect(clause).not.toMatch(/restore or re-create/i);
+        });
+
+        it('hedges that the same case is a 500 until WXYC/Backend-Service#2818 deploys', () => {
+          expect(missingReferenceClause()).toContain(
+            'Contract ahead of WXYC/Backend-Service#2818: until that deploys, the same case is a 500, so a consumer must tolerate its absence.'
+          );
+        });
       });
 
       it('declares the 503 stand-down and the 404, and no other statuses', () => {
@@ -8026,7 +8063,7 @@ describe('OpenAPI Specification', () => {
       // listing time, against an immutable capture, `true` cannot go on to
       // hit the corrupt-envelope failure -- so naming that as the residual
       // risk is backwards. What a restorable batch can still answer is the
-      // three outcomes below, all of which a caller must handle.
+      // four outcomes below, all of which a caller must handle.
       //
       // The restore-success negative is deliberately NOT keyed to one
       // phrasing. The assertion this replaces read
@@ -8044,7 +8081,7 @@ describe('OpenAPI Specification', () => {
           expect(claim).toMatch(/is not a promise/i);
         }
 
-        for (const outcome of ['already_restored', 'resolution_required', 'lock_unavailable']) {
+        for (const outcome of ['already_restored', 'resolution_required', 'lock_unavailable', 'missing_reference']) {
           expect(description).toContain(`\`${outcome}\``);
         }
       });
@@ -8078,6 +8115,9 @@ describe('OpenAPI Specification', () => {
     });
 
     describe('RestoreMissingReferenceRefusal (wxyc-shared#547)', () => {
+      const schemaDescription = () =>
+        String((spec.components.schemas.RestoreMissingReferenceRefusal as { description?: string }).description).replace(/\s+/g, ' ');
+
       it('requires the refusal keys, with reason pinned to the single literal', () => {
         expect(requiredKeysOf('RestoreMissingReferenceRefusal').sort()).toEqual(
           ['captured_value', 'column', 'message', 'reason', 'row_id', 'table', 'target_table'].sort()
@@ -8085,9 +8125,51 @@ describe('OpenAPI Specification', () => {
         expect(propertyOf('RestoreMissingReferenceRefusal', 'reason')?.enum).toEqual(['missing_reference']);
       });
 
-      it('types row_id and captured_value as RestoreDeviation does', () => {
+      it('types table, column, target_table and captured_value as strings, and row_id as an integer', () => {
+        for (const key of ['table', 'column', 'target_table', 'captured_value']) {
+          expect(propertyOf('RestoreMissingReferenceRefusal', key)?.type).toBe('string');
+        }
         expect(propertyOf('RestoreMissingReferenceRefusal', 'row_id')?.type).toBe('integer');
-        expect(propertyOf('RestoreMissingReferenceRefusal', 'captured_value')?.type).toBe('string');
+      });
+
+      // artist_library_crossreference, which the restore replays, has no
+      // single-column primary key, and its NOT NULL NO ACTION artist_id makes
+      // this refusal reachable for it. RestoreDeviation.row_id stays non-null.
+      it('makes row_id nullable, required, and says how a keyless row is identified', () => {
+        expect(propertyOf('RestoreMissingReferenceRefusal', 'row_id')?.nullable).toBe(true);
+        expect(requiredKeysOf('RestoreMissingReferenceRefusal')).toContain('row_id');
+        const description = String(propertyOf('RestoreMissingReferenceRefusal', 'row_id')?.description).replace(/\s+/g, ' ');
+        expect(description).toContain('`null` for a row with no single-column primary key');
+        expect(description).toContain('identified by `table`, `column` and `captured_value` together with the entity being restored');
+        expect(propertyOf('RestoreDeviation', 'row_id')?.nullable).toBeUndefined();
+      });
+
+      it("carries the schema's own description: first missing reference, nothing written, what clears it, the #2818 hedge", () => {
+        const description = schemaDescription();
+        expect(description).toContain('whose delete rule is `NO ACTION`');
+        expect(description).toContain('first missing reference the restore finds, so a retry can name another');
+        expect(description).toContain('Nothing was written and the snapshot is untouched.');
+        expect(description).toContain("The refusal clears only once a row with `captured_value`'s id exists again in `target_table`");
+        expect(description).toContain('the refusal is permanent');
+        expect(description).toContain('Contract ahead of WXYC/Backend-Service#2818');
+        expect(description).toContain('the same case is an unexplained 500, so a consumer must tolerate its absence');
+        expect(description).not.toMatch(/restore or re-create/i);
+      });
+    });
+
+    describe('resolution_required does not promise the restore succeeds (wxyc-shared#547)', () => {
+      it('RestoreResolutionRequiredRefusal says supplying resolution clears it but another refusal can follow', () => {
+        const description = String(
+          (spec.components.schemas.RestoreResolutionRequiredRefusal as { description?: string }).description
+        ).replace(/\s+/g, ' ');
+        expect(description).toContain('supplying `resolution` clears this refusal, though the retry can still meet another one');
+        expect(description).not.toMatch(/restores successfully/i);
+      });
+
+      it('the route description says the same', () => {
+        const description = String(operation(restorePath, 'post').description).replace(/\s+/g, ' ');
+        expect(description).toContain('supplying `resolution` clears it, though the retry can still meet another refusal');
+        expect(description).not.toMatch(/succeeds as soon as/i);
       });
     });
 
