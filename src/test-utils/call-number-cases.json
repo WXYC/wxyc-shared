@@ -3,29 +3,33 @@
     "description": "Call number parity corpus. Every composer (library-metadata-lookup LibraryItem.call_number, Backend-Service computeCallNumber, dj-site libraryCode.ts) drives its tests from these rows so the three cannot drift apart by hand. Canonical JSON: src/test-utils/call-number-cases.json; non-TS consumers vendor it from the published tarball and pin its SHA-256.",
     "version": 1,
     "schema": {
-      "id": "Unique kebab-case identifier for the row.",
+      "id": "Unique kebab-case identifier for the row (lowercase letters, digits and hyphens).",
       "why": "One line: what the row pins.",
-      "genre": "Genre name, or null.",
+      "genre": "Genre name, or null. dj-site branches on numeric genre_id: map Rock to 11, Soundtracks to 12, any other name to any other id, and null to undefined.",
       "format": "Format word (cd, CD, LP, ...), verbatim, or null.",
       "call_letters": "Artist code letters as stored, verbatim (V/A, Z-M, ST, ...), or null.",
       "artist_number": "Artist number, or null.",
       "release_number": "Release number, or null.",
       "volume_letters": "Per-release volume letters, or null. No composer renders them yet (LML#1373, Backend-Service#2827); seeded null.",
-      "comp_letter": "Compilation bin letter as a first-class input, or null. No composer reads it yet (LML#1431, Backend-Service#2837, dj-site#1791); seeded null, so bins still come from call_letters or artist_name.",
+      "comp_letter": "Compilation bin letter as a first-class input, or null. No composer reads it yet (LML#1431, Backend-Service#2837, dj-site#1791). A row with comp_letter null and a bin only on artist_name pins the TARGET that the name is ignored, so LML and Backend carry pending until they delete their name-reading.",
       "artist_name": "Artist name as stored, or null. Kept only so a row can pin that the name is ignored once name-reading is deleted.",
-      "full": "The LML/Backend string: <Genre> <Format> <artist half><release half>. Empty only when the row has nothing to compose.",
+      "full": "The LML/Backend string: <Genre> <Format> <artist half><release half>, where the artist half drops dj-site's trailing '/' or '-' when there is no release number. Empty only when the row has nothing to compose.",
       "artist_half": "What dj-site formatArtistCodeWithPunctuation returns (trailing punctuation included), or null when the row has no artist half dj-site would render.",
       "release_half": "What dj-site formatReleaseCode returns, or null when the row has no release number.",
-      "pending": "Optional object keyed by consumer (lml, backend, djsite) whose value is the ticket ref that will close that consumer's known divergence from this row; that consumer skips or expects-fail the row until then."
+      "pending": "Optional object keyed by consumer (lml, backend, djsite) whose value is an OPEN ticket ref (owner/repo#N) whose acceptance criteria close that consumer's divergence from the row's target. A consumer that already matches carries no marker. That consumer skips or expects-fail the row until the ticket lands. Never this corpus's own issue."
     },
     "decisions": [
       {
-        "decision": "Partial rows render LML#1432's form: letters with no artist number is \"Rock cd ST/3\", no artist half is \"Rock cd 3\".",
-        "rationale": "Decided 2026-10-05. Backend-Service#2827 aligns computeCallNumber; until then the two rows carry pending.backend. Backend's rows always have an artist number today (library_artist_view INNER JOINs genre_artist_crossreference and artist_genre_code is NOT NULL), so its side is latent."
+        "decision": "Partial rows render LML#1432's form: letters with no artist number is \"Rock cd ST/3\", no artist half is \"Rock cd 3\", a release number alone is \"3\".",
+        "rationale": "Decided 2026-10-05. Backend-Service#2827 aligns computeCallNumber; until then the three partial rows carry pending.backend. Backend's rows always have an artist number today (library_artist_view INNER JOINs genre_artist_crossreference and artist_genre_code is NOT NULL), so its side is latent."
       },
       {
         "decision": "Letter case is undecided: LML and Backend render call_letters verbatim, dj-site upper-cases it.",
-        "rationale": "No source produces lowercase call letters today, so the corpus seeds uppercase rows and records the one lowercase-input row with pending.djsite pointing at this ticket instead of choosing a rule."
+        "rationale": "No source produces lowercase call letters today, so the corpus seeds uppercase rows only and carries no lowercase-input row that depends on the rule; it is left to whichever ticket decides it."
+      },
+      {
+        "decision": "A compilation bin that exists only in the artist name renders the no-letter form: names are ignored. The bin letter is read only from comp_letter (or the legacy Z-<letter> code).",
+        "rationale": "Epic Backend-Service#2828 deletes name-reading. LML and Backend read the name today (pending LML#1431, Backend-Service#2837); dj-site already ignores it. artist_name stays an input only to pin that the name is ignored."
       }
     ]
   },
@@ -122,7 +126,7 @@
     },
     {
       "id": "release-only",
-      "why": "Only a release number renders as the bare number.",
+      "why": "Partial row, decided 2026-10-05 (LML#1432): only a release number renders as the bare number. Backend drops the whole row (\"\"); its rows always have an artist number today, so that side is latent.",
       "genre": null,
       "format": null,
       "call_letters": null,
@@ -133,7 +137,10 @@
       "artist_name": null,
       "full": "3",
       "artist_half": null,
-      "release_half": "3"
+      "release_half": "3",
+      "pending": {
+        "backend": "WXYC/Backend-Service#2827"
+      }
     },
     {
       "id": "genre-format-release-no-artist-half",
@@ -218,7 +225,7 @@
     },
     {
       "id": "rock-with-bin",
-      "why": "Rock splits into lettered bins; the bin letter survives only as a trailing \" - <letter>\" on the artist name. dj-site never reads the artist name, so it renders no bin letter here until comp_letter lands.",
+      "why": "A Rock compilation whose bin exists only as a trailing \" - <letter>\" on the artist name renders the no-letter form: the name is ignored. LML and Backend still read it from the name until their name-reading is deleted; dj-site already ignores names.",
       "genre": "Rock",
       "format": "cd",
       "call_letters": "V/A",
@@ -227,16 +234,37 @@
       "volume_letters": null,
       "comp_letter": null,
       "artist_name": "Various Artists - Rock - M",
+      "full": "Rock cd V/A-121",
+      "artist_half": "V/A-",
+      "release_half": "121",
+      "pending": {
+        "lml": "WXYC/library-metadata-lookup#1431",
+        "backend": "WXYC/Backend-Service#2837"
+      }
+    },
+    {
+      "id": "rock-with-comp-letter",
+      "why": "The Rock bin letter supplied structurally as comp_letter, with no name to read, renders V/A <L>-Release. No composer reads comp_letter yet.",
+      "genre": "Rock",
+      "format": "cd",
+      "call_letters": "V/A",
+      "artist_number": 0,
+      "release_number": 121,
+      "volume_letters": null,
+      "comp_letter": "M",
+      "artist_name": null,
       "full": "Rock cd V/A M-121",
       "artist_half": "V/A M-",
       "release_half": "121",
       "pending": {
+        "lml": "WXYC/library-metadata-lookup#1431",
+        "backend": "WXYC/Backend-Service#2837",
         "djsite": "WXYC/dj-site#1791"
       }
     },
     {
       "id": "soundtracks-with-bin",
-      "why": "Soundtracks renders the bare bin letter with no V/A word. dj-site never reads the artist name, so it renders no bin letter here until comp_letter lands.",
+      "why": "A Soundtracks compilation whose bin exists only on the artist name renders the no-letter form V/A-Release: the name is ignored. LML and Backend still read it until their name-reading is deleted.",
       "genre": "Soundtracks",
       "format": "cd",
       "call_letters": "V/A",
@@ -245,10 +273,31 @@
       "volume_letters": null,
       "comp_letter": null,
       "artist_name": "Soundtracks - M",
+      "full": "Soundtracks cd V/A-12",
+      "artist_half": "V/A-",
+      "release_half": "12",
+      "pending": {
+        "lml": "WXYC/library-metadata-lookup#1431",
+        "backend": "WXYC/Backend-Service#2837"
+      }
+    },
+    {
+      "id": "soundtracks-with-comp-letter",
+      "why": "The Soundtracks bin letter supplied as comp_letter renders the bare letter with no V/A word. No composer reads comp_letter yet.",
+      "genre": "Soundtracks",
+      "format": "cd",
+      "call_letters": "V/A",
+      "artist_number": 0,
+      "release_number": 12,
+      "volume_letters": null,
+      "comp_letter": "M",
+      "artist_name": null,
       "full": "Soundtracks cd M-12",
       "artist_half": "M-",
       "release_half": "12",
       "pending": {
+        "lml": "WXYC/library-metadata-lookup#1431",
+        "backend": "WXYC/Backend-Service#2837",
         "djsite": "WXYC/dj-site#1791"
       }
     },
@@ -268,25 +317,7 @@
       "release_half": "53"
     },
     {
-      "id": "lowercase-name-bin-is-uppercased",
-      "why": "A lowercase bin letter on the name is uppercased on render. dj-site never reads the artist name, so it renders no bin letter here until comp_letter lands.",
-      "genre": "Rock",
-      "format": "cd",
-      "call_letters": "V/A",
-      "artist_number": 0,
-      "release_number": 121,
-      "volume_letters": null,
-      "comp_letter": null,
-      "artist_name": "Various Artists - Rock - m",
-      "full": "Rock cd V/A M-121",
-      "artist_half": "V/A M-",
-      "release_half": "121",
-      "pending": {
-        "djsite": "WXYC/dj-site#1791"
-      }
-    },
-    {
-      "id": "lowercase-padded-v/a",
+      "id": "lowercase-padded-va",
       "why": "V/A is recognized structurally, case- and whitespace-insensitively.",
       "genre": "Hiphop",
       "format": "cd",
@@ -346,21 +377,6 @@
       "release_half": "651"
     },
     {
-      "id": "legacy-z-no-letter-ignores-name",
-      "why": "Legacy Z-- on Rock has no bin and does not fall through to the name.",
-      "genre": "Rock",
-      "format": "cd",
-      "call_letters": "Z--",
-      "artist_number": 0,
-      "release_number": 121,
-      "volume_letters": null,
-      "comp_letter": null,
-      "artist_name": "Various Artists - Rock - M",
-      "full": "Rock cd V/A-121",
-      "artist_half": "V/A-",
-      "release_half": "121"
-    },
-    {
       "id": "legacy-z-letter-single-bin-genre",
       "why": "Legacy Z-M on a single-bin genre drops the bin (the Java renders it only for Rock and Soundtracks).",
       "genre": "Hiphop",
@@ -389,24 +405,6 @@
       "full": "Rock cd V/A 1-121",
       "artist_half": "V/A 1-",
       "release_half": "121"
-    },
-    {
-      "id": "lowercase-z-is-not-a-compilation-marker",
-      "why": "Z- is case-sensitive, so lowercase z-m is an ordinary artist code. Decision 2 (letter case) is undecided: LML and Backend render call_letters verbatim, dj-site upper-cases it (Z-M 0/).",
-      "genre": "Rock",
-      "format": "cd",
-      "call_letters": "z-m",
-      "artist_number": 0,
-      "release_number": 121,
-      "volume_letters": null,
-      "comp_letter": null,
-      "artist_name": "Various Artists",
-      "full": "Rock cd z-m 0/121",
-      "artist_half": "z-m 0/",
-      "release_half": "121",
-      "pending": {
-        "djsite": "WXYC/wxyc-shared#585"
-      }
     },
     {
       "id": "rock-heading-ignored-outside-rock",
@@ -500,7 +498,7 @@
     },
     {
       "id": "no-release-number-with-bin",
-      "why": "A null release number on a Rock compilation with a bin keeps the bin and drops the trailing hyphen. dj-site never reads the artist name, so it renders no bin letter here until comp_letter lands.",
+      "why": "A null release number on a Rock compilation whose bin exists only on the artist name renders bare V/A: the name is ignored. LML and Backend still read it until their name-reading is deleted.",
       "genre": "Rock",
       "format": "cd",
       "call_letters": "V/A",
@@ -509,10 +507,31 @@
       "volume_letters": null,
       "comp_letter": null,
       "artist_name": "Various Artists - Rock - M",
+      "full": "Rock cd V/A",
+      "artist_half": "V/A-",
+      "release_half": null,
+      "pending": {
+        "lml": "WXYC/library-metadata-lookup#1431",
+        "backend": "WXYC/Backend-Service#2837"
+      }
+    },
+    {
+      "id": "no-release-number-with-comp-letter",
+      "why": "A null release number on a Rock compilation with comp_letter keeps the bin and drops the trailing hyphen. No composer reads comp_letter yet.",
+      "genre": "Rock",
+      "format": "cd",
+      "call_letters": "V/A",
+      "artist_number": 0,
+      "release_number": null,
+      "volume_letters": null,
+      "comp_letter": "M",
+      "artist_name": null,
       "full": "Rock cd V/A M",
       "artist_half": "V/A M-",
       "release_half": null,
       "pending": {
+        "lml": "WXYC/library-metadata-lookup#1431",
+        "backend": "WXYC/Backend-Service#2837",
         "djsite": "WXYC/dj-site#1791"
       }
     },
