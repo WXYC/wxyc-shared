@@ -1958,6 +1958,7 @@ describe('OpenAPI Specification', () => {
       'code_letters',
       'code_number',
       'code_artist_number',
+      'code_comp_letter',
       'label',
       'genre_name',
       'format_name',
@@ -1971,7 +1972,7 @@ describe('OpenAPI Specification', () => {
       'code_volume_letters',
     ];
 
-    it('defines CatalogExportRow with exactly the 21 shipped fields', () => {
+    it('defines CatalogExportRow with exactly the 22 declared fields', () => {
       const schema = spec.components.schemas.CatalogExportRow as Schema;
       expect(schema).toBeDefined();
       expect(Object.keys(schema.properties ?? {}).sort()).toEqual([...EXPORT_FIELDS].sort());
@@ -9485,6 +9486,25 @@ describe('OpenAPI Specification', () => {
       expect(flat(operation('/reviews', 'post').responses?.['400']?.description)).toMatch(
         /both or neither of `intake_item_id` and `album_id`/
       );
+    });
+  });
+  describe('code_comp_letter (WXYC/wxyc-shared#549)', () => {
+    it.each([
+      'Artist',
+      'AlbumSearchResult',
+      'AlbumDetail',
+      'CatalogExportRow',
+      'Rotation',
+      'ArtistCard',
+      'ArtistCardWithDependentCounts',
+      'ArtistRelease',
+      'ArtistByCodeMatch',
+      'BinLibraryDetails',
+    ])('%s declares an optional nullable single-uppercase-letter code_comp_letter', (schema) => {
+      const prop = propertyOf(schema, 'code_comp_letter');
+      expect(prop).toMatchObject({ type: 'string', nullable: true, maxLength: 1, pattern: '^[A-Z]$' });
+      expect(String(prop?.description)).toContain('code_volume_letters');
+      expect(requiredKeysOf(schema)).not.toContain('code_comp_letter');
     });
   });
 });

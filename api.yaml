@@ -2150,6 +2150,19 @@ components:
           type: string
         code_artist_number:
           type: integer
+        code_comp_letter:
+          type: string
+          nullable: true
+          maxLength: 1
+          pattern: '^[A-Z]$'
+          description: &code-comp-letter-description >
+            The section letter of a Rock or Soundtracks compilation (`V/A`)
+            shelf slot (release numbers restart per section, so *Music for
+            Plants* is `Rock V/A M-121`); null on every other slot. It stands
+            where the artist number would be in the call number: Rock renders
+            `V/A <L>-<n>`, Soundtracks `<L>-<n>`. Not `code_volume_letters`,
+            the per-release volume letter. Optional: a server that predates
+            WXYC/Backend-Service#2833 omits it.
         genre_id:
           type: integer
 
@@ -2393,6 +2406,12 @@ components:
           type: integer
         code_artist_number:
           type: integer
+        code_comp_letter:
+          type: string
+          nullable: true
+          maxLength: 1
+          pattern: '^[A-Z]$'
+          description: *code-comp-letter-description
         format_name:
           type: string
         genre_name:
@@ -2721,6 +2740,12 @@ components:
         code_artist_number:
           type: integer
           description: Shelf call-number artist number (genre-scoped).
+        code_comp_letter:
+          type: string
+          nullable: true
+          maxLength: 1
+          pattern: '^[A-Z]$'
+          description: *code-comp-letter-description
         label:
           type: string
           nullable: true
@@ -3284,6 +3309,12 @@ components:
             Joined from `genre_artist_crossreference.artist_genre_code` — the
             artist's number *within* this release's genre, so the same artist
             has a different one per genre. Part of the call number, not an id.
+        code_comp_letter:
+          type: string
+          nullable: true
+          maxLength: 1
+          pattern: '^[A-Z]$'
+          description: *code-comp-letter-description
         code_volume_letters:
           type: string
           nullable: true
@@ -4683,6 +4714,12 @@ components:
             `genre_artist_crossreference.artist_genre_code`. Null on an
             uncatalogued row (no `library.artist_id` to join the
             crossreference on).
+        code_comp_letter:
+          type: string
+          nullable: true
+          maxLength: 1
+          pattern: '^[A-Z]$'
+          description: *code-comp-letter-description
         code_number:
           type: integer
           nullable: true
@@ -5012,6 +5049,12 @@ components:
           type: string
         code_artist_number:
           type: integer
+        code_comp_letter:
+          type: string
+          nullable: true
+          maxLength: 1
+          pattern: '^[A-Z]$'
+          description: *code-comp-letter-description
 
     ArtistCardWithDependentCounts:
       description: >
@@ -5226,6 +5269,12 @@ components:
         genre_id:
           type: integer
           description: Echo of the request's `genre_id`, identical on every row.
+        code_comp_letter:
+          type: string
+          nullable: true
+          maxLength: 1
+          pattern: '^[A-Z]$'
+          description: *code-comp-letter-description
 
     ArtistByCodeResponse:
       type: object
@@ -5283,6 +5332,12 @@ components:
           type: string
         code_artist_number:
           type: integer
+        code_comp_letter:
+          type: string
+          nullable: true
+          maxLength: 1
+          pattern: '^[A-Z]$'
+          description: *code-comp-letter-description
         code_number:
           type: integer
         code_volume_letters:
@@ -6106,6 +6161,12 @@ components:
           type: string
         code_artist_number:
           type: integer
+        code_comp_letter:
+          type: string
+          nullable: true
+          maxLength: 1
+          pattern: '^[A-Z]$'
+          description: *code-comp-letter-description
         code_number:
           type: integer
         format_name:
