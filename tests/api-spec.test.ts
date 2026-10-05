@@ -3945,7 +3945,7 @@ describe('OpenAPI Specification', () => {
     // path, grant clause in the description, delivering issue (all POST)
     it.each([
       ['/intake/{id}/checkout', 'reviews: write', '#2798'],
-      ['/intake/{id}/release', 'Grant: `reviews: write`; a `reviews: manage` holder may release anyone\'s checkout.', '#2798'],
+      ['/intake/{id}/release', 'Grant: `reviews: write`; a `reviews: manage` holder may release anyone\'s item.', '#2798'],
       ['/intake/{id}/request', 'reviews: manage', '#2798'],
       ['/intake/{id}/cancel-request', 'reviews: manage', '#2798'],
       ['/intake/{id}/accept', 'Grant: `reviews: write`, and only the requested DJ.', '#2798'],
@@ -3969,7 +3969,7 @@ describe('OpenAPI Specification', () => {
     // Precedence (BS#2798, ADR 0006): no `reviews` grant is a 403 in any state; then a wrong
     // effective state is a 409; then a caller who is not the holder / requested DJ is a 403.
     it.each([
-      ['release', '`checked_out`', 'a caller who is neither the holder nor a `reviews: manage` holder gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `checked_out` and the caller is neither the holder nor a `reviews: manage` holder.'],
+      ['release', '`checked_out` or `reviewed`', 'a caller who is neither the holder nor a `reviews: manage` holder gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `checked_out` or `reviewed` and the caller is neither the holder nor a `reviews: manage` holder.'],
       ['accept', '`requested`', 'a caller who is not the requested DJ gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` and the caller is not the requested DJ.'],
       ['pass', '`requested`', 'a caller who is not the requested DJ gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` and the caller is not the requested DJ.'],
     ])('states the %s 403/409 precedence in the description and the 403 response', (action, state, who, forbiddenText) => {
@@ -3980,7 +3980,8 @@ describe('OpenAPI Specification', () => {
           ? 'Precedence: a caller without the `reviews: write` grant gets a 403 in any state;'
           : 'Precedence: a caller without the `reviews` grant the route requires gets a 403 in any state;',
       );
-      expect(text).toContain(`otherwise an item not in effective state ${state} answers 409 \`state_changed\`; otherwise ${who}`);
+      const noHolder = action === 'release' ? ', or a `reviewed` item that has no holder,' : '';
+      expect(text).toContain(`otherwise an item not in effective state ${state}${noHolder} answers 409 \`state_changed\`; otherwise ${who}`);
       expect(text).not.toContain('whoever calls');
       const forbidden = flat(o.responses?.['403']?.description);
       expect(forbidden).toContain(forbiddenText);
@@ -4071,6 +4072,7 @@ describe('OpenAPI Specification', () => {
       expect(ops).toContainEqual(['post', '/intake/{id}/request']);
       expect(ops).toContainEqual(['post', '/intake/{id}/file']);
       expect(ops).toContainEqual(['post', '/intake/{id}/print']);
+      expect(ops).toContainEqual(['post', '/intake/{id}/accept-review']);
       expect(ops.length).toBeGreaterThanOrEqual(12);
     });
 
@@ -4131,7 +4133,7 @@ describe('OpenAPI Specification', () => {
 
     it('names the role-level release grant like accept and pass', () => {
       const text = flat(operation('/intake/{id}/release', 'post').description);
-      expect(text).toContain('Grant: `reviews: write`; a `reviews: manage` holder may release anyone\'s checkout.');
+      expect(text).toContain('Grant: `reviews: write`; a `reviews: manage` holder may release anyone\'s item.');
       expect(text).not.toContain('the `reviews` grant the route requires');
     });
 
@@ -4161,14 +4163,15 @@ describe('OpenAPI Specification', () => {
       it('states /file source states, both paths, and the 409 reasons without invalid_citation', () => {
         const o = operation('/intake/{id}/file', 'post');
         const text = flat(o.description);
-        expect(text).toContain('Files an item that has a submitted review (effective state `reviewed`) or a valid citation; a cited item may still be in `pool`.');
+        expect(text).toContain('Files an item that has an accepted review (effective state `reviewed`) or a valid citation; a cited item may still be in `pool`.');
+        expect(text).toContain('Filing clears the holder fields (`checked_out_by`, `checked_out_at`) and any request fields (`requested_dj_id`, `requested_at`), because the music director has the record in hand.');
         expect(text).toContain('An item with neither is 409 `not_reviewed`, and an item already filed is 409 `state_changed`.');
         expect(text).toContain('The 409 is an `IntakeConflictError` (`state_changed`, `not_reviewed`)');
         expect(text).not.toContain('invalid_citation');
         expect(text).toContain('`catalog: write`');
         expect(text).not.toContain('catalog:write');
         const conflict = flat(o.responses?.['409']?.description);
-        expect(conflict).toContain('`not_reviewed`: the item has neither a submitted review nor a valid citation');
+        expect(conflict).toContain('`not_reviewed`: the item has neither an accepted review nor a valid citation');
         expect(conflict).not.toContain('invalid_citation');
       });
 
@@ -4190,15 +4193,15 @@ describe('OpenAPI Specification', () => {
 
       it('defines the /finalize in_rotation refusal by the release\'s rotation rows (BS#2804)', () => {
         const rule =
-          'while the item\'s release has a rotation row, found by `album_id` and not by `rotation_id`, whose `kill_date` is null or after today (station date)';
+          'while the item\'s release has a rotation row, found by `album_id` and not by `rotation_id`, whose `kill_date` is null or after today (the database\'s date, the one every rotation list is filtered by, not the station\'s calendar date)';
         const text = flat(operation('/intake/{id}/finalize', 'post').description);
         expect(text).toContain(rule);
         expect(text).toContain('the message names the latest kill date, or says that no kill date is set');
         expect(flat(operation('/intake/{id}/finalize', 'post').responses?.['409']?.description)).toContain(
-          'rotation row whose kill date is null or after today (station date)',
+          'rotation row whose kill date is null or after today (the database\'s date)',
         );
         const reason = flat((spec.components.schemas.IntakeConflictReason as { description?: string }).description);
-        expect(reason).toContain('(found by `album_id`, not by `rotation_id`) whose `kill_date` is null or after today, station date');
+        expect(reason).toContain('(found by `album_id`, not by `rotation_id`) whose `kill_date` is null or after today, by the database\'s date, the one every rotation list is filtered by, and not the station\'s calendar date');
         expect(reason).toContain('names the latest kill date, or says that no kill date is set');
       });
 
@@ -4215,6 +4218,119 @@ describe('OpenAPI Specification', () => {
       expect(text).toMatch(/catalogued on the cutover date counts as before it/);
       expect(text).not.toMatch(/neither has a review nor predates/);
       expect(text).toMatch(/`in_rotation`/);
+    });
+
+    it('words invalid_citation with all four refusals and not_reviewed with the accepted review', () => {
+      const text = flat((spec.components.schemas.IntakeConflictReason as { description?: string }).description);
+      expect(text).toContain('a cited form submission with no date (`submitted_at` null) once a cutover date is set, because it cannot be shown to predate the cutover (while no cutover date is set it is citable)');
+      expect(text).toContain('or a cited id that names no release or no form submission (WXYC/Backend-Service#2797)');
+      expect(text).toContain('`not_reviewed`: filing an item with no accepted review and no valid citation, or printing one whose accepted review is missing or is handwritten');
+    });
+
+    describe('POST /intake/{id}/accept-review (WXYC/wxyc-shared#571)', () => {
+      it('declares the route with its grant, issue, IntakeId and body', () => {
+        expectBackendRoute('/intake/{id}/accept-review', 'post', { grant: 'reviews: manage', issue: '#2860' });
+        const o = operation('/intake/{id}/accept-review', 'post');
+        expect(o.summary).toBe('Accept a review for an intake item');
+        expect(o.requestBody?.content?.['application/json']?.schema).toEqual(ref('IntakeAcceptReviewRequest'));
+        expect(responseSchema('/intake/{id}/accept-review', 'post', '200')).toEqual(ref('IntakeItem'));
+        expect(responseSchema('/intake/{id}/accept-review', 'post', '400')).toEqual(ref('ApiErrorResponse'));
+        expect(
+          (spec.paths as Record<string, { parameters?: unknown[] }>)['/intake/{id}/accept-review']?.parameters,
+        ).toContainEqual({ $ref: '#/components/parameters/IntakeId' });
+      });
+
+      it('bounds review_id to a positive int4', () => {
+        const body = spec.components.schemas.IntakeAcceptReviewRequest as {
+          required?: string[];
+          properties?: Record<string, { type?: string; minimum?: number; maximum?: number }>;
+        };
+        expect(body.required).toEqual(['review_id']);
+        expect(body.properties?.review_id).toMatchObject({ type: 'integer', minimum: 1, maximum: 2147483647 });
+      });
+
+      it('declares no 409', () => {
+        const o = operation('/intake/{id}/accept-review', 'post');
+        expect(Object.keys(o.responses ?? {}).sort()).toEqual(['200', '400', '401', '403', '404']);
+      });
+
+      it('states which reviews belong to the record, the two-nulls rule and the typed citation rule', () => {
+        const o = operation('/intake/{id}/accept-review', 'post');
+        const text = flat(o.description);
+        expect(text).toContain('two nulls are not a match');
+        expect(text).toContain('`cited_album_id`');
+        expect(text).toContain('A review reached through the citation must be `typed`');
+        expect(text).toContain('Every release has a slip, whether or not it was filed on a citation');
+        expect(text).toContain('the accepted review is swapped and the state stays');
+        expect(text).toContain("This is not `POST /intake/{id}/accept`, which is the requested DJ accepting a music director's request.");
+        expect(flat(o.responses?.['400']?.description)).toContain('a handwritten review reached through the citation');
+      });
+
+      it('leaves /accept for the requested DJ and points at accept-review', () => {
+        const text = flat(operation('/intake/{id}/accept', 'post').description);
+        expect(text).toContain('only the requested DJ');
+        expect(text).toContain('To accept a review, see `POST /intake/{id}/accept-review`.');
+      });
+    });
+
+    it('declares the acceptance fields on IntakeItem', () => {
+      const item = spec.components.schemas.IntakeItem as {
+        required?: string[];
+        properties?: Record<string, { type?: string; format?: string; nullable?: boolean; minimum?: number; items?: { type?: string }; description?: string }>;
+      };
+      expect(item.required).toEqual(
+        expect.arrayContaining(['accepted_review_id', 'accepted_by', 'accepted_at', 'submitted_review_count']),
+      );
+      expect(item.properties?.accepted_review_id).toMatchObject({ type: 'integer', nullable: true });
+      expect(item.properties?.accepted_by).toMatchObject({ type: 'string', nullable: true });
+      expect(item.properties?.accepted_at).toMatchObject({ type: 'string', format: 'date-time', nullable: true });
+      expect(item.properties?.submitted_review_count).toMatchObject({ type: 'integer', minimum: 0 });
+      expect(item.properties?.submitted_review_count?.nullable).toBeUndefined();
+      expect(item.required).not.toContain('draft_authors');
+      expect(item.properties?.draft_authors).toMatchObject({ type: 'array', items: { type: 'string' } });
+      expect(flat(item.properties?.draft_authors?.description)).toContain('names only, never content');
+      expect(flat(item.properties?.draft_authors?.description)).toContain('station-only, never for client telemetry');
+      expect(flat(item.properties?.accepted_review_id?.description)).toContain('the item is first given its own copy of that review');
+      const holder = flat(item.properties?.checked_out_by?.description);
+      expect(holder).toContain('It stays set when a review is accepted, so a `reviewed` item can still name the DJ who has the copy');
+      expect(holder).toContain('A `reviewed` item keeps its holder until the holder or a music director returns it (`POST /intake/{id}/release`) or the item is filed, which clears it.');
+    });
+
+    it('words IntakeItemState, IntakeItemPatch and IntakeDeleteResponse for acceptance', () => {
+      expect(flat((spec.components.schemas.IntakeItemState as { description?: string }).description)).toContain(
+        '`reviewed` once a music director has accepted a review for it (submitting a review does not move it)',
+      );
+      expect(flat((spec.components.schemas.IntakeItemPatch as { description?: string }).description)).toContain(
+        'Setting `cited_album_id` to a different release, or clearing it, also clears an accepted review that was chosen from the cited release (`accepted_review_id`, `accepted_by` and `accepted_at` become null)',
+      );
+      const del = spec.components.schemas.IntakeDeleteResponse as {
+        properties?: { deleted_review_authors?: { description?: string } };
+      };
+      expect(flat(del.properties?.deleted_review_authors?.description)).toContain(
+        'Includes the authors of unsubmitted drafts that went with the item, the same names `IntakeItem.draft_authors` showed before the delete.',
+      );
+    });
+
+    it('declares awaiting_acceptance on GET /intake', () => {
+      const list = operation('/intake', 'get') as Omit<Operation, 'parameters'> & {
+        parameters?: Array<{ name: string; in?: string; required?: boolean; schema?: { type?: string }; description?: string }>;
+      };
+      const p = list.parameters?.find((x) => x.name === 'awaiting_acceptance');
+      expect(p).toMatchObject({ in: 'query', required: false, schema: { type: 'boolean' } });
+      expect(flat(p?.description)).toContain('It combines with `state` by AND.');
+      expect(flat(list.description)).toContain('`passes` for callers holding `reviews: manage` and `draft_authors`');
+      expect(flat(list.responses?.['400']?.description)).toContain('`awaiting_acceptance` is not `true` or `false`');
+    });
+
+    it('lets /release hand back a reviewed item', () => {
+      const o = operation('/intake/{id}/release', 'post');
+      expect(o.summary).toBe('Return an intake item the caller holds');
+      const text = flat(o.description);
+      expect(text).toContain('In effective state `reviewed` the holder fields (`checked_out_by`, `checked_out_at`) are cleared and the state stays `reviewed`; the accepted review is untouched.');
+      expect(text).toContain('an item not in effective state `checked_out` or `reviewed`, or a `reviewed` item that has no holder, answers 409 `state_changed`');
+      const forbidden = flat(o.responses?.['403']?.description);
+      expect(forbidden).toContain('or the item is in effective state `checked_out` or `reviewed` and the caller is neither the holder');
+      expect(forbidden).toContain('Otherwise an item not in effective state `checked_out` or `reviewed` answers 409');
     });
 
     it('documents the single-key citation switch on IntakeItemPatch', () => {
@@ -9420,7 +9536,7 @@ describe('OpenAPI Specification', () => {
       const reasons = flat(schema('ReviewConflictReason').description);
       expect(reasons).toMatch(/`not_draft`: the review is already submitted \(submitting twice\)/);
       expect(reasons).toMatch(
-        /`subject_not_held`: a DJ's `POST \/reviews` names an `intake_item_id` the caller does not currently hold \(effective state `checked_out` with `checked_out_by` the caller\)/
+        /`subject_not_held`: a DJ's `POST \/reviews` names an `intake_item_id` the caller does not currently hold \(effective state `checked_out` or `reviewed`, with `checked_out_by` the caller\)/
       );
       expect(reasons).toMatch(/an on-behalf create \(`reviews: manage`\) is exempt from the hold rule/);
       expect(reasons).toContain("`in_use`: an author deleting their own review while it is in use, meaning it is the accepted review of an intake item or the review most recently printed for a copy. The author may still edit it. A caller with `reviews: manage` is never refused with `in_use`.");

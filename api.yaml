@@ -4019,7 +4019,9 @@ components:
         Where an intake item sits in its lifecycle: logged into `pool`, held
         in the office for a named DJ as `requested` (the DJ it was requested
         of has not yet accepted), held by its holder as `checked_out`,
-        `reviewed`, `filed` into the catalog, and `finalized` once shelved.
+        `reviewed` once a music director has accepted a review for it
+        (submitting a review does not move it), `filed` into the catalog, and
+        `finalized` once shelved.
         `effective_state` on `IntakeItem` reads a stale `requested` as `pool`
         (WXYC/Backend-Service#2796): a `requested` row is stale once its
         `requested_at` is more than 7 days old, or once the DJ it was
@@ -4064,6 +4066,10 @@ components:
         - filed_at
         - printed_at
         - finalized_at
+        - accepted_review_id
+        - accepted_by
+        - accepted_at
+        - submitted_review_count
       properties:
         id:
           type: integer
@@ -4126,10 +4132,14 @@ components:
           type: string
           nullable: true
           description: >
-            Who holds the physical copy, set on checkout. It stays set once
-            the review is submitted: deleting the last review of a
-            `reviewed` item returns it to `checked_out` with the same
-            holder. Read it together with `state`, not as proof of a live
+            Who holds the physical copy, set on checkout. It stays set when a
+            review is accepted, so a `reviewed` item can still name the DJ who
+            has the copy: deleting the accepted review of an item not yet
+            filed returns it to `checked_out` with the same holder, or to
+            `pool` when there is none. A `reviewed` item keeps its holder until
+            the holder or a music director returns it
+            (`POST /intake/{id}/release`) or the item is filed, which clears
+            it. Read it together with `state`, not as proof of a live
             checkout. `null` while `state: checked_out` means the holder's
             account has since been deleted, shown to MDs as "holder
             removed"; an MD may release the item.
@@ -4178,6 +4188,57 @@ components:
               passed_at:
                 type: string
                 format: date-time
+        accepted_review_id:
+          type: integer
+          nullable: true
+          description: >
+            The review a music director accepted for this item: the one its
+            slip prints. It is a review of the item, of the release the item
+            was filed as, or of the release the item cites. `null` until one
+            is accepted, and again if the accepted review is deleted or the
+            citation it was chosen through is changed or cleared. Deleting
+            the cited release from the catalog does not clear it: the item is
+            first given its own copy of that review
+            (WXYC/Backend-Service#2875).
+        accepted_by:
+          type: string
+          nullable: true
+          description: >
+            The accepting music director's account id, shaped like
+            `checked_out_by`. `null` when none is accepted or that account
+            has been deleted.
+        accepted_at:
+          type: string
+          format: date-time
+          nullable: true
+        submitted_review_count:
+          type: integer
+          minimum: 0
+          description: >
+            How many submitted reviews are attached to this item through
+            `intake_item_id`.
+        draft_authors:
+          type: array
+          items:
+            type: string
+          description: >
+            Present only for callers holding `reviews: manage`. The `author`
+            of each unsubmitted draft attached to this item: names only, never
+            content, so a music director can see whose unfinished work a
+            delete would remove. These are `reviews.author` snapshots and
+            carry the caveat on `IntakeDeleteResponse.deleted_review_authors`:
+            station-only, never for client telemetry.
+
+    IntakeAcceptReviewRequest:
+      type: object
+      description: Body for `POST /intake/{id}/accept-review`.
+      required:
+        - review_id
+      properties:
+        review_id:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
 
     NewIntakeItemRequest:
       type: object
@@ -4223,7 +4284,12 @@ components:
         send an explicit null. The schema-level `not` rule is documentation
         the pipeline does not enforce, and the generated `IntakeItemPatchNot`
         type in swift6 and kotlin is a generator artifact, not part of the
-        wire contract.
+        wire contract. Setting `cited_album_id` to a different release, or
+        clearing it, also clears an accepted review that was chosen from the
+        cited release (`accepted_review_id`, `accepted_by` and `accepted_at`
+        become null) and returns the item to `checked_out` if someone holds
+        it, otherwise to `pool`. An accepted review of the item itself is
+        kept. Implemented by WXYC/Backend-Service#2860.
       not:
         allOf:
           - required:
@@ -4323,18 +4389,23 @@ components:
         `LibraryFilingConflictError`. `state_changed`: the item was not in a
         state that allows the transition (two DJs racing for one record, an
         expired request, an item already filed). `not_reviewed`: filing an
-        item with no submitted review and no valid citation, or printing one
-        with no submitted **typed** review (WXYC/Backend-Service#2804 — a
-        handwritten review is already on the sleeve, so nothing prints).
+        item with no accepted review and no valid citation, or printing one
+        whose accepted review is missing or is handwritten
+        (WXYC/Backend-Service#2804; a handwritten review is already on the
+        sleeve, so nothing prints).
         `invalid_citation`: a cited release with no **submitted** review that
         was catalogued **after** the cutover date (station time; a release
         catalogued on the cutover date counts as before it), or a cited form
-        submission dated, in station time, after the cutover date
-        (WXYC/Backend-Service#2797). `already_filed`: delete or patch after
+        submission dated, in station time, after the cutover date, a cited
+        form submission with no date (`submitted_at` null) once a cutover date
+        is set, because it cannot be shown to predate the cutover (while no
+        cutover date is set it is citable), or a cited id that names no
+        release or no form submission (WXYC/Backend-Service#2797). `already_filed`: delete or patch after
         filing. `in_rotation`: finalize of a filed item while its release has a
         rotation row (found by `album_id`, not by `rotation_id`) whose
-        `kill_date` is null or after today, station date
-        (WXYC/Backend-Service#2804); the item stays `filed`, and the message
+        `kill_date` is null or after today, by the database's date, the one
+        every rotation list is filtered by, and not the station's calendar
+        date (WXYC/Backend-Service#2804); the item stays `filed`, and the message
         names the latest kill date, or says that no kill date is set.
 
     IntakeConflictError:
@@ -4370,7 +4441,9 @@ components:
             guaranteed PII-free — it exists for the MD's own in-station
             confirmation of what was removed, never for display outside the
             station or for client telemetry (analytics properties, error
-            breadcrumbs, logs).
+            breadcrumbs, logs). Includes the authors of unsubmitted drafts
+            that went with the item, the same names `IntakeItem.draft_authors`
+            showed before the delete.
 
     ReviewMedium:
       type: string
@@ -4665,8 +4738,8 @@ components:
         `not_draft`: the review is already
         submitted (submitting twice). `subject_not_held`: a DJ's
         `POST /reviews` names an `intake_item_id` the caller does not
-        currently hold (effective state `checked_out` with `checked_out_by`
-        the caller), or the subject is neither an intake item nor a library
+        currently hold (effective state `checked_out` or `reviewed`, with
+        `checked_out_by` the caller), or the subject is neither an intake item nor a library
         release; an on-behalf create (`reviews: manage`) is exempt from the
         hold rule. `in_use`: an author deleting their own review while it is
         in use, meaning it is the accepted review of an intake item or the
@@ -12994,7 +13067,7 @@ paths:
         descending, then `id` descending. Grant: `reviews: read`. `state`
         filters on `effective_state`, so a stale `requested` item (see `IntakeItemState`) is returned for
         `state=pool`, not `state=requested`. Each item carries `passes` for
-        callers holding `reviews: manage`, which the music director notice
+        callers holding `reviews: manage` and `draft_authors`, which the music director notice
         band in WXYC/dj-site#1764 reads from this list. Delivered by
         WXYC/Backend-Service#2796.
       security:
@@ -13005,6 +13078,16 @@ paths:
           required: false
           schema:
             $ref: '#/components/schemas/IntakeItemState'
+        - name: awaiting_acceptance
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: >
+            `true` returns only items with `submitted_review_count` above
+            zero, `accepted_review_id` null, and a state before `filed`.
+            `false` means the same as leaving it out. It combines with `state`
+            by AND.
       responses:
         '200':
           description: The matching items
@@ -13015,7 +13098,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/IntakeItem'
         '400':
-          description: '`state` is not an `IntakeItemState` value'
+          description: '`state` is not an `IntakeItemState` value, or `awaiting_acceptance` is not `true` or `false`'
           content:
             application/json:
               schema:
@@ -13223,14 +13306,18 @@ paths:
       - $ref: '#/components/parameters/IntakeId'
     post:
       x-wxyc-service: backend-service
-      summary: Release a checked-out intake item
+      summary: Return an intake item the caller holds
       description: >
-        Returns a checked-out item to the pool. Grant: `reviews: write`; a
-        `reviews: manage` holder may release anyone's checkout. Precedence: a
-        caller without the `reviews: write` grant gets a 403 in any state; otherwise an item not in
-        effective state `checked_out` answers 409 `state_changed`; otherwise a
-        caller who is neither the holder nor a `reviews: manage` holder gets a
-        403. Delivered by WXYC/Backend-Service#2798.
+        Hands a held item back. In effective state `checked_out` the item
+        returns to `pool`. In effective state `reviewed` the holder fields
+        (`checked_out_by`, `checked_out_at`) are cleared and the state stays
+        `reviewed`; the accepted review is untouched. Grant: `reviews: write`;
+        a `reviews: manage` holder may release anyone's item. Precedence: a
+        caller without the `reviews: write` grant gets a 403 in any state;
+        otherwise an item not in effective state `checked_out` or `reviewed`,
+        or a `reviewed` item that has no holder, answers 409 `state_changed`;
+        otherwise a caller who is neither the holder nor a `reviews: manage`
+        holder gets a 403. Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
       responses:
@@ -13250,9 +13337,9 @@ paths:
           description: No bearer token
         '403':
           description: >-
-            Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `checked_out`
+            Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `checked_out` or `reviewed`
             and the caller is neither the holder nor a `reviews: manage`
-            holder. Otherwise an item not in effective state `checked_out`
+            holder. Otherwise an item not in effective state `checked_out` or `reviewed`
             answers 409 `state_changed` instead
         '404':
           description: No such intake item
@@ -13381,7 +13468,8 @@ paths:
         without the `reviews` grant the route requires gets a 403 in any state;
         otherwise an item not in effective state `requested` answers 409
         `state_changed`; otherwise a caller who is not the requested DJ gets a
-        403. Delivered by WXYC/Backend-Service#2798.
+        403. To accept a review, see `POST /intake/{id}/accept-review`.
+        Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
       responses:
@@ -13417,6 +13505,73 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IntakeConflictError'
+
+  /intake/{id}/accept-review:
+    parameters:
+      - $ref: '#/components/parameters/IntakeId'
+    post:
+      x-wxyc-service: backend-service
+      summary: Accept a review for an intake item
+      description: >
+        A music director accepts one submitted review as the one the item's
+        slip prints. Grant: `reviews: manage`. The review must be `submitted`
+        and belong to the record: its `intake_item_id` is this item, or, once
+        the item is filed, its `album_id` is this item's `album_id`, or the
+        item cites a release (`cited_album_id`) and the review is a `typed`
+        review whose `album_id` is that release. An item that is not filed
+        has no `album_id`, and a review with no `album_id` never matches it
+        through that arm: two nulls are not a match; the same holds for an
+        item with no `cited_album_id`. A review of the item itself, or of the
+        release it was filed as, may be `typed` or `handwritten`. A review
+        reached through the citation must be `typed`: a handwritten one is on
+        another copy's sleeve and cannot be printed for this one. An item
+        that cites a release takes its cover review this way. Every release
+        has a slip, whether or not it was filed on a citation: the citation
+        means no new review has to be written. From effective state `pool`,
+        `requested` or `checked_out` the item becomes `reviewed`. In
+        `reviewed`, `filed` or `finalized` the accepted review is swapped and
+        the state stays; this is how a review is replaced, and the music
+        director would normally reprint. The holder fields (`checked_out_by`,
+        `checked_out_at`, `requested_dj_id`, `requested_at`) are left as they
+        are, so an item accepted while a DJ still has it checked out is
+        `reviewed` and still names its holder. This is not
+        `POST /intake/{id}/accept`, which is the requested DJ accepting a
+        music director's request. No 409: `state_changed` is not used here.
+        Delivered by WXYC/Backend-Service#2860.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntakeAcceptReviewRequest'
+      responses:
+        '200':
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeItem'
+        '400':
+          description: >-
+            A malformed id, a body that fails validation, or a `review_id`
+            that names no review, a draft, a review of another record, or a
+            handwritten review reached through the citation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: manage` permission'
+        '404':
+          description: No such intake item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /intake/{id}/pass:
     parameters:
@@ -13520,7 +13675,7 @@ paths:
       x-wxyc-service: backend-service
       summary: File an intake item into the catalog
       description: >
-        Files an item that has a submitted review (effective state `reviewed`)
+        Files an item that has an accepted review (effective state `reviewed`)
         or a valid citation; a cited item may still be in `pool`. An item with
         neither is 409 `not_reviewed`, and an item already filed is 409
         `state_changed`. Files either as a new release (`kind: new_release`,
@@ -13529,7 +13684,9 @@ paths:
         `album_id` that names no library release is a 400, not a 404. Grant:
         `reviews: manage` **and** `catalog: write`. Returns the item with
         `album_id` (and `rotation_id` when the new release entered rotation).
-        The 409 is an `IntakeConflictError` (`state_changed`, `not_reviewed`),
+        Filing clears the holder fields (`checked_out_by`, `checked_out_at`)
+        and any request fields (`requested_dj_id`, `requested_at`), because
+        the music director has the record in hand. The 409 is an `IntakeConflictError` (`state_changed`, `not_reviewed`),
         or a `LibraryFilingConflictError` when the new-release arm collides
         with the catalog. Delivered by WXYC/Backend-Service#2803.
       security:
@@ -13567,8 +13724,8 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: >
-            An `IntakeConflictError` (`not_reviewed`: the item has neither a
-            submitted review nor a valid citation; `state_changed`: the item is
+            An `IntakeConflictError` (`not_reviewed`: the item has neither an
+            accepted review nor a valid citation; `state_changed`: the item is
             already filed), or a `LibraryFilingConflictError` when the
             new-release arm collides with the catalog
           content:
@@ -13589,7 +13746,8 @@ paths:
         changes go through `PATCH /library/{id}` first. Refused with 409
         `in_rotation` while the item's release has a rotation row, found by
         `album_id` and not by `rotation_id`, whose `kill_date` is null or after
-        today (station date); the item stays `filed`, and the message names the
+        today (the database's date, the one every rotation list is filtered
+        by, not the station's calendar date); the item stays `filed`, and the message names the
         latest kill date, or says that no kill date is set. Delivered by
         WXYC/Backend-Service#2804.
       security:
@@ -13620,7 +13778,7 @@ paths:
         '409':
           description: >-
             `state_changed`, or `in_rotation` while the item's release has a
-            rotation row whose kill date is null or after today (station date)
+            rotation row whose kill date is null or after today (the database's date)
           content:
             application/json:
               schema:
