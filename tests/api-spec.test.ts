@@ -9498,6 +9498,7 @@ describe('OpenAPI Specification', () => {
       'ArtistCard',
       'ArtistCardWithDependentCounts',
       'ArtistRelease',
+      'ArtistSearchMatch',
       'ArtistByCodeMatch',
       'BinLibraryDetails',
     ])('%s declares an optional nullable single-uppercase-letter code_comp_letter', (schema) => {
