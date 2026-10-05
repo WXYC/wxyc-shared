@@ -38,3 +38,25 @@
 # claiming a count is wrong the moment someone appends an entry below it, and no
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
+
+# wxyc-shared#570: the review rules after the 2026-10-04 decisions. Every entry
+# below removes or changes something that exists only in unpublished 11.x:
+# `Review.locked` and the `locked` and `last_review` conflict reasons were added
+# in 11.1.0 (wxyc-shared#565), nothing has been published since 10.7.0
+# (package.json and the newest tag), and the 11.0.0 major (wxyc-shared#562)
+# already tells consumers the release breaks 10.x. No consumer has seen
+# `locked`, so none can depend on it. Ruled a minor (11.3.0 to 11.4.0) by the
+# maintainer on 2026-10-04, with one justified entry per finding, as
+# wxyc-shared#569 did. The `in_use` and `accepted_review` additions are likewise
+# values of a 409 reason that was itself first declared in 11.x.
+get /reviews removed the required property `items/locked` from the response with the `200` status
+post /reviews removed the required property `locked` from the response with the `200` status
+get /reviews/{id} removed the required property `locked` from the response with the `200` status
+patch /reviews/{id} removed the required property `locked` from the response with the `200` status
+post /reviews/{id}/submit removed the required property `locked` from the response with the `200` status
+post /reviews added the new `in_use` enum value to the `reason` response property for the response status `409`
+post /reviews added the new `accepted_review` enum value to the `reason` response property for the response status `409`
+delete /reviews/{id} added the new `in_use` enum value to the `reason` response property for the response status `409`
+delete /reviews/{id} added the new `accepted_review` enum value to the `reason` response property for the response status `409`
+post /reviews/{id}/submit added the new `in_use` enum value to the `reason` response property for the response status `409`
+post /reviews/{id}/submit added the new `accepted_review` enum value to the `reason` response property for the response status `409`
