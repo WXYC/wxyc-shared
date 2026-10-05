@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.8.0');
+      expect(spec.info.version).toBe('11.8.1');
     });
 
     it('should have components section', () => {
@@ -9699,5 +9699,19 @@ describe('OpenAPI Specification', () => {
       expect(String(prop?.description)).toContain('code_volume_letters');
       expect(requiredKeysOf(schema)).not.toContain('code_comp_letter');
     });
+  });
+
+  describe('call_number is documented as a display string (#545)', () => {
+    it.each(['LibraryCatalogItem', 'LibrarySearchItem'])(
+      '%s.call_number says not to parse it and gives named-artist and compilation examples',
+      (schema) => {
+        const description = String(propertyOf(schema, 'call_number')?.description);
+        expect(description).toMatch(/display string/);
+        expect(description).toMatch(/not parse/);
+        for (const example of ['Rock CD S 1/1', 'Hiphop cd V/A-651', 'Rock cd V/A M-121', 'Soundtracks cd M-12']) {
+          expect(description).toContain(example);
+        }
+      }
+    );
   });
 });
