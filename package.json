@@ -78,6 +78,7 @@
     "api.yaml",
     "src/test-utils/wxyc-example-data.json",
     "src/test-utils/charset-torture.json",
+    "src/test-utils/call-number-cases.json",
     "src/analytics/listener-events.json",
     "src/analytics/listener-events.schema.json"
   ],
