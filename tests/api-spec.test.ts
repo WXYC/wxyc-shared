@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.3.0');
+      expect(spec.info.version).toBe('11.4.0');
     });
 
     it('should have components section', () => {
@@ -8871,7 +8871,7 @@ describe('OpenAPI Specification', () => {
         'id', 'album_id', 'intake_item_id', 'author', 'author_user_id', 'recorded_by_user_id',
         'medium', 'status', 'buzzwords', 'artist_blurb', 'review', 'recommended_tracks', 'fcc',
         'publish_website', 'publish_apps', 'publish_instagram', 'credit', 'add_date',
-        'submitted_at', 'last_modified', 'locked',
+        'submitted_at', 'last_modified',
       ];
       // A closed set: a new column (a real-name field, say) must be added here on purpose.
       expect(Object.keys(review.properties ?? {}).sort()).toEqual([...columns].sort());
@@ -8891,7 +8891,9 @@ describe('OpenAPI Specification', () => {
       expect(review.properties?.last_modified).toMatchObject({ format: 'date-time' });
       expect(String(review.properties?.recorded_by_user_id?.description)).toMatch(/music\s+director\s+who\s+recorded/);
       expect(String(review.properties?.credit?.description)).toMatch(/`null`\s+means\s+no\s+choice[^.]*`none`\s+means\s+the\s+author\s+chose\s+no\s+name/);
-      expect(String(review.properties?.locked?.description)).toMatch(/Always\s+`false`\s+for\s+a\s+review\s+attached\s+to\s+`album_id`\s+alone/);
+      expect(review.properties).not.toHaveProperty('locked');
+      expect(review.required).not.toContain('locked');
+      expect(flat(review.properties?.author_user_id?.description as string)).toContain("The review's author account. When set on an on-behalf review, that account is the author: it may edit and delete the review and is the only account that may set `publish_*` and `credit`.");
       expect(String(schema('ReviewMedium').description)).not.toMatch(/differ|author_user_id/);
       expect(String(schema('ReviewMedium').description)).toMatch(/`handwritten`\s+review\s+with\s+no\s+text/);
       expect(String(review.properties?.review?.description)).toMatch(/handwritten\s+review,\s+or\s+for\s+one\s+whose\s+OCR\s+text\s+is\s+still\s+pending/);
@@ -9246,7 +9248,7 @@ describe('OpenAPI Specification', () => {
       const request = schema('NewReviewRequest');
       expect(request.allOf?.[0]).toEqual(ref('ReviewFields'));
       expect(propertyKeysOf('NewReviewRequest').sort()).toEqual([
-        'album_id', 'artist_blurb', 'author', 'author_user_id', 'buzzwords', 'credit', 'fcc', 'intake_item_id',
+        'accept', 'album_id', 'artist_blurb', 'author', 'author_user_id', 'buzzwords', 'credit', 'fcc', 'intake_item_id',
         'medium', 'publish_apps', 'publish_instagram', 'publish_website', 'recommended_tracks', 'review',
       ]);
       expect(requiredKeysOf('NewReviewRequest')).toEqual([]);
@@ -9299,20 +9301,43 @@ describe('OpenAPI Specification', () => {
       );
     });
 
-    it('declares the on-behalf create rules: filed subject locked, author required, unknown account 400', () => {
+    it('declares the on-behalf create rules: any stage, author required, unknown account 400', () => {
       const request = flat(schema('NewReviewRequest').description);
       expect(request).toMatch(/`author` is required on an on-behalf create[^.]*cannot snapshot a display name for someone who is not the caller/);
       expect(request).toMatch(/a missing or blank `author` answers 400, and so does an `author_user_id` that names no account/);
-      expect(request).toMatch(/on-behalf create naming an intake item in `filed` or `finalized` answers 409 `locked`[^.]*slip is printed at filing; a library-release subject is unaffected/);
-      expect(flat(schema('ReviewConflictReason').description)).toMatch(
-        /an on-behalf create naming an intake item in `filed` or `finalized` is refused with it too, because the slip is printed at filing[^()]*\(a library-release subject is unaffected\)/
-      );
+      expect(request).not.toContain('answers 409 `locked`');
+      expect(request).toContain('An on-behalf create may name an intake item in any state, including `filed` and `finalized`.');
+      expect(request).toContain('Creates a draft, except an on-behalf or handwritten create that names an `intake_item_id` and does not send `accept: false`, which creates a submitted, accepted review (see `accept`).');
+      expect(request).toContain('When `author_user_id` is sent, that account is the review\'s author and is told by email that a review was recorded in their name (the email carries no review text).');
+      const props = (schema('NewReviewRequest').allOf![1] as Schema).properties!;
+      expect(flat(props.author!.description as string)).toContain('A value longer than 128 code points is a 400; it is never cut.');
       const bad = flat(operation('/reviews', 'post').responses?.['400']?.description);
       expect(bad).toMatch(/an on-behalf create with a missing or blank `author`/);
       expect(bad).toMatch(/an `author_user_id` that names no account/);
+      expect(bad).toContain('an `accept` sent without the on-behalf fields or with an `album_id` subject');
+      expect(bad).toContain('an accepted on-behalf create of a `typed` review with a `null` `review`');
+      expect(bad).toContain('an on-behalf `author` longer than 128 code points');
       const conflict = flat(operation('/reviews', 'post').responses?.['409']?.description);
-      expect(conflict).toMatch(/`locked`: an on-behalf create naming an intake item in `filed` or `finalized`/);
+      expect(conflict).not.toContain('`locked`');
       expect(conflict).toMatch(/or a subject that is neither an intake item nor a library release/);
+    });
+
+    it('declares NewReviewRequest.accept as optional with no schema-level default', () => {
+      const props = (schema('NewReviewRequest').allOf![1] as Schema).properties!;
+      expect(props.accept).toMatchObject({ type: 'boolean' });
+      expect(props.accept).not.toHaveProperty('default');
+      expect((schema('NewReviewRequest').allOf![1] as Schema).required ?? []).not.toContain('accept');
+      const description = flat(props.accept!.description as string);
+      expect(description).toContain('Only a caller with `reviews: manage` may send this, and it only has meaning on an on-behalf or handwritten create whose subject is an `intake_item_id`.');
+      expect(description).toContain('the review is created already `submitted` (revision 1 is written) and is accepted for the item in the same step, exactly as `POST /intake/{id}/accept-review` would: there is no draft and no separate submit.');
+      expect(description).toContain('a `typed` review with a `null` `review` is a 400 at create');
+      expect(description).toContain('`false` creates a draft that is not accepted, like any other create.');
+      expect(description).toContain('Sent with an `album_id` subject, with either value, it is a 400.');
+    });
+
+    it('generates NewReviewRequest.accept as an optional TypeScript property', () => {
+      const generated = readFileSync(join(__dirname, '../src/generated/openapi-types.d.ts'), 'utf8');
+      expect(generated).toMatch(/NewReviewRequest: [^]*?\baccept\?: boolean;/);
     });
 
     it('keeps the nonexistent-subject case in the subject_not_held reason', () => {
@@ -9326,7 +9351,7 @@ describe('OpenAPI Specification', () => {
       expect(forbidden('/reviews/{id}', 'patch')).toMatch(/may not edit this review/);
       expect(forbidden('/reviews/{id}/submit', 'post')).toMatch(/may not submit this review/);
       expect(forbidden('/reviews/{id}', 'delete')).toMatch(/may not delete this review/);
-      expect(forbidden('/reviews', 'post')).toMatch(/`reviews: manage` for `author`, `author_user_id`, `medium` or a handwritten review/);
+      expect(forbidden('/reviews', 'post')).toMatch(/`reviews: manage` for `author`, `author_user_id`, `medium`, `accept` or a handwritten review/);
     });
 
     it('declares the PATCH 400 for clearing the text of a submitted typed review', () => {
@@ -9336,31 +9361,36 @@ describe('OpenAPI Specification', () => {
     });
 
     it('declares the conflict reasons and the 409 body', () => {
-      expect(schema('ReviewConflictReason').enum).toEqual(['locked', 'not_draft', 'subject_not_held', 'last_review']);
+      expect(schema('ReviewConflictReason').enum).toEqual(['not_draft', 'subject_not_held', 'in_use', 'accepted_review']);
       const error = schema('ReviewConflictError');
       expect(error.required).toEqual(['message', 'reason']);
       expect(error.properties?.reason).toEqual(ref('ReviewConflictReason'));
       const reasons = flat(schema('ReviewConflictReason').description);
-      for (const reason of ['locked', 'not_draft', 'subject_not_held', 'last_review']) {
+      for (const reason of ['not_draft', 'subject_not_held', 'in_use', 'accepted_review']) {
         expect(reasons).toContain(`\`${reason}\``);
       }
+      expect(reasons).not.toContain('`locked`');
+      expect(reasons).not.toContain('`last_review`');
     });
 
     it('says what each conflict reason means', () => {
       const reasons = flat(schema('ReviewConflictReason').description);
-      expect(reasons).toMatch(/`locked`: the item's slip is printed, so only a music director may edit or delete the review/);
       expect(reasons).toMatch(/`not_draft`: the review is already submitted \(submitting twice\)/);
       expect(reasons).toMatch(
         /`subject_not_held`: a DJ's `POST \/reviews` names an `intake_item_id` the caller does not currently hold \(effective state `checked_out` with `checked_out_by` the caller\)/
       );
       expect(reasons).toMatch(/an on-behalf create \(`reviews: manage`\) is exempt from the hold rule/);
-      expect(reasons).toMatch(/`last_review`: deleting the last submitted review of a filed or finalized intake item that has no citation/);
+      expect(reasons).toContain("`in_use`: an author deleting their own review while it is in use, meaning it is the accepted review of an intake item or the review most recently printed for a copy. The author may still edit it. A caller with `reviews: manage` is never refused with `in_use`.");
+      expect(reasons).toContain("`accepted_review`: a caller with `reviews: manage` deleting the accepted review of a `filed` or `finalized` intake item that carries no citation. Accept another review for the item first (`POST /intake/{id}/accept-review`). Deleting the accepted review of an item that is not yet filed is allowed: the item returns to `checked_out` if someone holds it, otherwise to `pool`.");
+      const acceptedReview = reasons.slice(reasons.indexOf('`accepted_review`:'));
+      expect(acceptedReview).not.toMatch(/\bcit(e|es|ed|ing)\b/i);
       expect(flat(operation('/reviews', 'post').responses?.['409']?.description)).toMatch(
         /does not hold \(an on-behalf create is exempt\)/
       );
-      expect(flat(operation('/reviews/{id}', 'delete').description)).toMatch(
-        /`last_review` when it is the last submitted review of a filed or finalized intake item that has no citation/
-      );
+      const remove = flat(operation('/reviews/{id}', 'delete').description);
+      expect(remove).toContain('Who may do this: the author, unless the review is in use; `reviews: manage` for any review, unless it is the accepted review of a filed or finalized item with no citation.');
+      expect(remove).toContain("An author's delete of a review that is in use is refused with `in_use`. A music director's delete of the accepted review of a `filed` or `finalized` item that has no citation is refused with `accepted_review`. A music director deleting the accepted review of an item not yet filed returns the item to `checked_out` if someone holds it, otherwise to `pool`. Deleting a review deletes its edit history.");
+      expect(remove).not.toContain('last_review');
     });
 
     it.each([
@@ -9389,39 +9419,47 @@ describe('OpenAPI Specification', () => {
 
     it.each([
       ['post', '/reviews', ['400', '401', '403', '409']],
-      ['patch', '/reviews/{id}', ['400', '401', '403', '404', '409']],
+      ['patch', '/reviews/{id}', ['400', '401', '403', '404']],
       ['post', '/reviews/{id}/submit', ['400', '401', '403', '404', '409']],
       ['delete', '/reviews/{id}', ['400', '401', '403', '404', '409']],
     ])('declares the refusals of %s %s', (method, path, statuses) => {
       expect(Object.keys(operation(path, method).responses ?? {}).sort()).toEqual(
         ['200', '204'].filter((s) => s in (operation(path, method).responses ?? {})).concat(statuses).sort()
       );
-      expect(responseSchema(path, method, '409')).toEqual(ref('ReviewConflictError'));
+      if (statuses.includes('409')) expect(responseSchema(path, method, '409')).toEqual(ref('ReviewConflictError'));
       if (statuses.includes('404')) expect(responseSchema(path, method, '404')).toEqual(ref('ApiErrorResponse'));
     });
 
     it('names the conflict reasons each route can raise', () => {
       const conflict = (path: string, method: string) => flat(operation(path, method).responses?.['409']?.description);
       expect(conflict('/reviews', 'post')).toContain('`subject_not_held`');
-      expect(conflict('/reviews/{id}', 'patch')).toContain('`locked`');
+      expect(operation('/reviews/{id}', 'patch').responses).not.toHaveProperty('409');
       expect(conflict('/reviews/{id}/submit', 'post')).toContain('`not_draft`');
-      expect(conflict('/reviews/{id}', 'delete')).toContain('`locked`');
-      expect(conflict('/reviews/{id}', 'delete')).toContain('`last_review`');
+      expect(conflict('/reviews/{id}', 'delete')).toBe('`in_use` or `accepted_review`');
     });
 
-    it('states the draft-visibility 404 and the editing rules on the write paths', () => {
+    it('states the draft-visibility 404 and who may write on each path', () => {
+      const text = (path: string, method: string) => flat(operation(path, method).description);
       for (const [path, method] of [['/reviews/{id}', 'patch'], ['/reviews/{id}/submit', 'post'], ['/reviews/{id}', 'delete']]) {
-        expect(flat(operation(path!, method!).description), `${method} ${path}`).toMatch(/draft[^.]*404|404[^.]*draft/);
-        expect(flat(operation(path!, method!).description), `${method} ${path}`).toMatch(/the author while a draft/);
-        expect(flat(operation(path!, method!).description), `${method} ${path}`).toMatch(/for a library-release review, the author always/);
+        expect(text(path!, method!), `${method} ${path}`).toMatch(/draft[^.]*404|404[^.]*draft/);
+        expect(text(path!, method!), `${method} ${path}`).not.toContain('the author while a draft');
       }
+      const patch = text('/reviews/{id}', 'patch');
+      expect(patch).toContain('Who may do this: the author at any time, draft or submitted, printed or not; `reviews: manage` for any review. The author is the account in `author_user_id`, including the linked account of an on-behalf review.');
+      expect(patch).toContain('Only the author may change `publish_website`, `publish_apps`, `publish_instagram` or `credit`. A request from anyone else that carries any of those keys, a `reviews: manage` caller included, is a 403. A review with no `author_user_id` therefore has no consent anyone can set.');
+      expect(patch).toContain("When a `reviews: manage` caller who is not the author edits a review that has an `author_user_id`, the author is told by email (the email carries no review text), and the review's history shows the edit under the music director's name. An edit that changes `fcc` on a review that has been printed notifies the music directors, so they can reprint.");
+      expect(flat(operation('/reviews/{id}', 'patch').responses?.['403']?.description)).toBe(
+        'Caller lacks `reviews: write`, may not edit this review, or sent `publish_*` or `credit` for a review they are not the author of'
+      );
+      expect(text('/reviews/{id}/submit', 'post')).toContain('Who may do this: the author, or `reviews: manage` for any review.');
     });
 
     it('declares the submit 400 for a typed review with no review text, and the notification rule', () => {
       const submit = operation('/reviews/{id}/submit', 'post');
       expect(flat(submit.responses?.['400']?.description)).toMatch(/`typed` review with a `null` `review`/);
       expect(flat(submit.description)).toMatch(/handwritten review may be submitted with no text/);
-      expect(flat(submit.description)).toMatch(/intake review notifies the music directors/);
+      expect(flat(submit.description)).toContain("Submitting never changes the intake item's state: an item becomes `reviewed` only when a music director accepts a review (`POST /intake/{id}/accept-review`). An on-behalf review that a music director creates accepted (`NewReviewRequest.accept`) never passes through this route. Submitting a review attached to an intake item notifies the music directors; a library-release review notifies nobody.");
+      expect(flat(submit.description)).not.toContain('intake review');
       expect(flat(submit.description)).toMatch(/library-release review notifies nobody/);
     });
 
@@ -9430,6 +9468,10 @@ describe('OpenAPI Specification', () => {
       expect(description).toMatch(/`reviews: write` for your own review/);
       expect(description).toMatch(/`reviews: manage` to write on behalf of someone, or to record a handwritten review/);
       expect(description).toMatch(/creates a draft/i);
+      expect(operation('/reviews', 'post').summary).toBe('Create a review');
+      expect(description).toContain('Creates a draft, or for an on-behalf create with `accept`, a submitted and accepted review; see `NewReviewRequest`.');
+      expect(operation('/reviews', 'post').responses?.['200']?.description).toBe('The new review: a draft, or a submitted review when it was created accepted');
+      expect(flat(operation('/reviews', 'post').responses?.['403']?.description)).toContain('`reviews: manage` for `author`, `author_user_id`, `medium`, `accept` or a handwritten review');
       expect(flat(operation('/reviews', 'post').responses?.['400']?.description)).toMatch(
         /both or neither of `intake_item_id` and `album_id`/
       );

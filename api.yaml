@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.3.0
+  version: 11.4.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4367,7 +4367,6 @@ components:
         - add_date
         - submitted_at
         - last_modified
-        - locked
       properties:
         id:
           type: integer
@@ -4393,6 +4392,7 @@ components:
         author_user_id:
           type: string
           nullable: true
+          description: "The review's author account. When set on an on-behalf review, that account is the author: it may edit and delete the review and is the only account that may set `publish_*` and `credit`."
         recorded_by_user_id:
           type: string
           nullable: true
@@ -4442,9 +4442,6 @@ components:
         last_modified:
           type: string
           format: date-time
-        locked:
-          type: boolean
-          description: Computed. The item's slip has been printed, so only music directors may edit. Always `false` for a review attached to `album_id` alone, which has no item and no slip.
 
     IntakeSlip:
       type: object
@@ -4552,7 +4549,8 @@ components:
               maxLength: 128
               description: >
                 Only a caller with `reviews: manage` may send this. The
-                reviewer's name as typed, free text (see `Review.author`).
+                reviewer's name as typed, free text (see `Review.author`). A
+                value longer than 128 code points is a 400; it is never cut.
             author_user_id:
               type: string
               description: >
@@ -4566,23 +4564,40 @@ components:
                 path takes `typed` or `handwritten`; `printed` (see
                 `ReviewMedium`) is for the later OCR backfill and is never
                 sent here.
+            accept:
+              type: boolean
+              description: >
+                Only a caller with `reviews: manage` may send this, and it only
+                has meaning on an on-behalf or handwritten create whose subject
+                is an `intake_item_id`. When `true` or left out on such a
+                create, the review is created already `submitted` (revision 1
+                is written) and is accepted for the item in the same step,
+                exactly as `POST /intake/{id}/accept-review` would: there is no
+                draft and no separate submit. Because the review is submitted
+                at once, a `typed` review with a `null` `review` is a 400 at
+                create. `false` creates a draft that is not accepted, like any
+                other create. Sent with an `album_id` subject, with either
+                value, it is a 400.
       description: >
-        Creates a draft. Send exactly one of `intake_item_id` and `album_id`.
+        Creates a draft, except an on-behalf or handwritten create that names
+        an `intake_item_id` and does not send `accept: false`, which creates a
+        submitted, accepted review (see `accept`). Send exactly one of `intake_item_id` and `album_id`.
         A caller with `reviews: manage` may also send `author`,
         `author_user_id` and `medium`, which makes it an on-behalf review:
         `author` is free text, `author_user_id` optionally links the
         reviewer's account, and the caller is recorded as the one who
-        recorded it. A `handwritten` review is recorded the same way. An
+        recorded it. When `author_user_id` is sent, that account is the
+        review's author and is told by email that a review was recorded in
+        their name (the email carries no review text). A `handwritten` review is recorded the same way. An
         on-behalf review starts with no publishing surface ticked and `credit`
         null, because the author never saw the consent question, so an
         on-behalf create that sends any `publish_*` as `true`, or a non-null
         `credit`, answers 400. `author` is required on an on-behalf create,
         because the service cannot snapshot a display name for someone who is
         not the caller: a missing or blank `author` answers 400, and so does
-        an `author_user_id` that names no account. An on-behalf create naming
-        an intake item in `filed` or `finalized` answers 409 `locked`, because
-        the slip is printed at filing; a library-release subject is
-        unaffected. Without these fields, the review is the
+        an `author_user_id` that names no account. An on-behalf create may name
+        an intake item in any state, including `filed` and `finalized`.
+        Without these fields, the review is the
         caller's own and `typed`: the service sets `author` to a snapshot of
         the account's display name at creation, and sets the account fields
         from the caller, so a client never sends them. `author` is never the
@@ -4595,23 +4610,26 @@ components:
 
     ReviewConflictReason:
       type: string
-      enum: [locked, not_draft, subject_not_held, last_review]
+      enum: [not_draft, subject_not_held, in_use, accepted_review]
       description: >
         Discriminator for the review 409s, pairing with `ReviewConflictError`
         the way `IntakeConflictReason` pairs with `IntakeConflictError`.
-        `locked`: the item's slip is printed, so only a music director may
-        edit or delete the review; an on-behalf create naming an intake item
-        in `filed` or `finalized` is refused with it too, because the slip is
-        printed at filing and the item's reviews are closed (a
-        library-release subject is unaffected). `not_draft`: the review is already
+        `not_draft`: the review is already
         submitted (submitting twice). `subject_not_held`: a DJ's
         `POST /reviews` names an `intake_item_id` the caller does not
         currently hold (effective state `checked_out` with `checked_out_by`
         the caller), or the subject is neither an intake item nor a library
         release; an on-behalf create (`reviews: manage`) is exempt from the
-        hold rule. `last_review`: deleting the last submitted review of a
-        filed or finalized intake item that has no citation, which would
-        leave a post-cutover release with no review.
+        hold rule. `in_use`: an author deleting their own review while it is
+        in use, meaning it is the accepted review of an intake item or the
+        review most recently printed for a copy. The author may still edit it.
+        A caller with `reviews: manage` is never refused with `in_use`.
+        `accepted_review`: a caller with `reviews: manage` deleting the
+        accepted review of a `filed` or `finalized` intake item that carries
+        no citation. Accept another review for the item first
+        (`POST /intake/{id}/accept-review`). Deleting the accepted review of an
+        item that is not yet filed is allowed: the item returns to
+        `checked_out` if someone holds it, otherwise to `pool`.
 
     ReviewConflictError:
       type: object
@@ -13645,11 +13663,12 @@ paths:
           description: 'Caller lacks the `reviews: read` permission'
     post:
       x-wxyc-service: backend-service
-      summary: Create a review draft
+      summary: Create a review
       description: >
         Grant: `reviews: write` for your own review, `reviews: manage` to
         write on behalf of someone, or to record a handwritten review. Creates
-        a draft; see `NewReviewRequest`. Delivered by
+        a draft, or for an on-behalf create with `accept`, a submitted and
+        accepted review; see `NewReviewRequest`. Delivered by
         WXYC/Backend-Service#2802 (the on-behalf and handwritten shape:
         WXYC/Backend-Service#2805).
       security:
@@ -13662,13 +13681,13 @@ paths:
               $ref: '#/components/schemas/NewReviewRequest'
       responses:
         '200':
-          description: The new draft
+          description: 'The new review: a draft, or a submitted review when it was created accepted'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Review'
         '400':
-          description: Validation failure, including both or neither of `intake_item_id` and `album_id`, an on-behalf create that sends any `publish_*` as `true` or a non-null `credit`, an on-behalf create with a missing or blank `author`, and an `author_user_id` that names no account
+          description: Validation failure, including both or neither of `intake_item_id` and `album_id`, an on-behalf create that sends any `publish_*` as `true` or a non-null `credit`, an on-behalf create with a missing or blank `author`, an `author_user_id` that names no account, an `accept` sent without the on-behalf fields or with an `album_id` subject, an accepted on-behalf create of a `typed` review with a `null` `review`, and an on-behalf `author` longer than 128 code points
           content:
             application/json:
               schema:
@@ -13676,9 +13695,9 @@ paths:
         '401':
           description: No bearer token
         '403':
-          description: 'Caller lacks the grant for what was asked: `reviews: write`, or `reviews: manage` for `author`, `author_user_id`, `medium` or a handwritten review'
+          description: 'Caller lacks the grant for what was asked: `reviews: write`, or `reviews: manage` for `author`, `author_user_id`, `medium`, `accept` or a handwritten review'
         '409':
-          description: "`subject_not_held`: a DJ's create naming an `intake_item_id` the caller does not hold (an on-behalf create is exempt), or a subject that is neither an intake item nor a library release. `locked`: an on-behalf create naming an intake item in `filed` or `finalized`"
+          description: "`subject_not_held`: a DJ's create naming an `intake_item_id` the caller does not hold (an on-behalf create is exempt), or a subject that is neither an intake item nor a library release"
           content:
             application/json:
               schema:
@@ -13724,9 +13743,19 @@ paths:
       summary: Edit a review
       description: >
         Grant: `reviews: write`, or `reviews: manage` for any review.
-        Who may do this: the author while a draft, or submitted and not yet
-        printed; for a library-release review, the author always;
-        `reviews: manage` always. A draft the caller may not see is a 404.
+        Who may do this: the author at any time, draft or submitted, printed or
+        not; `reviews: manage` for any review. The author is the account in
+        `author_user_id`, including the linked account of an on-behalf review.
+        Only the author may change `publish_website`, `publish_apps`,
+        `publish_instagram` or `credit`. A request from anyone else that
+        carries any of those keys, a `reviews: manage` caller included, is a
+        403. A review with no `author_user_id` therefore has no consent anyone
+        can set. When a `reviews: manage` caller who is not the author edits a
+        review that has an `author_user_id`, the author is told by email (the
+        email carries no review text), and the review's history shows the edit
+        under the music director's name. An edit that changes `fcc` on a
+        review that has been printed notifies the music directors, so they can
+        reprint. A draft the caller may not see is a 404.
         Delivered by WXYC/Backend-Service#2802.
       security:
         - BearerAuth: []
@@ -13752,29 +13781,28 @@ paths:
         '401':
           description: No bearer token
         '403':
-          description: 'Caller lacks `reviews: write`, or may not edit this review'
+          description: 'Caller lacks `reviews: write`, may not edit this review, or sent `publish_*` or `credit` for a review they are not the author of'
         '404':
           description: No such review, or a draft the caller may not see
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
-        '409':
-          description: "`locked`"
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReviewConflictError'
     delete:
       x-wxyc-service: backend-service
       summary: Delete a review
       description: >
         Grant: `reviews: write`, or `reviews: manage` for any review.
-        Who may do this: the author while a draft, or submitted and not yet
-        printed; for a library-release review, the author always;
-        `reviews: manage` always. A draft the caller may not see is a 404.
-        Refused with `last_review` when it is the last submitted review of a
-        filed or finalized intake item that has no citation. Delivered by
+        Who may do this: the author, unless the review is in use;
+        `reviews: manage` for any review, unless it is the accepted review of
+        a filed or finalized item with no citation. A draft the caller may not
+        see is a 404. An author's delete of a review that is in use is refused
+        with `in_use`. A music director's delete of the accepted review of a
+        `filed` or `finalized` item that has no citation is refused with
+        `accepted_review`. A music director deleting the accepted review of an
+        item not yet filed returns the item to `checked_out` if someone holds
+        it, otherwise to `pool`. Deleting a review deletes its edit history.
+        Delivered by
         WXYC/Backend-Service#2802.
       security:
         - BearerAuth: []
@@ -13798,7 +13826,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
-          description: "`locked` or `last_review`"
+          description: "`in_use` or `accepted_review`"
           content:
             application/json:
               schema:
@@ -13812,11 +13840,14 @@ paths:
       summary: Submit a draft review
       description: >
         Grant: `reviews: write`, or `reviews: manage` for any review.
-        Who may do this: the author while a draft, or submitted and not yet
-        printed; for a library-release review, the author always;
-        `reviews: manage` always. A draft the caller may not see is a 404.
-        Submitting an intake review notifies the music directors; a
-        library-release review notifies nobody. A `typed` review needs
+        Who may do this: the author, or `reviews: manage` for any review. A
+        draft the caller may not see is a 404. Submitting never changes the
+        intake item's state: an item becomes `reviewed` only when a music
+        director accepts a review (`POST /intake/{id}/accept-review`). An
+        on-behalf review that a music director creates accepted
+        (`NewReviewRequest.accept`) never passes through this route.
+        Submitting a review attached to an intake item notifies the music
+        directors; a library-release review notifies nobody. A `typed` review needs
         non-null `review` text; a handwritten review may be submitted with no
         text. Delivered by WXYC/Backend-Service#2802.
       security:
