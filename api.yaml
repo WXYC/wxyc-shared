@@ -4288,8 +4288,11 @@ components:
         clearing it, also clears an accepted review that was chosen from the
         cited release (`accepted_review_id`, `accepted_by` and `accepted_at`
         become null) and returns the item to `checked_out` if someone holds
-        it, otherwise to `pool`. An accepted review of the item itself is
-        kept. Implemented by WXYC/Backend-Service#2860.
+        it, otherwise to `pool`. Citing a submission instead
+        (`{cited_submission_id: 12}`, the switch above) clears
+        `cited_album_id` and counts as clearing it here: an accepted review
+        chosen from that release goes with it. An accepted review of the
+        item itself is kept. Implemented by WXYC/Backend-Service#2860.
       not:
         allOf:
           - required:
@@ -13317,8 +13320,11 @@ paths:
         otherwise an item not in effective state `checked_out` or `reviewed`,
         or a `reviewed` item that has no holder, answers 409 `state_changed`;
         otherwise a caller who is neither the holder nor a `reviews: manage`
-        holder gets a 403. Delivered by WXYC/Backend-Service#2798 (handing
-        back a `reviewed` item: WXYC/Backend-Service#2860).
+        holder gets a 403. A `reviewed` item has a holder while
+        `checked_out_at` is set: one whose holder's account was deleted
+        (`checked_out_by` null, "holder removed") still counts as held, and a
+        music director may return it. Delivered by WXYC/Backend-Service#2798
+        (handing back a `reviewed` item: WXYC/Backend-Service#2860).
       security:
         - BearerAuth: []
       responses:

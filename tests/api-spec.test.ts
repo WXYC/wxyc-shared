@@ -4318,6 +4318,12 @@ describe('OpenAPI Specification', () => {
       expect(flat((spec.components.schemas.IntakeItemPatch as { description?: string }).description)).toContain(
         'Setting `cited_album_id` to a different release, or clearing it, also clears an accepted review that was chosen from the cited release (`accepted_review_id`, `accepted_by` and `accepted_at` become null)',
       );
+      // The single-key switch clears `cited_album_id` implicitly, so the
+      // reset must say that counts, or an implementer keys it on the body
+      // key alone and a slip prints a review of a release no longer cited.
+      expect(flat((spec.components.schemas.IntakeItemPatch as { description?: string }).description)).toContain(
+        'Citing a submission instead (`{cited_submission_id: 12}`, the switch above) clears `cited_album_id` and counts as clearing it here: an accepted review chosen from that release goes with it.',
+      );
       const del = spec.components.schemas.IntakeDeleteResponse as {
         properties?: { deleted_review_authors?: { description?: string } };
       };
@@ -4352,6 +4358,10 @@ describe('OpenAPI Specification', () => {
       // WXYC/Backend-Service#2860 lands; say so the way PATCH /intake/{id}
       // names its citation rules.
       expect(text).toContain('Delivered by WXYC/Backend-Service#2798 (handing back a `reviewed` item: WXYC/Backend-Service#2860).');
+      // "Has no holder" is defined by `checked_out_at`, so a removed holder
+      // (`checked_out_by` null) does not turn a music director's return
+      // into a 409; `checked_out_by` promises an MD may release the item.
+      expect(text).toContain('A `reviewed` item has a holder while `checked_out_at` is set: one whose holder\'s account was deleted (`checked_out_by` null, "holder removed") still counts as held, and a music director may return it.');
       const forbidden = flat(o.responses?.['403']?.description);
       expect(forbidden).toContain('or the item is in effective state `checked_out` or `reviewed` and the caller is neither the holder');
       // The 403 text's precedence must agree with the description's: a
