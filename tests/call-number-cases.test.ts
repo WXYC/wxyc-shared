@@ -56,18 +56,31 @@ describe('call-number corpus shape', () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it('keys pending markers by known consumer with a ticket ref', () => {
+  it('keys pending markers by known consumer with an owner/repo#N ticket ref, never this corpus\'s own issue', () => {
     for (const c of callNumberCases) {
       for (const [consumer, ref] of Object.entries(c.pending ?? {})) {
         expect(CALL_NUMBER_CONSUMERS, c.id).toContain(consumer);
-        expect(ref, c.id).toMatch(/^WXYC\/[\w-]+#\d+$/);
+        expect(ref, c.id).toMatch(/^[\w.-]+\/[\w.-]+#\d+$/);
+        expect(ref, c.id).not.toBe('WXYC/wxyc-shared#585');
       }
     }
   });
 
-  it('records the forced partial-row divergence on Backend', () => {
-    const partial = callNumberCases.filter((c) => c.full === 'Rock cd ST/3' || c.full === 'Rock cd 3');
-    expect(partial).toHaveLength(2);
-    for (const c of partial) expect(c.pending?.backend).toBe('WXYC/Backend-Service#2827');
+  it('has kebab-case ids', () => {
+    for (const c of callNumberCases) expect(c.id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+  });
+
+  it('records the forced partial-row divergence on Backend for every partial row', () => {
+    // Partial: a release number with no artist half to hang it on (no letters, or no artist number),
+    // outside the V/A and legacy Z- compilation forms, which have their own rules.
+    const partial = callNumberCases.filter((c) => {
+      const letters = (c.call_letters ?? '').trim();
+      const compilation = letters.toUpperCase() === 'V/A' || letters.startsWith('Z-');
+      return !compilation && c.release_number !== null && (c.call_letters === null || c.artist_number === null);
+    });
+    expect(partial.map((c) => c.id).sort()).toEqual(
+      ['genre-format-release-no-artist-half', 'letters-without-artist-number', 'release-only'].sort(),
+    );
+    for (const c of partial) expect(c.pending?.backend, c.id).toBe('WXYC/Backend-Service#2827');
   });
 });
