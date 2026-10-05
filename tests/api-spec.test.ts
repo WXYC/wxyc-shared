@@ -9708,9 +9708,10 @@ describe('OpenAPI Specification', () => {
         const description = String(propertyOf(schema, 'call_number')?.description);
         expect(description).toMatch(/display string/);
         expect(description).toMatch(/not parse/);
-        for (const example of ['Rock CD S 1/1', 'Hiphop cd V/A-651', 'Rock cd V/A M-121', 'Soundtracks cd M-12']) {
+        for (const example of ['Rock cd S 1/1', 'Hiphop cd V/A-651', 'Rock cd V/A M-121', 'Soundtracks cd M-12']) {
           expect(description).toContain(example);
         }
+        expect(description).not.toMatch(/Computed from|<ArtistNum>\/<ReleaseNum>/);
       }
     );
   });

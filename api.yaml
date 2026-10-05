@@ -8273,11 +8273,15 @@ components:
           description: >
             A display string: the shelf locator as a librarian reads it. Clients
             must not parse it or recompose it from other fields. Named artists
-            render as "Rock CD S 1/1"; compilations render as "Hiphop cd V/A-651",
+            render as "Rock cd S 1/1"; compilations render as "Hiphop cd V/A-651",
             "Rock cd V/A M-121" or "Soundtracks cd M-12", with no artist number
-            and a "-" separator. Reference formatters in tubafrenzy:
-            ArtistLibraryCode.getCallLettersAndNumbers and
-            LibraryRelease.getEntireLibraryCode.
+            and a "-" separator. A release with a volume letter may carry it
+            after the release number as "-<Letter>". The artist half follows
+            tubafrenzy's `ArtistLibraryCode.getCallLettersAndNumbersWithPunctuation`
+            and the release half its `LibraryRelease.getCallNumbersAndLetters`;
+            unlike tubafrenzy's `LibraryRelease.getEntireLibraryCode`, this
+            string also names the format.
+            A row-less item (`id` 0) carries the sentinel "(external)" instead.
         library_url:
           type: string
           description: >
@@ -10963,11 +10967,14 @@ components:
           description: >
             A display string: the shelf locator as a librarian reads it. Clients
             must not parse it or recompose it from other fields. Named artists
-            render as "Rock CD S 1/1"; compilations render as "Hiphop cd V/A-651",
+            render as "Rock cd S 1/1"; compilations render as "Hiphop cd V/A-651",
             "Rock cd V/A M-121" or "Soundtracks cd M-12", with no artist number
-            and a "-" separator. Reference formatters in tubafrenzy:
-            ArtistLibraryCode.getCallLettersAndNumbers and
-            LibraryRelease.getEntireLibraryCode.
+            and a "-" separator. A release with a volume letter may carry it
+            after the release number as "-<Letter>". The artist half follows
+            tubafrenzy's `ArtistLibraryCode.getCallLettersAndNumbersWithPunctuation`
+            and the release half its `LibraryRelease.getCallNumbersAndLetters`;
+            unlike tubafrenzy's `LibraryRelease.getEntireLibraryCode`, this
+            string also names the format.
         library_url:
           type: string
           description: >
