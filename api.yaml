@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.4.0
+  version: 11.5.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2577,7 +2577,7 @@ components:
         code_volume_letters (WXYC/wxyc-shared#548) is a later producer-facing
         addition of the same kind.
 
-        All four are producer-facing and OPTIONAL on the wire — none is in
+        Every producer-facing field above is OPTIONAL on the wire — none is in
         `required`, so the pre-BS#1965 15-field body still decodes cleanly
         against a client generated from this spec. That leniency is deliberate
         and load-bearing: this row is also the iOS Spotlight clone's shape, and
