@@ -1968,9 +1968,10 @@ describe('OpenAPI Specification', () => {
       'rotation_bin',
       'rotation_kill_date',
       'has_digital_audio',
+      'code_volume_letters',
     ];
 
-    it('defines CatalogExportRow with exactly the 20 shipped fields', () => {
+    it('defines CatalogExportRow with exactly the 21 shipped fields', () => {
       const schema = spec.components.schemas.CatalogExportRow as Schema;
       expect(schema).toBeDefined();
       expect(Object.keys(schema.properties ?? {}).sort()).toEqual([...EXPORT_FIELDS].sort());
@@ -2018,6 +2019,15 @@ describe('OpenAPI Specification', () => {
       expect(schema.properties?.legacy_release_id?.type).toBe('integer');
       expect(schema.properties?.album_artist?.type).toBe('string');
       expect(schema.properties?.alternate_artist_name?.type).toBe('string');
+    });
+
+    it('keeps code_volume_letters an optional, nullable string (#548)', () => {
+      const schema = spec.components.schemas.CatalogExportRow as Schema;
+      const prop = schema.properties?.code_volume_letters;
+      expect(prop).toBeDefined();
+      expect(prop!.type).toBe('string');
+      expect(prop!.nullable).toBe(true);
+      expect(schema.required ?? []).not.toContain('code_volume_letters');
     });
 
     it('keeps has_digital_audio optional and boolean — absent means false (#417)', () => {

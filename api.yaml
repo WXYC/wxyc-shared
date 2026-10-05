@@ -2574,6 +2574,8 @@ components:
         direct Postgres read: legacy_release_id (the producer emits it AS the
         library.db id, since BS serials collide with the tubafrenzy id space),
         album_artist, alternate_artist_name, and cross_reference_names.
+        code_volume_letters (WXYC/wxyc-shared#548) is a later producer-facing
+        addition of the same kind.
 
         All four are producer-facing and OPTIONAL on the wire — none is in
         `required`, so the pre-BS#1965 15-field body still decodes cleanly
@@ -2693,6 +2695,21 @@ components:
             observable until an unrelated write on a covered table happened to
             bump the watermark, which is why every table a field on this row is
             derived from must carry the trigger.
+        code_volume_letters:
+          type: string
+          nullable: true
+          maxLength: 4
+          description: >
+            The per-release volume letter, library.code_volume_letters
+            (varchar(4)). Volumes of one set share a call number (e.g. volumes
+            A-G of one compilation at one shelf location), so this tells them
+            apart. Stored RAW: the wire does not trim or case-fold it. Case
+            policy is Backend-Service#2582's; library.db folds it at build time
+            (discogs-etl#439, wxyc_catalog.normalize_volume_letters).
+
+            NOT the compilation-section letter (code_comp_letter, a separate
+            field). Optional and nullable like the other producer-facing fields,
+            for the reason given in the schema description.
         album_title:
           type: string
         code_letters:
