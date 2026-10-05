@@ -2162,7 +2162,7 @@ components:
             where the artist number would be in the call number: Rock renders
             `V/A <L>-<n>`, Soundtracks `<L>-<n>`. Not `code_volume_letters`,
             the per-release volume letter. Optional: a server that predates
-            WXYC/Backend-Service#2833 omits it.
+            WXYC/Backend-Service#2835, which exposes it, omits it.
         genre_id:
           type: integer
 
@@ -5005,6 +5005,12 @@ components:
             The genre's display name, from the same INNER join as `genre_id`
             (`genres.genre_name` is NOT NULL). Same treatment: returned on
             every row, optional in the contract for the same reason.
+        code_comp_letter:
+          type: string
+          nullable: true
+          maxLength: 1
+          pattern: '^[A-Z]$'
+          description: *code-comp-letter-description
 
     ArtistSearchResponse:
       type: object
@@ -5243,7 +5249,10 @@ components:
         `genre_artist_crossreference` joined to `genres`; this lookup
         projects `(artist_id, artist_name, code_letters)` and never joins
         `genres`, echoing the already-validated `genre_id`/`code_number`
-        back onto each row rather than reading a per-row fact.
+        back onto each row rather than reading a per-row fact. The exception
+        is `code_comp_letter`, read per row from
+        `genre_artist_crossreference`: it is what tells apart the Rock and
+        Soundtracks compilation sections that share a code.
       required:
         - id
         - artist_name
