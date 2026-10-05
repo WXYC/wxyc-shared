@@ -6847,15 +6847,16 @@ components:
 
         Distinct from the in-app `Review` model (`/reviews`: many per
         release, each attached to an intake item or a library release):
-        submissions here are append-only and identify
-        albums by free text with a best-effort `album_id` link. The
-        This endpoint returns the reviewer's name (`reviewer`): the station
-        allows reviewer names inside the station (dj-site, the DJ apps), and
-        this route is reachable only by signed-in station staff. They are
-        never shown outside it; the public review attach (`WxycReviewItem`)
-        carries no reviewer.
+        submissions here are append-only and identify albums by free text
+        with a best-effort `album_id` link. This endpoint returns the
+        reviewer's name (`reviewer`): the station allows reviewer names
+        inside the station (dj-site, the DJ apps), and this route is
+        reachable only by signed-in station staff. They are never shown
+        outside it; the public review attach (`WxycReviewItem`) carries no
+        reviewer.
       required:
         - id
+        - reviewer
         - album_id
         - artist_name
         - album_title
@@ -6869,7 +6870,6 @@ components:
         - rotated
         - released_within_six_months
         - social_consent
-        - reviewer
         - submitted_at
       properties:
         id:

@@ -9023,7 +9023,12 @@ describe('OpenAPI Specification', () => {
       const text = schema('AlbumReview').description ?? '';
       expect(text).not.toMatch(/deliberately not\s+exposed/);
       expect(text).not.toMatch(/withheld/);
-      expect(text).toMatch(/This\s+endpoint\s+returns\s+the\s+reviewer's\s+name\s+\(`reviewer`\)/);
+      // The whole replacement sentence, anchored on the clause before it: a
+      // leftover word from the old wording ("link. The This endpoint") or a
+      // dropped clause would pass a pin on the opening words alone.
+      expect(flat(text)).toContain(
+        "best-effort `album_id` link. This endpoint returns the reviewer's name (`reviewer`): the station allows reviewer names inside the station (dj-site, the DJ apps), and this route is reachable only by signed-in station staff. They are never shown outside it; the public review attach (`WxycReviewItem`) carries no reviewer.",
+      );
       expect(text).toMatch(/inside\s+the\s+station/);
       expect(text).toMatch(/never\s+shown\s+outside/);
       expect(text).not.toMatch(/one-per-album|author-owned|several per album/);
@@ -9039,6 +9044,15 @@ describe('OpenAPI Specification', () => {
     });
 
     it('keeps WxycReviewItem and the wxycReviews attach nameless', () => {
+      // The attach must still point at this schema by name, and the schema
+      // must still exist under that name: `propertyOf`/`propertyKeysOf` answer
+      // "nothing" for a missing schema, so without these two a renamed schema
+      // or a `$ref` re-pointed at `AlbumReview` (which now carries `reviewer`)
+      // would pass the name check below vacuously.
+      expect(propertyOf('AlbumMetadataResponse', 'wxycReviews')?.items).toEqual(ref('WxycReviewItem'));
+      const keys = propertyKeysOf('WxycReviewItem');
+      expect(keys).toContain('review');
+      expect(keys.filter((key) => /reviewer/i.test(key))).toEqual([]);
       expect(propertyOf('WxycReviewItem', 'reviewer')).toBeUndefined();
       expect(propertyOf('AlbumMetadataResponse', 'wxycReviews')?.description).toMatch(/Reviewer identity is never included/);
     });
