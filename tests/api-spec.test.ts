@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.6.0');
+      expect(spec.info.version).toBe('11.7.0');
     });
 
     it('should have components section', () => {
@@ -9022,11 +9022,29 @@ describe('OpenAPI Specification', () => {
     it('corrects the AlbumReview description to allow names inside the station only', () => {
       const text = schema('AlbumReview').description ?? '';
       expect(text).not.toMatch(/deliberately not\s+exposed/);
-      expect(text).toMatch(/withheld\s+by\s+this\s+endpoint/);
+      expect(text).not.toMatch(/withheld/);
+      expect(text).toMatch(/This\s+endpoint\s+returns\s+the\s+reviewer's\s+name\s+\(`reviewer`\)/);
       expect(text).toMatch(/inside\s+the\s+station/);
       expect(text).toMatch(/never\s+shown\s+outside/);
       expect(text).not.toMatch(/one-per-album|author-owned|several per album/);
       expect(text).toMatch(/many\s+per\s+release/);
+    });
+
+    it('pins reviewer as a required, nullable string for use inside the station only', () => {
+      expect(schema('AlbumReview').required).toContain('reviewer');
+      const p = propertyOf('AlbumReview', 'reviewer') as { type?: string; nullable?: boolean; description?: string };
+      expect(p).toMatchObject({ type: 'string', nullable: true });
+      expect(flat(p.description)).toMatch(/inside the station only/);
+      expect(flat(operation('/album-reviews', 'get').description)).toMatch(/carries the reviewer's name as typed into the form \(`reviewer`\)/);
+    });
+
+    it('keeps WxycReviewItem and the wxycReviews attach nameless', () => {
+      expect(propertyOf('WxycReviewItem', 'reviewer')).toBeUndefined();
+      expect(propertyOf('AlbumMetadataResponse', 'wxycReviews')?.description).toMatch(/Reviewer identity is never included/);
+    });
+
+    it('drops the print lock from the AlbumReview description', () => {
+      expect(schema('AlbumReview').description).not.toMatch(/locked\s+at\s+print/);
     });
   });
 
