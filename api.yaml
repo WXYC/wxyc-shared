@@ -4037,10 +4037,10 @@ components:
         waiting for a review (WXYC/Backend-Service#2791). Its three DJ-name
         fields (`requested_dj_name`, `checked_out_by_name`,
         `passes[].dj_name`) are `auth_user.name`, the public-safe display
-        value; no real name appears in it.
-        `passes` is present only for callers holding `reviews: manage`.
-        `IntakeDeleteResponse.deleted_review_authors` is a different schema
-        with its own, weaker guarantee — see its description.
+        value; no real name appears in it. `passes` and `draft_authors` are
+        present only for callers holding `reviews: manage`; `draft_authors`
+        is `reviews.author` free text and carries the weaker guarantee of
+        `IntakeDeleteResponse.deleted_review_authors`; see its description.
       required:
         - id
         - artist_name
@@ -4395,7 +4395,7 @@ components:
         sleeve, so nothing prints).
         `invalid_citation`: a cited release with no **submitted** review that
         was catalogued **after** the cutover date (station time; a release
-        catalogued on the cutover date counts as before it), or a cited form
+        catalogued on the cutover date counts as before it), a cited form
         submission dated, in station time, after the cutover date, a cited
         form submission with no date (`submitted_at` null) once a cutover date
         is set, because it cannot be shown to predate the cutover (while no
@@ -13066,10 +13066,10 @@ paths:
         The intake pool and every other state, ordered by `logged_at`
         descending, then `id` descending. Grant: `reviews: read`. `state`
         filters on `effective_state`, so a stale `requested` item (see `IntakeItemState`) is returned for
-        `state=pool`, not `state=requested`. Each item carries `passes` for
-        callers holding `reviews: manage` and `draft_authors`, which the music director notice
-        band in WXYC/dj-site#1764 reads from this list. Delivered by
-        WXYC/Backend-Service#2796.
+        `state=pool`, not `state=requested`. Each item carries `passes` and
+        `draft_authors` for callers holding `reviews: manage`; the music
+        director notice band in WXYC/dj-site#1764 reads `passes` from this
+        list. Delivered by WXYC/Backend-Service#2796.
       security:
         - BearerAuth: []
       parameters:
@@ -13317,7 +13317,8 @@ paths:
         otherwise an item not in effective state `checked_out` or `reviewed`,
         or a `reviewed` item that has no holder, answers 409 `state_changed`;
         otherwise a caller who is neither the holder nor a `reviews: manage`
-        holder gets a 403. Delivered by WXYC/Backend-Service#2798.
+        holder gets a 403. Delivered by WXYC/Backend-Service#2798 (handing
+        back a `reviewed` item: WXYC/Backend-Service#2860).
       security:
         - BearerAuth: []
       responses:
@@ -13339,8 +13340,8 @@ paths:
           description: >-
             Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `checked_out` or `reviewed`
             and the caller is neither the holder nor a `reviews: manage`
-            holder. Otherwise an item not in effective state `checked_out` or `reviewed`
-            answers 409 `state_changed` instead
+            holder. Otherwise an item not in effective state `checked_out` or `reviewed`,
+            or a `reviewed` item that has no holder, answers 409 `state_changed` instead
         '404':
           description: No such intake item
           content:
