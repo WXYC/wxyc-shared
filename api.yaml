@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.6.0
+  version: 11.7.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -6846,12 +6846,14 @@ components:
         Backend-Service's album-reviews ETL.
 
         Distinct from the in-app `Review` model (`/reviews`: many per
-        release, each attached to an intake item or a library release and
-        locked at print): submissions here are append-only and identify
+        release, each attached to an intake item or a library release):
+        submissions here are append-only and identify
         albums by free text with a best-effort `album_id` link. The
-        reviewer's name is withheld by this endpoint today. The station
-        allows reviewer names inside the station (dj-site, the DJ apps);
-        they are never shown outside it.
+        This endpoint returns the reviewer's name (`reviewer`): the station
+        allows reviewer names inside the station (dj-site, the DJ apps), and
+        this route is reachable only by signed-in station staff. They are
+        never shown outside it; the public review attach (`WxycReviewItem`)
+        carries no reviewer.
       required:
         - id
         - album_id
@@ -6867,10 +6869,20 @@ components:
         - rotated
         - released_within_six_months
         - social_consent
+        - reviewer
         - submitted_at
       properties:
         id:
           type: integer
+        reviewer:
+          type: string
+          nullable: true
+          description: >-
+            The form's 'Name of reviewer, and date' answer, verbatim: free
+            text, usually a real name followed by a date. Not parsed. `null`
+            when the row has none. For use inside the station only: never
+            show it on a public surface, and never send it to analytics,
+            error reports or logs.
         album_id:
           type: integer
           nullable: true
@@ -13621,7 +13633,9 @@ paths:
       description: >
         Grant: `album_reviews: read`. Ordered by `submitted_at` descending.
         Station-internal: the list is not filtered by `social_consent`, and
-        rows with no review body are excluded.
+        rows with no review body are excluded. Each review carries the
+        reviewer's name as typed into the form (`reviewer`), for use inside
+        the station.
       security:
         - BearerAuth: []
       parameters:
