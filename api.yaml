@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.8.0
+  version: 11.8.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -8271,9 +8271,13 @@ components:
         call_number:
           type: string
           description: >
-            Full call number for shelf lookup, e.g. "Rock CD ABC 123/45".
-            Computed from genre, format, call_letters, artist_call_number,
-            and release_call_number.
+            A display string: the shelf locator as a librarian reads it. Clients
+            must not parse it or recompose it from other fields. Named artists
+            render as "Rock CD S 1/1"; compilations render as "Hiphop cd V/A-651",
+            "Rock cd V/A M-121" or "Soundtracks cd M-12", with no artist number
+            and a "-" separator. Reference formatters in tubafrenzy:
+            ArtistLibraryCode.getCallLettersAndNumbers and
+            LibraryRelease.getEntireLibraryCode.
         library_url:
           type: string
           description: >
@@ -10956,7 +10960,14 @@ components:
           nullable: true
         call_number:
           type: string
-          description: Computed call number (e.g. "Rock CD S 1/1")
+          description: >
+            A display string: the shelf locator as a librarian reads it. Clients
+            must not parse it or recompose it from other fields. Named artists
+            render as "Rock CD S 1/1"; compilations render as "Hiphop cd V/A-651",
+            "Rock cd V/A M-121" or "Soundtracks cd M-12", with no artist number
+            and a "-" separator. Reference formatters in tubafrenzy:
+            ArtistLibraryCode.getCallLettersAndNumbers and
+            LibraryRelease.getEntireLibraryCode.
         library_url:
           type: string
           description: >
