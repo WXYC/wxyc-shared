@@ -4132,11 +4132,11 @@ components:
             The DJ a music director asked to review the item, set when it
             enters `requested`. Read it together with `state` and
             `effective_state`, not as proof of a live request: later
-            transitions may leave it set (a checkout or accepting a review
-            clears a stale request's fields). `null` while `state: requested` means the
-            requested DJ's account has since been deleted, the case that
-            makes `effective_state` read `pool` despite `state` still
-            saying `requested`.
+            transitions may leave it set (a checkout clears the request's
+            fields, and accepting a review withdraws a pending request).
+            `null` while `state: requested` means the requested DJ's account
+            has since been deleted, the case that makes `effective_state`
+            read `pool` despite `state` still saying `requested`.
         requested_dj_name:
           type: string
           nullable: true
@@ -4830,11 +4830,12 @@ components:
         release; an on-behalf create (`reviews: manage`) is exempt from the
         hold rule. `in_use`: an author deleting their own review while it is
         in use, meaning it is the accepted review of an intake item or the
-        review most recently printed for a copy. The author may still edit it.
+        review in the latest print-log entry of a copy or of a library
+        release. The author may still edit it.
         A caller with `reviews: manage` is never refused with `in_use`.
         `accepted_review`: a caller with `reviews: manage` deleting the
-        accepted review of a `filed` or `finalized` intake item that carries
-        no citation. Accept another review for the item first
+        accepted review of a `filed` or `finalized` intake item, whether or
+        not the item carries a citation. Accept another review for the item first
         (`POST /intake/{id}/accept-review`). Deleting the accepted review of an
         item that is not yet filed is allowed: the item returns to
         `checked_out` if someone holds it, otherwise to `pool`.
@@ -14173,11 +14174,11 @@ paths:
         Grant: `reviews: write`, or `reviews: manage` for any review.
         Who may do this: the author, unless the review is in use;
         `reviews: manage` for any review, unless it is the accepted review of
-        a filed or finalized item with no citation. A draft the caller may not
+        a filed or finalized item, cited or not. A draft the caller may not
         see is a 404. An author's delete of a review that is in use is refused
         with `in_use`. A music director's delete of the accepted review of a
-        `filed` or `finalized` item that has no citation is refused with
-        `accepted_review`. A music director deleting the accepted review of an
+        `filed` or `finalized` item, whether or not the item carries a
+        citation, is refused with `accepted_review`. A music director deleting the accepted review of an
         item not yet filed returns the item to `checked_out` if someone holds
         it, otherwise to `pool`. Deleting a review deletes its edit history.
         Delivered by
