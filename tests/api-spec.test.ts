@@ -3772,7 +3772,7 @@ describe('OpenAPI Specification', () => {
       expect(item.properties?.submitted_review_count?.nullable).toBeUndefined();
       expect(flat(item.properties?.accepted_review_id?.description)).toContain('the item is first given its own copy of that review');
       const holder = flat(item.properties?.checked_out_by?.description);
-      expect(holder).toContain('It stays set when a review is accepted, so a `reviewed` item can still name the DJ who has the copy');
+      expect(holder).toContain('It stays set when a review is accepted, so a `reviewed` item can still name the DJ who has the copy: deleting the accepted review of an item not yet filed returns it to `checked_out` with the same holder, or to `pool` when there is none.');
       expect(holder).toContain('A `reviewed` item keeps its holder until the holder or a music director returns it (`POST /intake/{id}/release`) or the item is filed, which clears it.');
       // Every nullable column the server always returns is required+nullable
       // (CLAUDE.md's "Python codegen and `nullable` on required fields"
@@ -4291,17 +4291,27 @@ describe('OpenAPI Specification', () => {
       it('states which reviews belong to the record, the two-nulls rule and the typed citation rule', () => {
         const o = operation('/intake/{id}/accept-review', 'post');
         const text = flat(o.description);
-        expect(text).toContain('two nulls are not a match');
+        // The opening and the first arm: `submitted` is what keeps a music
+        // director from accepting a draft.
+        expect(text).toContain('The review must be `submitted` and belong to the record: its `intake_item_id` is this item,');
         // Each arm word for word: `cited_album_id` alone is also matched by
         // the two-nulls sentence, so it would not catch the citation arm
         // (decision 34, the only way a cited record gets a slip) being dropped.
         expect(text).toContain("or, once the item is filed, its `album_id` is this item's `album_id`");
         expect(text).toContain('or the item cites a release (`cited_album_id`) and the review is a `typed` review whose `album_id` is that release');
+        // The whole two-nulls sentence: its last clause is what stops an
+        // uncited item from matching a review through a null `cited_album_id`.
+        expect(text).toContain('An item that is not filed has no `album_id`, and a review with no `album_id` never matches it through that arm: two nulls are not a match; the same holds for an item with no `cited_album_id`.');
+        expect(text).toContain('A review of the item itself, or of the release it was filed as, may be `typed` or `handwritten`.');
         expect(text).toContain('A review reached through the citation must be `typed`');
         expect(text).toContain('Every release has a slip, whether or not it was filed on a citation');
+        // The state machine: which states move to `reviewed`, that a swap
+        // keeps the state, and that the holder fields stay as they are.
+        expect(text).toContain('From effective state `pool`, `requested` or `checked_out` the item becomes `reviewed`.');
         expect(text).toContain('the accepted review is swapped and the state stays');
+        expect(text).toContain('The holder fields (`checked_out_by`, `checked_out_at`, `requested_dj_id`, `requested_at`) are left as they are, so an item accepted while a DJ still has it checked out is `reviewed` and still names its holder.');
         expect(text).toContain("This is not `POST /intake/{id}/accept`, which is the requested DJ accepting a music director's request.");
-        expect(flat(o.responses?.['400']?.description)).toContain('a handwritten review reached through the citation');
+        expect(flat(o.responses?.['400']?.description)).toContain('a `review_id` that names no review, a draft, a review of another record, or a handwritten review reached through the citation');
       });
 
       it('leaves /accept for the requested DJ and points at accept-review', () => {
@@ -4315,13 +4325,17 @@ describe('OpenAPI Specification', () => {
       expect(flat((spec.components.schemas.IntakeItemState as { description?: string }).description)).toContain(
         '`reviewed` once a music director has accepted a review for it (submitting a review does not move it)',
       );
-      expect(flat((spec.components.schemas.IntakeItemPatch as { description?: string }).description)).toContain(
-        'Setting `cited_album_id` to a different release, or clearing it, also clears an accepted review that was chosen from the cited release (`accepted_review_id`, `accepted_by` and `accepted_at` become null)',
+      const patch = flat((spec.components.schemas.IntakeItemPatch as { description?: string }).description);
+      // The whole sentence: its state half is what keeps a `reviewed` item
+      // from being left with no accepted review.
+      expect(patch).toContain(
+        'Setting `cited_album_id` to a different release, or clearing it, also clears an accepted review that was chosen from the cited release (`accepted_review_id`, `accepted_by` and `accepted_at` become null) and returns the item to `checked_out` if someone holds it, otherwise to `pool`.',
       );
+      expect(patch).toContain('An accepted review of the item itself is kept.');
       // The single-key switch clears `cited_album_id` implicitly, so the
       // reset must say that counts, or an implementer keys it on the body
       // key alone and a slip prints a review of a release no longer cited.
-      expect(flat((spec.components.schemas.IntakeItemPatch as { description?: string }).description)).toContain(
+      expect(patch).toContain(
         'Citing a submission instead (`{cited_submission_id: 12}`, the switch above) clears `cited_album_id` and counts as clearing it here: an accepted review chosen from that release goes with it.',
       );
       const del = spec.components.schemas.IntakeDeleteResponse as {
@@ -4352,21 +4366,15 @@ describe('OpenAPI Specification', () => {
       const o = operation('/intake/{id}/release', 'post');
       expect(o.summary).toBe('Return an intake item the caller holds');
       const text = flat(o.description);
+      // Both arms: `checked_out` is the deployed behaviour (#2798) and
+      // `reviewed` is what #2860 adds. The 403/409 precedence, in the
+      // description and the 403 text, is pinned once by the it.each above.
+      expect(text).toContain('In effective state `checked_out` the item returns to `pool`.');
       expect(text).toContain('In effective state `reviewed` the holder fields (`checked_out_by`, `checked_out_at`) are cleared and the state stays `reviewed`; the accepted review is untouched.');
-      expect(text).toContain('an item not in effective state `checked_out` or `reviewed`, or a `reviewed` item that has no holder, answers 409 `state_changed`');
       // The route is deployed (#2798) but answers 409 for `reviewed` until
       // WXYC/Backend-Service#2860 lands; say so the way PATCH /intake/{id}
       // names its citation rules.
       expect(text).toContain('Delivered by WXYC/Backend-Service#2798 (handing back a `reviewed` item: WXYC/Backend-Service#2860).');
-      // "Has no holder" is defined by `checked_out_at`, so a removed holder
-      // (`checked_out_by` null) does not turn a music director's return
-      // into a 409; `checked_out_by` promises an MD may release the item.
-      expect(text).toContain('A `reviewed` item has a holder while `checked_out_at` is set: one whose holder\'s account was deleted (`checked_out_by` null, "holder removed") still counts as held, and a music director may return it.');
-      const forbidden = flat(o.responses?.['403']?.description);
-      expect(forbidden).toContain('or the item is in effective state `checked_out` or `reviewed` and the caller is neither the holder');
-      // The 403 text's precedence must agree with the description's: a
-      // `reviewed` item with no holder is a 409, not a 403.
-      expect(forbidden).toContain('Otherwise an item not in effective state `checked_out` or `reviewed`, or a `reviewed` item that has no holder, answers 409 `state_changed` instead');
     });
 
     it('documents the single-key citation switch on IntakeItemPatch', () => {
