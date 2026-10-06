@@ -20,7 +20,7 @@
     "decisions": [
       {
         "decision": "Partial rows render LML#1432's form: letters with no artist number is \"Rock cd ST/3\", no artist half is \"Rock cd 3\", a release number alone is \"3\".",
-        "rationale": "Decided 2026-10-05. Backend-Service#2827 aligns computeCallNumber; until then Backend diverges on the three partial rows. Backend's rows always have an artist number today (library_artist_view INNER JOINs genre_artist_crossreference and artist_genre_code is NOT NULL), so its side is latent."
+        "rationale": "Decided 2026-10-05. Backend aligned computeCallNumber in Backend-Service#2827 (PR #2880), so LML and Backend both render the three partial rows this way. Backend's rows always have an artist number today (library_artist_view INNER JOINs genre_artist_crossreference and artist_genre_code is NOT NULL), so the rule is latent there."
       },
       {
         "decision": "Letter case: call letters render upper-case, as tubafrenzy does. Z- compilation detection stays case-sensitive, so a lowercase z-m is a named-artist code rendered Z-M, not a compilation.",
