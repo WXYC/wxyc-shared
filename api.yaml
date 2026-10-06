@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.10.0
+  version: 11.11.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -2422,8 +2422,13 @@ components:
             A-G of one compilation at one shelf location), so this tells them
             apart. Stored RAW: the wire does not trim or case-fold it. NOT the
             compilation-section letter (code_comp_letter, a separate field).
-            Optional: GET /library sends it; GET /library/query does not yet
-            (Backend-Service#2886).
+            Optional: both GET /library and GET /library/query send it.
+        genre_id:
+          type: integer
+          description: >
+            The release's shelf genre (`library.genre_id`). The id that gates
+            `code_comp_letter`: a consumer rendering the section letter needs
+            it to know whether the letter applies. Optional.
         format_name:
           type: string
         genre_name:
@@ -4881,6 +4886,27 @@ components:
           maxLength: 1
           pattern: '^[A-Z]$'
           description: *code-comp-letter-description
+        code_volume_letters:
+          type: string
+          nullable: true
+          maxLength: 4
+          description: >
+            The per-release volume letter, `library.code_volume_letters`
+            (varchar(4)). Volumes of one set share a call number, so this
+            tells them apart. Stored RAW: the wire does not trim or case-fold
+            it. NOT the compilation-section letter (`code_comp_letter`, a
+            separate field). Null when the release has no volume letter (most
+            catalogued rows), and always null on an unlinked rotation row (no
+            library row). Optional: Backend does not send it yet; it will with
+            WXYC/Backend-Service#2917.
+        genre_id:
+          type: integer
+          nullable: true
+          description: >
+            The release's shelf genre (`library.genre_id`), the id that gates
+            `code_comp_letter`. Null on an unlinked rotation row (no library
+            row). Optional: Backend does not send it yet; it will with
+            WXYC/Backend-Service#2917.
         code_number:
           type: integer
           nullable: true
@@ -6339,6 +6365,24 @@ components:
           description: *code-comp-letter-description
         code_number:
           type: integer
+        code_volume_letters:
+          type: string
+          nullable: true
+          maxLength: 4
+          description: >
+            The per-release volume letter, `library.code_volume_letters`
+            (varchar(4)). Volumes of one set share a call number, so this
+            tells them apart. Stored RAW: the wire does not trim or case-fold
+            it. NOT the compilation-section letter (`code_comp_letter`, a
+            separate field). Optional: Backend does not send it yet; it will
+            with WXYC/Backend-Service#2917.
+        genre_id:
+          type: integer
+          description: >
+            The release's shelf genre (`library.genre_id`). The id that gates
+            `code_comp_letter`: a consumer rendering the section letter needs
+            it to know whether the letter applies. Optional: Backend does not
+            send it yet; it will with WXYC/Backend-Service#2917.
         format_name:
           type: string
         genre_name:

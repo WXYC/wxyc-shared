@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.10.0');
+      expect(spec.info.version).toBe('11.11.0');
     });
 
     it('should have components section', () => {
@@ -9758,6 +9758,30 @@ describe('OpenAPI Specification', () => {
       expect(description).toMatch(/GET \/library\/query/);
       // The export row's rationale points at its own schema description, which AlbumSearchResult lacks.
       expect(description).not.toMatch(/schema description|producer-facing/);
+    });
+  });
+
+  describe('genre_id and code_volume_letters on shelf-slot schemas (#595)', () => {
+    it.each([
+      ['AlbumSearchResult', 'genre_id', { type: 'integer' }],
+      ['BinLibraryDetails', 'genre_id', { type: 'integer' }],
+      ['Rotation', 'genre_id', { type: 'integer', nullable: true }],
+      ['BinLibraryDetails', 'code_volume_letters', { type: 'string', nullable: true, maxLength: 4 }],
+      ['Rotation', 'code_volume_letters', { type: 'string', nullable: true, maxLength: 4 }],
+    ])('%s.%s is declared optional with the pinned shape', (schema, name, shape) => {
+      expect(propertyOf(schema, name)).toMatchObject(shape);
+      expect(requiredKeysOf(schema)).not.toContain(name);
+    });
+
+    it('AlbumSearchResult.genre_id is not nullable', () => {
+      expect(propertyOf('AlbumSearchResult', 'genre_id')?.nullable).toBeUndefined();
+    });
+
+    it('AlbumSearchResult.code_volume_letters says both library endpoints send it', () => {
+      const description = String(propertyOf('AlbumSearchResult', 'code_volume_letters')?.description);
+      expect(description).toMatch(/GET \/library(?!\/)/);
+      expect(description).toMatch(/GET \/library\/query/);
+      expect(description).not.toMatch(/does not yet|2886/);
     });
   });
 
