@@ -4274,6 +4274,17 @@ components:
           minimum: 1
           maximum: 2147483647
 
+    LibraryPrintRequest:
+      type: object
+      description: Body for `POST /library/{id}/print`.
+      required:
+        - review_id
+      properties:
+        review_id:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+
     NewIntakeItemRequest:
       type: object
       description: Logging fields for `POST /intake`.
@@ -4610,7 +4621,8 @@ components:
           description: >
             Computed. `true` when this review is the accepted review of an
             intake item, or is the review in the latest print-log entry of a
-            copy or of a library release. An author cannot delete a review
+            copy or of a library release (`POST /library/{id}/print`). An
+            author cannot delete a review
             that is in use (`ReviewConflictReason` `in_use`), but may still
             edit it.
         on_cover:
@@ -4733,8 +4745,9 @@ components:
     IntakeSlip:
       type: object
       description: >
-        The printable review slip for an intake item: the item's identity
-        plus the printed review's text. Each review field is nullable exactly
+        The printable review slip: the record's identity (the intake item's,
+        or the library release's for `POST /library/{id}/print`) plus the
+        printed review's text. Each review field is nullable exactly
         as on `Review`. `fcc` is for the station's own slip and is never
         published outside it.
       required:
@@ -16717,6 +16730,66 @@ paths:
                 $ref: '#/components/schemas/AlbumDetail'
         '404':
           description: Album not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/{id}/print:
+    post:
+      x-wxyc-service: backend-service
+      summary: Print a review for a library release
+      tags:
+        - Library
+      description: >
+        Grant: `reviews: manage`. Prints one review of a library release,
+        whether or not the release came through intake. The review must be
+        `typed`, `submitted`, and one that `GET /reviews?album_id=` returns
+        for this release, a review reached through `cited_album_id` included.
+        It prints the review as it reads now (its current revision) with the
+        release's confirmed FCC notes, and appends an entry to the print log
+        with no intake item. To print an intake item's accepted review, use
+        `POST /intake/{id}/print`. Delivered by WXYC/Backend-Service#2865.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LibraryPrintRequest'
+      responses:
+        '200':
+          description: >
+            The slip, with `revision_id` set to the revision printed and
+            `fcc_notes` holding the release's confirmed FCC notes (an empty
+            array when there are none; a note still `reported` does not
+            print).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntakeSlip'
+        '400':
+          description: >-
+            A malformed id, a body that fails validation, or a `review_id`
+            that names no review, a draft, a handwritten review, or a review
+            not in this release's list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: "Caller lacks the `reviews: manage` grant"
+        '404':
+          description: No such library release
           content:
             application/json:
               schema:
