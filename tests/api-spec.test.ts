@@ -9100,7 +9100,7 @@ describe('OpenAPI Specification', () => {
       expect(review.properties?.on_cover).toMatchObject({ type: 'boolean' });
       expect(review.properties?.printed_revision_id).toMatchObject({ type: 'integer', nullable: true });
       expect(review.properties?.printed_at).toMatchObject({ type: 'string', format: 'date-time', nullable: true });
-      expect(flat(review.properties?.in_use?.description as string)).toBe('Computed. `true` when this review is the accepted review of an intake item, or is the review in the latest print-log entry of a copy or of a library release. An author cannot delete a review that is in use (`ReviewConflictReason` `in_use`), but may still edit it.');
+      expect(flat(review.properties?.in_use?.description as string)).toBe('Computed. `true` when this review is the accepted review of an intake item, or is the review in the latest print-log entry of a copy or of a library release (`POST /library/{id}/print`). An author cannot delete a review that is in use (`ReviewConflictReason` `in_use`), but may still edit it.');
       const onCover = flat(review.properties?.on_cover?.description as string);
       expect(onCover).toContain('Computed, and meaningful only in a list filtered by `album_id` (`GET /reviews?album_id=`): `true` when this review is on the cover of a copy of that release.');
       expect(onCover).toContain('That is, it is the accepted review of an intake item filed or finalized as that release, or the review in the latest print-log entry of such an item, or the review in the release\'s latest print-log entry that has no intake item. These are the reviews that list puts first.');
@@ -10070,6 +10070,67 @@ describe('OpenAPI Specification', () => {
       );
       expect(flat(operation('/intake/{id}/file', 'post').description)).toContain(
         "Filing stamps the item's FCC notes with the release.",
+      );
+    });
+  });
+  describe('POST /library/{id}/print (#576)', () => {
+    const path = '/library/{id}/print';
+
+    it('is a backend-service route granted reviews: manage, delivered by Backend-Service#2865', () => {
+      expectBackendRoute(path, 'post', { grant: 'Grant: `reviews: manage`.', issue: '#2865' });
+      expect(operation(path, 'post').summary).toBe('Print a review for a library release');
+    });
+
+    it('declares the path id like the neighbouring /library/{id}/missing', () => {
+      const params = (spec.paths[path] as unknown as { post: { parameters?: unknown[] } }).post.parameters;
+      expect(params).toEqual([{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }]);
+    });
+
+    it('takes a LibraryPrintRequest with a bounded required review_id', () => {
+      const body = operation(path, 'post').requestBody;
+      expect(body?.content?.['application/json']?.schema).toEqual(ref('LibraryPrintRequest'));
+      expect(spec.components.schemas.LibraryPrintRequest).toMatchObject({
+        type: 'object',
+        required: ['review_id'],
+        properties: { review_id: { type: 'integer', minimum: 1, maximum: 2147483647 } },
+      });
+    });
+
+    it('states what it prints and where it logs', () => {
+      expect(flat(operation(path, 'post').description)).toContain(
+        'Prints one review of a library release, whether or not the release came through intake. The review must be `typed`, `submitted`, and one that `GET /reviews?album_id=` returns for this release, a review reached through `cited_album_id` included. It prints the review as it reads now (its current revision) with the release\'s confirmed FCC notes, and appends an entry to the print log with no intake item. To print an intake item\'s accepted review, use `POST /intake/{id}/print`.',
+      );
+    });
+
+    it('returns an IntakeSlip carrying confirmed FCC notes, with 400, 401, 403, 404 and no 409', () => {
+      const o = operation(path, 'post');
+      expect(responseSchema(path, 'post', '200')).toEqual(ref('IntakeSlip'));
+      const text = flat(o.responses?.['200']?.description);
+      expect(text).toContain('`revision_id`');
+      expect(text).toContain('`fcc_notes`');
+      expect(text).toContain('confirmed FCC notes');
+      expect(text).toContain('an empty array when there are none');
+      expect(text).toContain('a note still `reported` does not print');
+      expect(responseSchema(path, 'post', '400')).toEqual(ref('ApiErrorResponse'));
+      expect(responseSchema(path, 'post', '404')).toEqual(ref('ApiErrorResponse'));
+      expect(o.responses?.['401']).toBeDefined();
+      expect(o.responses?.['403']).toBeDefined();
+      expect(o.responses?.['409']).toBeUndefined();
+      const bad = flat(o.responses?.['400']?.description);
+      for (const s of ['malformed id', 'a body that fails validation', 'names no review', 'a draft', 'a handwritten review', 'not in this release\'s list']) {
+        expect(bad).toContain(s);
+      }
+    });
+
+    it('words IntakeSlip for a library release too', () => {
+      expect(flat((spec.components.schemas.IntakeSlip as { description?: string }).description)).toContain(
+        "The printable review slip: the record's identity (the intake item's, or the library release's for `POST /library/{id}/print`) plus the printed review's text.",
+      );
+    });
+
+    it('names the route beside the library-release print-log phrase in Review.in_use', () => {
+      expect(flat((spec.components.schemas.Review as { properties: { in_use: { description?: string } } }).properties.in_use.description)).toContain(
+        'the latest print-log entry of a copy or of a library release (`POST /library/{id}/print`)',
       );
     });
   });
