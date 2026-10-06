@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.8.1');
+      expect(spec.info.version).toBe('11.9.0');
     });
 
     it('should have components section', () => {
@@ -9698,6 +9698,15 @@ describe('OpenAPI Specification', () => {
       expect(prop).toMatchObject({ type: 'string', nullable: true, maxLength: 1, pattern: '^[A-Z]$' });
       expect(String(prop?.description)).toContain('code_volume_letters');
       expect(requiredKeysOf(schema)).not.toContain('code_comp_letter');
+    });
+  });
+
+  describe('code_volume_letters on AlbumSearchResult (#591)', () => {
+    it('declares an optional nullable code_volume_letters sharing the CatalogExportRow description', () => {
+      const prop = propertyOf('AlbumSearchResult', 'code_volume_letters');
+      expect(prop).toMatchObject({ type: 'string', nullable: true, maxLength: 4 });
+      expect(prop?.description).toBe(propertyOf('CatalogExportRow', 'code_volume_letters')?.description);
+      expect(requiredKeysOf('AlbumSearchResult')).not.toContain('code_volume_letters');
     });
   });
 
