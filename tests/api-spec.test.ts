@@ -9825,6 +9825,34 @@ describe('OpenAPI Specification', () => {
       for (const k of ['reported_by', 'confirmed_by', 'artist_name', 'album_title']) {
         expect(p[k].maxLength).toBe(128);
       }
+      const types: Record<string, string> = {
+        id: 'integer', album_id: 'integer', intake_item_id: 'integer', track: 'string', note: 'string',
+        reported_by: 'string', reported_by_user_id: 'string', reported_at: 'string', confirmed_by: 'string',
+        confirmed_at: 'string', artist_name: 'string', album_title: 'string',
+      };
+      for (const [k, type] of Object.entries(types)) {
+        expect(p[k].type).toBe(type);
+      }
+      for (const k of ['reported_at', 'confirmed_at']) {
+        expect(p[k].format).toBe('date-time');
+      }
+      // Only these five may be null; every other field is always present and non-null.
+      const nullable = Object.keys(p).filter((k) => p[k].nullable === true).sort();
+      expect(nullable).toEqual(['album_id', 'confirmed_at', 'confirmed_by', 'intake_item_id', 'reported_by_user_id']);
+      for (const k of ['id', 'track', 'note', 'status', 'reported_by', 'reported_at', 'artist_name', 'album_title']) {
+        expect(p[k].nullable).toBeUndefined();
+      }
+      expect(flat(p.reported_by.description)).toBe(
+        'Display-name snapshot of the reporter, the public-safe account display name. Shown inside the station only; never for client telemetry.',
+      );
+      expect(flat(p.reported_by_user_id.description)).toBe('`null` once that account has been deleted.');
+      expect(flat(p.confirmed_by.description)).toBe(
+        'Display-name snapshot of the music director who confirmed the note, taken at the time, like `reported_by`; `null` while `reported`. There is no account-id field for the confirmer.',
+      );
+      expect(flat(p.album_id.description)).toBe('The library release the note is about.');
+      expect(flat(p.intake_item_id.description)).toContain('The intake item the note is about. At least one of the two is set.');
+      expect(flat(p.track.description)).toBe('Which track, as the reporter wrote it (for example `B2` or `Back, Baby`).');
+      expect(flat(p.note.description)).toBe('What is in it.');
       expect(flat(schemas.FccNote.description)).toBe(
         "An FCC note on a record, separate from any review's own `fcc` field. Never published outside the station.",
       );
@@ -9853,7 +9881,11 @@ describe('OpenAPI Specification', () => {
       expectBackendRoute('/fcc-notes', 'post', { grant: 'Grant: `reviews: write`.', issue: 'WXYC/Backend-Service#2862' });
       expect(operation('/fcc-notes', 'post').summary).toBe('Report an FCC note on a record');
       expect(flat(operation('/fcc-notes', 'post').description)).toContain(
-        'Any DJ may report a note on any library release or intake item; there is no hold requirement. The note starts `reported` and is visible to every DJ at once. The music directors are notified.',
+        'Any DJ may report a note on any library release or intake item; there is no hold requirement. The note starts `reported` and is visible to every DJ at once. Every music director is emailed about the report (WXYC/Backend-Service#2863), unless a music director reported it.',
+      );
+      expect(flat(operation('/fcc-notes', 'post').description)).not.toContain('The music directors are notified.');
+      expect(flat(operation('/fcc-notes', 'post').responses?.['400']?.description)).toBe(
+        'Both or neither of `album_id` and `intake_item_id`, a blank `track` or `note`, an id out of bounds, or a subject that names no release or item',
       );
       expect(operation('/fcc-notes', 'post').requestBody?.content?.['application/json']?.schema).toEqual(ref('NewFccNoteRequest'));
       expect(responseSchema('/fcc-notes', 'post', '200')).toEqual(ref('FccNote'));
@@ -9868,6 +9900,12 @@ describe('OpenAPI Specification', () => {
         ['album_id', { type: 'integer', minimum: 1, maximum: 2147483647 }],
         ['intake_item_id', { type: 'integer', minimum: 1, maximum: 2147483647 }],
       ]);
+      // Both are query parameters and neither is required on its own: exactly one must be sent.
+      for (const q of o.parameters as any[]) {
+        expect(q.in).toBe('query');
+        expect(q.required).toBeUndefined();
+      }
+      expect(o.responses?.['400']?.description).toBe('Both or neither filter, or a value that is not a positive int4');
       expect(responseSchema('/fcc-notes', 'get', '200')).toEqual({ type: 'array', items: ref('FccNote') });
       expect(responseSchema('/fcc-notes', 'get', '400')).toEqual(ref('ApiErrorResponse'));
       const text = flat(o.description);
@@ -9881,6 +9919,8 @@ describe('OpenAPI Specification', () => {
     });
 
     it('carries the cross-reference sentences', () => {
+      expect(flat(schemas.Review.description)).toContain('The review\'s own FCC line (`fcc`) is never published outside the station.');
+      expect(flat(schemas.Review.description)).not.toContain('FCC notes (`fcc`)');
       expect(flat(schemas.IntakeSlip.properties.fcc_notes.description)).toContain('See `GET /fcc-notes`.');
       expect(flat(schemas.ReviewFields.properties.fcc.description)).toBe(
         "The review's own FCC line. Never published outside the station. Notes on the record that any DJ can report are `FccNote`.",
