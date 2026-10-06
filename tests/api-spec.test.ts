@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.9.0');
+      expect(spec.info.version).toBe('11.10.0');
     });
 
     it('should have components section', () => {
@@ -3771,6 +3771,16 @@ describe('OpenAPI Specification', () => {
       expect(item.properties?.submitted_review_count).toMatchObject({ type: 'integer', minimum: 0 });
       expect(item.properties?.submitted_review_count?.nullable).toBeUndefined();
       expect(flat(item.properties?.accepted_review_id?.description)).toContain('the item is first given its own copy of that review');
+      const acceptedDesc = flat(item.properties?.accepted_review_id?.description);
+      expect(acceptedDesc).toContain('It is a review of the item, of the release the item was filed as, or of the release the item cites.');
+      expect(acceptedDesc).toContain('`null` until one is accepted, and again if the accepted review is deleted or the citation it was chosen through is changed or cleared.');
+      // Decision 39: overdue follows the checkout, not the state.
+      expect(flat(item.properties?.overdue?.description)).toBe('True while the record\'s checkout is more than 14 days old (`checked_out_at`), in `checked_out` or `reviewed`; a reviewed record that has been returned has no checkout and is never overdue.');
+      // Decision 36: accepting a review clears a pending request.
+      expect(flat(item.properties?.requested_dj_id?.description)).toContain('later transitions may leave it set (a checkout or accepting a review clears a stale request\'s fields)');
+      // Decision 38: a deleted holder on a `reviewed` item is returnable.
+      expect(flat(item.properties?.checked_out_by?.description)).toContain('`null` while `checked_out_at` is set, in `checked_out` or `reviewed`, means the holder\'s account has since been deleted');
+      expect(flat(item.properties?.printed_at?.description)).toBe("When this item's slip was last printed: the time of its latest print-log entry.");
       const holder = flat(item.properties?.checked_out_by?.description);
       expect(holder).toContain('It stays set when a review is accepted, so a `reviewed` item can still name the DJ who has the copy: deleting the accepted review of an item not yet filed returns it to `checked_out` with the same holder, or to `pool` when there is none.');
       expect(holder).toContain('A `reviewed` item keeps its holder until the holder or a music director returns it (`POST /intake/{id}/release`) or the item is filed, which clears it.');
@@ -4015,7 +4025,7 @@ describe('OpenAPI Specification', () => {
           ? 'Precedence: a caller without the `reviews: write` grant gets a 403 in any state;'
           : 'Precedence: a caller without the `reviews` grant the route requires gets a 403 in any state;',
       );
-      const noHolder = action === 'release' ? ', or a `reviewed` item that has no holder,' : '';
+      const noHolder = action === 'release' ? ', or a `reviewed` item with no checkout to return (`checked_out_at` null),' : '';
       expect(text).toContain(`otherwise an item not in effective state ${state}${noHolder} answers 409 \`state_changed\`; otherwise ${who}`);
       expect(text).not.toContain('whoever calls');
       const forbidden = flat(o.responses?.['403']?.description);
@@ -4048,12 +4058,6 @@ describe('OpenAPI Specification', () => {
       ).toContainEqual({ $ref: '#/components/parameters/IntakeId' });
     });
 
-    it('states what print stamps', () => {
-      const text = flat(operation('/intake/{id}/print', 'post').description);
-      expect(text).toContain('`printed_at` and `printed_by`');
-      expect(text).toContain('reprint');
-    });
-
     it('returns an IntakeSlip and declares 401, 403, 404 and a 409 IntakeConflictError from print', () => {
       const o = operation('/intake/{id}/print', 'post');
       expect(responseSchema('/intake/{id}/print', 'post', '200')).toEqual(ref('IntakeSlip'));
@@ -4063,10 +4067,10 @@ describe('OpenAPI Specification', () => {
       expect(o.responses?.['403']).toBeDefined();
     });
 
-    it('reaches not_reviewed and state_changed from print without adding a reason', () => {
+    it('reaches only not_reviewed from print without adding a reason', () => {
       const text = flat(operation('/intake/{id}/print', 'post').responses?.['409']?.description);
-      expect(text).toContain('`not_reviewed`');
-      expect(text).toContain('`state_changed`');
+      expect(text).toContain('`not_reviewed`: the item has no accepted review, or its accepted review is handwritten (a handwritten review is already on the sleeve)');
+      expect(text).not.toContain('state_changed');
       const reasons = (spec.components.schemas.IntakeConflictReason as { enum?: string[] }).enum;
       expect(reasons).toContain('not_reviewed');
       expect(reasons).toHaveLength(5);
@@ -4078,8 +4082,9 @@ describe('OpenAPI Specification', () => {
         properties?: Record<string, { nullable?: boolean; type?: string; format?: string }>;
       };
       const fields = ['artist_name', 'album_title', 'record_label', 'buzzwords', 'artist_blurb', 'review', 'author', 'submitted_at', 'recommended_tracks', 'fcc'];
-      expect(Object.keys(slip.properties ?? {}).sort()).toEqual([...fields].sort());
-      expect([...(slip.required ?? [])].sort()).toEqual([...fields].sort());
+      const all = [...fields, 'revision_id', 'fcc_notes'];
+      expect(Object.keys(slip.properties ?? {}).sort()).toEqual([...all].sort());
+      expect([...(slip.required ?? [])].sort()).toEqual([...all].sort());
       const review = spec.components.schemas.Review as { properties: Record<string, { nullable?: boolean }> };
       for (const f of fields.slice(3)) {
         expect(slip.properties?.[f]?.nullable, f).toBe(review.properties[f]?.nullable);
@@ -4088,6 +4093,21 @@ describe('OpenAPI Specification', () => {
       expect(slip.properties?.artist_name?.nullable).toBeUndefined();
       expect(slip.properties?.album_title?.nullable).toBeUndefined();
       expect(slip.properties?.submitted_at).toMatchObject({ type: 'string', format: 'date-time' });
+      expect(slip.properties?.revision_id).toMatchObject({ type: 'integer' });
+      expect(slip.properties?.revision_id?.nullable).toBeUndefined();
+      expect(flat((slip.properties?.revision_id as { description?: string }).description)).toBe('The id of the review revision this slip printed.');
+      expect(slip.properties?.fcc_notes).toMatchObject({ type: 'array', items: { $ref: '#/components/schemas/IntakeSlipFccNote' } });
+      expect(flat((slip.properties?.fcc_notes as { description?: string }).description)).toBe("The record's confirmed FCC notes, printed beside the review's own `fcc` line. A note that is reported but not yet confirmed does not print. Empty when there are none.");
+      const note = spec.components.schemas.IntakeSlipFccNote as { required?: string[]; properties?: Record<string, { type?: string }> };
+      expect([...(note.required ?? [])].sort()).toEqual(['note', 'track']);
+      expect(note.properties?.track?.type).toBe('string');
+      expect(note.properties?.note?.type).toBe('string');
+    });
+
+    it('describes print as allowed from acceptance, with a print log', () => {
+      const text = flat(operation('/intake/{id}/print', 'post').description);
+      expect(text).toContain('Allowed once a review is accepted, in effective state `reviewed`, `filed` or `finalized`; filing first is not required. It prints the accepted review as it reads now (its current revision), together with the record\'s confirmed FCC notes, and returns the slip. Every print appends an entry to the print log (the review, the revision, who printed and when); a reprint appends another. The item\'s `printed_at` is its latest entry, and the review a copy\'s slip carries is the one in its latest entry.');
+      expect(text).not.toContain('intake review');
     });
 
     // Derived from the path prefix, not from a `$ref` to the id parameter: a new /intake/{id}/... or
@@ -4198,15 +4218,16 @@ describe('OpenAPI Specification', () => {
       it('states /file source states, both paths, and the 409 reasons without invalid_citation', () => {
         const o = operation('/intake/{id}/file', 'post');
         const text = flat(o.description);
-        expect(text).toContain('Files an item that has an accepted review (effective state `reviewed`) or a valid citation; a cited item may still be in `pool`.');
+        expect(text).toContain('Files an item that has an accepted review (effective state `reviewed`). A citation does not stand in for one: it makes the cited release\'s typed reviews eligible for `POST /intake/{id}/accept-review`, after which the item is `reviewed` like any other. An item with no accepted review is 409 `not_reviewed`, and an item already filed is 409 `state_changed`.');
+        expect(text).not.toContain('a cited item may still be in `pool`');
         expect(text).toContain('Filing clears the holder fields (`checked_out_by`, `checked_out_at`) and any request fields (`requested_dj_id`, `requested_at`), because the music director has the record in hand.');
-        expect(text).toContain('An item with neither is 409 `not_reviewed`, and an item already filed is 409 `state_changed`.');
         expect(text).toContain('The 409 is an `IntakeConflictError` (`state_changed`, `not_reviewed`)');
         expect(text).not.toContain('invalid_citation');
         expect(text).toContain('`catalog: write`');
         expect(text).not.toContain('catalog:write');
         const conflict = flat(o.responses?.['409']?.description);
-        expect(conflict).toContain('`not_reviewed`: the item has neither an accepted review nor a valid citation');
+        expect(conflict).toContain('`not_reviewed`: the item has no accepted review;');
+        expect(conflict).not.toContain('valid citation');
         expect(conflict).not.toContain('invalid_citation');
       });
 
@@ -4258,7 +4279,7 @@ describe('OpenAPI Specification', () => {
       // would otherwise read as pairing B with C.
       expect(text).toContain('counts as before it), a cited form submission dated, in station time, after the cutover date, a cited form submission with no date (`submitted_at` null) once a cutover date is set, because it cannot be shown to predate the cutover (while no cutover date is set it is citable)');
       expect(text).toContain('or a cited id that names no release or no form submission (WXYC/Backend-Service#2797)');
-      expect(text).toContain('`not_reviewed`: filing an item with no accepted review and no valid citation, or printing one whose accepted review is missing or is handwritten');
+      expect(text).toContain('`not_reviewed`: filing an item with no accepted review, or printing one whose accepted review is missing or is handwritten');
     });
 
     describe('POST /intake/{id}/accept-review (WXYC/wxyc-shared#571)', () => {
@@ -4309,7 +4330,8 @@ describe('OpenAPI Specification', () => {
         // keeps the state, and that the holder fields stay as they are.
         expect(text).toContain('From effective state `pool`, `requested` or `checked_out` the item becomes `reviewed`.');
         expect(text).toContain('the accepted review is swapped and the state stays');
-        expect(text).toContain('The holder fields (`checked_out_by`, `checked_out_at`, `requested_dj_id`, `requested_at`) are left as they are, so an item accepted while a DJ still has it checked out is `reviewed` and still names its holder.');
+        expect(text).toContain('`checked_out_by` and `checked_out_at` are left as they are, so an item accepted while a DJ still has it checked out is `reviewed` and still names its holder. A pending request is withdrawn: `requested_dj_id` and `requested_at` are cleared, since the record no longer needs a review from that DJ, and no notice is sent.');
+        expect(text).not.toContain('The holder fields');
         expect(text).toContain("This is not `POST /intake/{id}/accept`, which is the requested DJ accepting a music director's request.");
         expect(flat(o.responses?.['400']?.description)).toContain('a `review_id` that names no review, a draft, a review of another record, or a handwritten review reached through the citation');
       });
@@ -4358,6 +4380,8 @@ describe('OpenAPI Specification', () => {
       expect(filter).toContain('`true` returns only items with `submitted_review_count` above zero, `accepted_review_id` null, and a state before `filed`.');
       expect(filter).toContain('`false` means the same as leaving it out.');
       expect(filter).toContain('It combines with `state` by AND.');
+      expect(filter).toContain('Delivered by WXYC/Backend-Service#2860.');
+      expect(flat(list.description)).toContain('Delivered by WXYC/Backend-Service#2796 (`awaiting_acceptance`, `draft_authors` and the acceptance fields: WXYC/Backend-Service#2860).');
       expect(flat(list.description)).toContain('Each item carries `passes` and `draft_authors` for callers holding `reviews: manage`; the music director notice band in WXYC/dj-site#1764 reads `passes` from this list.');
       expect(flat(list.responses?.['400']?.description)).toContain('`awaiting_acceptance` is not `true` or `false`');
     });
@@ -9042,7 +9066,7 @@ describe('OpenAPI Specification', () => {
         'id', 'album_id', 'intake_item_id', 'author', 'author_user_id', 'recorded_by_user_id',
         'medium', 'status', 'buzzwords', 'artist_blurb', 'review', 'recommended_tracks', 'fcc',
         'publish_website', 'publish_apps', 'publish_instagram', 'credit', 'add_date',
-        'submitted_at', 'last_modified',
+        'submitted_at', 'last_modified', 'in_use', 'on_cover', 'printed_revision_id', 'printed_at',
       ];
       // A closed set: a new column (a real-name field, say) must be added here on purpose.
       expect(Object.keys(review.properties ?? {}).sort()).toEqual([...columns].sort());
@@ -9052,6 +9076,7 @@ describe('OpenAPI Specification', () => {
       const nullable = [
         'author', 'album_id', 'intake_item_id', 'author_user_id', 'recorded_by_user_id', 'buzzwords',
         'artist_blurb', 'review', 'recommended_tracks', 'fcc', 'credit', 'submitted_at',
+        'printed_revision_id', 'printed_at',
       ];
       for (const key of columns) {
         expect(review.properties?.[key]?.nullable === true, `${key} nullable`).toBe(nullable.includes(key));
@@ -9062,6 +9087,18 @@ describe('OpenAPI Specification', () => {
       expect(review.properties?.last_modified).toMatchObject({ format: 'date-time' });
       expect(String(review.properties?.recorded_by_user_id?.description)).toMatch(/music\s+director\s+who\s+recorded/);
       expect(String(review.properties?.credit?.description)).toMatch(/`null`\s+means\s+no\s+choice[^.]*`none`\s+means\s+the\s+author\s+chose\s+no\s+name/);
+      expect(review.properties?.in_use).toMatchObject({ type: 'boolean' });
+      expect(review.properties?.on_cover).toMatchObject({ type: 'boolean' });
+      expect(review.properties?.printed_revision_id).toMatchObject({ type: 'integer', nullable: true });
+      expect(review.properties?.printed_at).toMatchObject({ type: 'string', format: 'date-time', nullable: true });
+      expect(flat(review.properties?.in_use?.description as string)).toBe('Computed. `true` when this review is the accepted review of an intake item, or is the review in the latest print-log entry of a copy or of a library release. An author cannot delete a review that is in use (`ReviewConflictReason` `in_use`), but may still edit it.');
+      const onCover = flat(review.properties?.on_cover?.description as string);
+      expect(onCover).toContain('Computed, and meaningful only in a list filtered by `album_id` (`GET /reviews?album_id=`): `true` when this review is on the cover of a copy of that release.');
+      expect(onCover).toContain('That is, it is the accepted review of an intake item filed or finalized as that release, or the review in the latest print-log entry of such an item, or the review in the release\'s latest print-log entry that has no intake item. These are the reviews that list puts first.');
+      expect(onCover).toContain('`false` in every other response: a single review, the write responses, and the unfiltered, `mine` and `intake_item_id` lists.');
+      expect(onCover).toContain('It differs from `in_use`, which is true when the review is in use for any record: a review reached through `cited_album_id` is in use for the release it belongs to, and is on the cover here only once it has been chosen or printed for a copy of this release.');
+      expect(flat(review.properties?.printed_revision_id?.description as string)).toBe('The revision of this review that was most recently printed; `null` if it has never been printed. When it is not the current revision, the printed slip is out of date.');
+      expect(flat(review.properties?.printed_at?.description as string)).toBe('When that print happened.');
       expect(review.properties).not.toHaveProperty('locked');
       expect(review.required).not.toContain('locked');
       expect(flat(review.properties?.author_user_id?.description as string)).toContain("The review's author account. When set on an on-behalf review, that account is the author: it may edit and delete the review and is the only account that may set `publish_*` and `credit`.");
@@ -9125,31 +9162,26 @@ describe('OpenAPI Specification', () => {
       );
     });
 
-    it('defines an item\'s intake review and the release\'s intake review, each with its tie-break', () => {
+    it('defines what a release\'s list holds and puts the reviews on the cover first, per copy', () => {
       const text = flat(operation('/reviews', 'get').description);
-      expect(text).toContain("An item's intake review is the typed, submitted review with the earliest `submitted_at` among that intake item's reviews, ties broken by the lower `id`; an item with no typed, submitted review has none.");
-      expect(text).toContain("The release's intake review is the earliest of the intake reviews of the items filed or finalized as that release, by the same key (earliest `submitted_at`, ties broken by the lower `id`).");
       expect(text).toContain("A release's list (`album_id`) holds the reviews whose `album_id` is that release (filing an intake item stamps its reviews with the release it was filed as, and they stay there once the item is `finalized`), plus, when an intake item filed or finalized as that release cites another release through `cited_album_id`, the cited release's reviews.");
       expect(text).not.toContain("An album's list includes reviews reached through an intake item's `cited_album_id`.");
-      expect(text).toContain('A release with no such review (handwritten-only, citation-only, or never filed through intake) has none.');
-      expect(text).toContain("An item's intake review is the review that item's slip prints (`POST /intake/{id}/print`).");
+      expect(text).toContain("Any list filtered by `album_id` puts the reviews on the cover of that release first (`Review.on_cover`): a review accepted for an intake item filed or finalized as that release, the review in the latest print-log entry of such an item, or the review in the release's latest print-log entry that has no intake item. A slip belongs to one copy, and two items can be filed as one release, so there can be more than one. Among themselves, and for every other visible review after them, including those reached through `cited_album_id`, the order is the one below.");
+      expect(text).toContain('the review in the latest print-log entry of such an item');
+      expect(text).toContain('The `intake_item_id` list is what the music director reads before accepting a review.');
+      expect(text).not.toContain('before filing');
+    });
+
+    it('never says "intake review" anywhere in api.yaml', () => {
+      expect(flat(readFileSync(join(__dirname, '..', 'api.yaml'), 'utf-8')).toLowerCase()).not.toContain('intake review');
     });
 
     it('orders every GET /reviews list by one key, drafts by last_modified, with explicit tie-break directions', () => {
       const text = flat(operation('/reviews', 'get').description);
-      expect(text).toContain("Any list filtered by `album_id` puts the release's intake review first, then every other visible review, including those reached through `cited_album_id`, in the order below.");
       expect(text).toContain('Every other list uses that order throughout.');
       expect(text).toContain('`submitted_at` descending (newest first); a draft the caller can see (their own, or one they recorded) sorts by its `last_modified` in that position; ties are broken by `id` descending.');
       expect(text).toContain('That tie-break is part of the order for the no-filter, `mine`, `intake_item_id` and `album_id` lists alike.');
       expect(text).not.toMatch(/a caller's own draft by/);
-    });
-
-    it('has POST /intake/{id}/print refer to the item\'s intake review instead of restating the rule', () => {
-      const text = flat(operation('/intake/{id}/print', 'post').description);
-      expect(text).toContain("It prints the item's intake review (see `GET /reviews`).");
-      expect(text).not.toContain('more than one');
-      expect(text).not.toContain("release's intake review");
-      expect(text).not.toMatch(/earliest|submitted typed review|sorts first/);
     });
 
     it('serves Review from the read paths', () => {
