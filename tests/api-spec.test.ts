@@ -9702,11 +9702,25 @@ describe('OpenAPI Specification', () => {
   });
 
   describe('code_volume_letters on AlbumSearchResult (#591)', () => {
-    it('declares an optional nullable code_volume_letters sharing the CatalogExportRow description', () => {
+    it('declares an optional nullable code_volume_letters with the same shape as CatalogExportRow', () => {
       const prop = propertyOf('AlbumSearchResult', 'code_volume_letters');
+      const exportProp = propertyOf('CatalogExportRow', 'code_volume_letters');
       expect(prop).toMatchObject({ type: 'string', nullable: true, maxLength: 4 });
-      expect(prop?.description).toBe(propertyOf('CatalogExportRow', 'code_volume_letters')?.description);
+      expect(prop).toMatchObject({
+        type: exportProp?.type,
+        nullable: exportProp?.nullable,
+        maxLength: exportProp?.maxLength,
+      });
       expect(requiredKeysOf('AlbumSearchResult')).not.toContain('code_volume_letters');
+    });
+
+    it('describes it in terms of AlbumSearchResult, not the export row', () => {
+      const description = String(propertyOf('AlbumSearchResult', 'code_volume_letters')?.description);
+      expect(description).toMatch(/volume letter/);
+      expect(description).toMatch(/code_comp_letter/);
+      expect(description).toMatch(/GET \/library\/query/);
+      // The export row's rationale points at its own schema description, which AlbumSearchResult lacks.
+      expect(description).not.toMatch(/schema description|producer-facing/);
     });
   });
 

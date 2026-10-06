@@ -2416,17 +2416,14 @@ components:
           type: string
           nullable: true
           maxLength: 4
-          description: &code-volume-letters-description >
+          description: >
             The per-release volume letter, library.code_volume_letters
             (varchar(4)). Volumes of one set share a call number (e.g. volumes
             A-G of one compilation at one shelf location), so this tells them
-            apart. Stored RAW: the wire does not trim or case-fold it. Case
-            policy is Backend-Service#2582's; library.db folds it at build time
-            (discogs-etl#439, wxyc_catalog.normalize_volume_letters).
-
-            NOT the compilation-section letter (code_comp_letter, a separate
-            field). Optional and nullable like the other producer-facing fields,
-            for the reason given in the schema description.
+            apart. Stored RAW: the wire does not trim or case-fold it. NOT the
+            compilation-section letter (code_comp_letter, a separate field).
+            Optional: GET /library sends it; GET /library/query does not yet
+            (Backend-Service#2886).
         format_name:
           type: string
         genre_name:
@@ -2733,7 +2730,17 @@ components:
           type: string
           nullable: true
           maxLength: 4
-          description: *code-volume-letters-description
+          description: >
+            The per-release volume letter, library.code_volume_letters
+            (varchar(4)). Volumes of one set share a call number (e.g. volumes
+            A-G of one compilation at one shelf location), so this tells them
+            apart. Stored RAW: the wire does not trim or case-fold it. Case
+            policy is Backend-Service#2582's; library.db folds it at build time
+            (discogs-etl#439, wxyc_catalog.normalize_volume_letters).
+
+            NOT the compilation-section letter (code_comp_letter, a separate
+            field). Optional and nullable like the other producer-facing fields,
+            for the reason given in the schema description.
         album_title:
           type: string
         code_letters:
