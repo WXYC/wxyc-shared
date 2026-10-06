@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.11.0');
+      expect(spec.info.version).toBe('11.12.0');
     });
 
     it('should have components section', () => {
@@ -4095,7 +4095,7 @@ describe('OpenAPI Specification', () => {
       expect(slip.properties?.submitted_at).toMatchObject({ type: 'string', format: 'date-time' });
       expect(slip.properties?.revision_id).toMatchObject({ type: 'integer' });
       expect(slip.properties?.revision_id?.nullable).toBeUndefined();
-      expect(flat((slip.properties?.revision_id as { description?: string }).description)).toBe('The id of the review revision this slip printed.');
+      expect(flat((slip.properties?.revision_id as { description?: string }).description)).toBe('The id of the review revision this slip printed. Its `id` is one of the entries of `GET /reviews/{id}/revisions`.');
       expect(slip.properties?.fcc_notes).toMatchObject({ type: 'array', items: { $ref: '#/components/schemas/IntakeSlipFccNote' } });
       expect(flat((slip.properties?.fcc_notes as { description?: string }).description)).toBe("The record's confirmed FCC notes, printed beside the review's own `fcc` line. A note that is reported but not yet confirmed does not print. Empty when there are none.");
       const note = spec.components.schemas.IntakeSlipFccNote as { required?: string[]; properties?: Record<string, { type?: string }> };
@@ -4137,6 +4137,7 @@ describe('OpenAPI Specification', () => {
       expect(ops).toContainEqual(['patch', '/reviews/{id}']);
       expect(ops).toContainEqual(['delete', '/reviews/{id}']);
       expect(ops).toContainEqual(['post', '/reviews/{id}/submit']);
+      expect(ops).toContainEqual(['get', '/reviews/{id}/revisions']);
     });
 
     describe.each(idFamilies)('%s', (prefix, param) => {
@@ -9068,7 +9069,7 @@ describe('OpenAPI Specification', () => {
         'id', 'album_id', 'intake_item_id', 'author', 'author_user_id', 'recorded_by_user_id',
         'medium', 'status', 'buzzwords', 'artist_blurb', 'review', 'recommended_tracks', 'fcc',
         'publish_website', 'publish_apps', 'publish_instagram', 'credit', 'add_date',
-        'submitted_at', 'last_modified', 'in_use', 'on_cover', 'printed_revision_id', 'printed_at',
+        'submitted_at', 'last_modified', 'in_use', 'on_cover', 'printed_revision_id', 'printed_at', 'revision_count',
       ];
       // A closed set: a new column (a real-name field, say) must be added here on purpose.
       expect(Object.keys(review.properties ?? {}).sort()).toEqual([...columns].sort());
@@ -9099,7 +9100,7 @@ describe('OpenAPI Specification', () => {
       expect(onCover).toContain('That is, it is the accepted review of an intake item filed or finalized as that release, or the review in the latest print-log entry of such an item, or the review in the release\'s latest print-log entry that has no intake item. These are the reviews that list puts first.');
       expect(onCover).toContain('`false` in every other response: a single review, the write responses, and the unfiltered, `mine` and `intake_item_id` lists.');
       expect(onCover).toContain('It differs from `in_use`, which is true when the review is in use for any record: a review reached through `cited_album_id` is in use for the release it belongs to, and is on the cover here only once it has been chosen or printed for a copy of this release.');
-      expect(flat(review.properties?.printed_revision_id?.description as string)).toBe('The revision of this review that was most recently printed; `null` if it has never been printed. When it is not the current revision, the printed slip is out of date.');
+      expect(flat(review.properties?.printed_revision_id?.description as string)).toBe('The revision of this review that was most recently printed; `null` if it has never been printed. When it is not the current revision, the printed slip is out of date. Its `id` is one of the entries of `GET /reviews/{id}/revisions`.');
       expect(flat(review.properties?.printed_at?.description as string)).toBe('When that print happened.');
       expect(review.properties).not.toHaveProperty('locked');
       expect(review.required).not.toContain('locked');
@@ -9639,7 +9640,9 @@ describe('OpenAPI Specification', () => {
       ['post', '/reviews/{id}/submit', 'reviews: write'],
       ['delete', '/reviews/{id}', 'reviews: write'],
     ])('declares %s %s with its grant (%s) and delivering issue', (method, path, grant) => {
-      expectBackendRoute(path, method, { grant, issue: 'WXYC/Backend-Service#2802' });
+      const issue = method === 'patch' || path === '/reviews' ? 'WXYC/Backend-Service#2802' : 'WXYC/Backend-Service#2854';
+      expectBackendRoute(path, method, { grant, issue });
+      if (issue.endsWith('#2854')) expect(flat(operation(path, method).description)).not.toContain('#2802');
       expect(flat(operation(path, method).description)).toContain('`reviews: manage`');
     });
 
@@ -9798,5 +9801,74 @@ describe('OpenAPI Specification', () => {
         expect(description).not.toMatch(/Computed from|<ArtistNum>\/<ReleaseNum>/);
       }
     );
+  });
+
+  describe('Review edit history (WXYC/wxyc-shared#573)', () => {
+    type Prop = { type?: string; format?: string; nullable?: boolean; minimum?: number; maxLength?: number; description?: string };
+    type Obj = { description?: string; required?: string[]; properties?: Record<string, Prop> };
+    const revision = () => spec.components.schemas.ReviewRevision as Obj;
+
+    it('declares ReviewRevision with an exact, fully required key set and no consent fields', () => {
+      const keys = ['id', 'review_id', 'revision', 'edited_by', 'edited_by_user_id', 'edited_at', 'review', 'artist_blurb', 'buzzwords', 'recommended_tracks', 'fcc'];
+      expect(Object.keys(revision().properties ?? {}).sort()).toEqual([...keys].sort());
+      expect([...(revision().required ?? [])].sort()).toEqual([...keys].sort());
+      for (const absent of ['publish_website', 'publish_apps', 'publish_instagram', 'credit']) {
+        expect(revision().properties).not.toHaveProperty(absent);
+      }
+    });
+
+    it('types the revision columns', () => {
+      const p = revision().properties!;
+      expect(p.id).toMatchObject({ type: 'integer' });
+      expect(p.review_id).toMatchObject({ type: 'integer' });
+      expect(p.revision).toMatchObject({ type: 'integer', minimum: 1 });
+      expect(p.edited_by).toMatchObject({ type: 'string', maxLength: 128, nullable: true });
+      expect(p.edited_by_user_id).toMatchObject({ type: 'string', nullable: true });
+      expect(p.edited_at).toMatchObject({ type: 'string', format: 'date-time' });
+      expect(p.edited_at?.nullable).toBeUndefined();
+      for (const key of ['review', 'artist_blurb', 'buzzwords', 'recommended_tracks', 'fcc']) {
+        expect(p[key], key).toMatchObject({ type: 'string', nullable: true });
+        expect(flat(p[key]?.description), key).toContain('as saved by this edit');
+      }
+      expect(flat(p.fcc?.description)).toContain('Never published outside the station.');
+    });
+
+    it('pins the revision sentences and the not-versioned description', () => {
+      const p = revision().properties!;
+      expect(flat(p.revision?.description)).toBe('1-based. Revision 1 is written when the review is submitted; each later edit of the submitted review writes the next.');
+      expect(flat(p.edited_by?.description)).toContain("Display-name snapshot taken at the time. Revision 1 names the review's author: it is a copy of `Review.author`, whoever pressed submit, so for a review a music director recorded on someone's behalf it is the name the music director typed. A later revision names whoever made that edit; for a music director's edit of someone else's review, the music director. Station-only, with the caveat on `Review.author`.");
+      expect(flat(p.edited_by_user_id?.description)).toBe("Revision 1 carries the review's `author_user_id` (null for an author with no linked account); a later revision carries the editor's account. `null` once that account has been deleted.");
+      expect(flat(revision().description)).toContain('Publishing consent (`publish_*`, `credit`) is not versioned. Drafts are not versioned: a review has no revisions until it is submitted. Deleting a review deletes its revisions.');
+    });
+
+    it('declares get /reviews/{id}/revisions with its grant, issue, order and visibility', () => {
+      expectBackendRoute('/reviews/{id}/revisions', 'get', { grant: 'Grant: `reviews: read`.', issue: 'WXYC/Backend-Service#2861' });
+      const o = operation('/reviews/{id}/revisions', 'get');
+      expect(o.summary).toBe("List a review's edit history");
+      expect(flat(o.description)).toContain('Visible to exactly who can see the review: a draft the caller may not see is a 404, and a draft the caller can see answers an empty array.');
+      expect(flat(o.description)).toContain('newest first');
+      expect(flat(o.description)).toContain('not paginated');
+      expect(
+        (spec.paths as Record<string, { parameters?: unknown[] }>)['/reviews/{id}/revisions']?.parameters,
+      ).toContainEqual({ $ref: '#/components/parameters/ReviewId' });
+      expect(responseSchema('/reviews/{id}/revisions', 'get', '200')).toEqual({ type: 'array', items: ref('ReviewRevision') });
+      expect(flat(o.responses?.['200']?.description)).toContain('ordered by `revision` descending');
+      expect(o.responses?.['401']).toBeDefined();
+      expect(flat(o.responses?.['403']?.description)).toBe('Caller lacks the `reviews: read` permission');
+      expect(flat(o.responses?.['404']?.description)).toBe('No such review, or a draft the caller may not see');
+    });
+
+    it('adds Review.revision_count', () => {
+      const review = spec.components.schemas.Review as Obj;
+      expect(review.required).toContain('revision_count');
+      expect(review.properties?.revision_count).toMatchObject({ type: 'integer', minimum: 0 });
+      expect(review.properties?.revision_count?.nullable).toBeUndefined();
+      expect(flat(review.properties?.revision_count?.description)).toBe('How many revisions the review has: `0` for a draft, `1` once submitted, more after edits. Above `1` means there is history to show (`GET /reviews/{id}/revisions`).');
+    });
+
+    it('states when a revision is written on submit and PATCH', () => {
+      expect(flat(operation('/reviews/{id}/submit', 'post').description)).toContain('Submitting writes revision 1.');
+      expect(flat(operation('/reviews/{id}', 'patch').description)).toContain("An edit of a submitted review writes a new revision under the editor's name. An edit of a draft writes none, and neither does a request that changes only `publish_*` or `credit`, or changes nothing.");
+    });
   });
 });
