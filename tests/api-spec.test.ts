@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.11.0');
+      expect(spec.info.version).toBe('11.12.0');
     });
 
     it('should have components section', () => {
@@ -4097,7 +4097,7 @@ describe('OpenAPI Specification', () => {
       expect(slip.properties?.revision_id?.nullable).toBeUndefined();
       expect(flat((slip.properties?.revision_id as { description?: string }).description)).toBe('The id of the review revision this slip printed.');
       expect(slip.properties?.fcc_notes).toMatchObject({ type: 'array', items: { $ref: '#/components/schemas/IntakeSlipFccNote' } });
-      expect(flat((slip.properties?.fcc_notes as { description?: string }).description)).toBe("The record's confirmed FCC notes, printed beside the review's own `fcc` line. A note that is reported but not yet confirmed does not print. Empty when there are none.");
+      expect(flat((slip.properties?.fcc_notes as { description?: string }).description)).toBe("The record's confirmed FCC notes, printed beside the review's own `fcc` line. A note that is reported but not yet confirmed does not print. Empty when there are none. See `GET /fcc-notes`.");
       const note = spec.components.schemas.IntakeSlipFccNote as { required?: string[]; properties?: Record<string, { type?: string }> };
       expect([...(note.required ?? [])].sort()).toEqual(['note', 'track']);
       expect(note.properties?.track?.type).toBe('string');
@@ -9798,5 +9798,96 @@ describe('OpenAPI Specification', () => {
         expect(description).not.toMatch(/Computed from|<ArtistNum>\/<ReleaseNum>/);
       }
     );
+  });
+
+  describe('FCC notes on a record, report and list (#574)', () => {
+    // `spec` is assigned in beforeAll, so read it lazily.
+    const schemas = new Proxy({} as Record<string, any>, {
+      get: (_target, name: string) => (spec.components.schemas as Record<string, any>)[name],
+    });
+
+    it('declares FccNoteStatus as a named enum', () => {
+      expect(schemas.FccNoteStatus).toEqual({ type: 'string', enum: ['reported', 'confirmed'] });
+    });
+
+    it('declares FccNote with the exact key set, all required', () => {
+      const keys = [
+        'id', 'album_id', 'intake_item_id', 'track', 'note', 'status', 'reported_by', 'reported_by_user_id',
+        'reported_at', 'confirmed_by', 'confirmed_at', 'artist_name', 'album_title',
+      ];
+      expect(propertyKeysOf('FccNote').sort()).toEqual([...keys].sort());
+      expect(requiredKeysOf('FccNote').sort()).toEqual([...keys].sort());
+      const p = schemas.FccNote.properties;
+      expect(p.status.allOf).toEqual([ref('FccNoteStatus')]);
+      for (const k of ['album_id', 'intake_item_id', 'reported_by_user_id', 'confirmed_by', 'confirmed_at']) {
+        expect(p[k].nullable).toBe(true);
+      }
+      for (const k of ['reported_by', 'confirmed_by', 'artist_name', 'album_title']) {
+        expect(p[k].maxLength).toBe(128);
+      }
+      expect(flat(schemas.FccNote.description)).toBe(
+        "An FCC note on a record, separate from any review's own `fcc` field. Never published outside the station.",
+      );
+      expect(flat(p.status.description)).toBe(
+        '`reported`: visible to every DJ as reported and not yet confirmed. `confirmed`: a music director has confirmed it; only confirmed notes print on the slip (`IntakeSlip.fcc_notes`).',
+      );
+      expect(flat(p.intake_item_id.description)).toContain(
+        "Filing an intake item stamps its notes with the release it was filed as, so a note reported against an item then carries both.",
+      );
+      expect(flat(p.artist_name.description)).toBe(flat(p.album_title.description));
+      expect(flat(p.artist_name.description)).toContain('read at response time');
+    });
+
+    it('declares NewFccNoteRequest with bounded subject ids', () => {
+      expect(propertyKeysOf('NewFccNoteRequest').sort()).toEqual(['album_id', 'intake_item_id', 'note', 'track']);
+      expect(requiredKeysOf('NewFccNoteRequest').sort()).toEqual(['note', 'track']);
+      for (const k of ['album_id', 'intake_item_id']) {
+        expect(schemas.NewFccNoteRequest.properties[k]).toEqual({ type: 'integer', minimum: 1, maximum: 2147483647 });
+      }
+      expect(flat(schemas.NewFccNoteRequest.description)).toBe(
+        'Send exactly one of `album_id` and `intake_item_id`. `track` and `note` must not be blank.',
+      );
+    });
+
+    it('declares POST /fcc-notes', () => {
+      expectBackendRoute('/fcc-notes', 'post', { grant: 'Grant: `reviews: write`.', issue: 'WXYC/Backend-Service#2862' });
+      expect(operation('/fcc-notes', 'post').summary).toBe('Report an FCC note on a record');
+      expect(flat(operation('/fcc-notes', 'post').description)).toContain(
+        'Any DJ may report a note on any library release or intake item; there is no hold requirement. The note starts `reported` and is visible to every DJ at once. The music directors are notified.',
+      );
+      expect(operation('/fcc-notes', 'post').requestBody?.content?.['application/json']?.schema).toEqual(ref('NewFccNoteRequest'));
+      expect(responseSchema('/fcc-notes', 'post', '200')).toEqual(ref('FccNote'));
+      expect(responseSchema('/fcc-notes', 'post', '400')).toEqual(ref('ApiErrorResponse'));
+    });
+
+    it('declares GET /fcc-notes as a bare array with two bounded filters', () => {
+      expectBackendRoute('/fcc-notes', 'get', { grant: 'Grant: `reviews: read`.', issue: 'WXYC/Backend-Service#2862' });
+      const o = operation('/fcc-notes', 'get');
+      expect(o.summary).toBe("List a record's FCC notes");
+      expect((o.parameters as any[]).map((q) => [q.name, q.schema])).toEqual([
+        ['album_id', { type: 'integer', minimum: 1, maximum: 2147483647 }],
+        ['intake_item_id', { type: 'integer', minimum: 1, maximum: 2147483647 }],
+      ]);
+      expect(responseSchema('/fcc-notes', 'get', '200')).toEqual({ type: 'array', items: ref('FccNote') });
+      expect(responseSchema('/fcc-notes', 'get', '400')).toEqual(ref('ApiErrorResponse'));
+      const text = flat(o.description);
+      expect(text).toContain('Send exactly one of `album_id` and `intake_item_id`; neither, or both, is a 400.');
+      expect(text).toContain('Returns notes of both statuses, `reported_at` ascending, then `id` ascending. Not paginated: a bare array.');
+      expect(text).toContain('The `album_id` list includes notes that were reported against an intake item and stamped with the release at filing.');
+    });
+
+    it.each(['get', 'post'])('declares no 409 on %s /fcc-notes', (method) => {
+      expect(operation('/fcc-notes', method).responses?.['409']).toBeUndefined();
+    });
+
+    it('carries the cross-reference sentences', () => {
+      expect(flat(schemas.IntakeSlip.properties.fcc_notes.description)).toContain('See `GET /fcc-notes`.');
+      expect(flat(schemas.ReviewFields.properties.fcc.description)).toBe(
+        "The review's own FCC line. Never published outside the station. Notes on the record that any DJ can report are `FccNote`.",
+      );
+      expect(flat(operation('/intake/{id}/file', 'post').description)).toContain(
+        "Filing stamps the item's FCC notes with the release.",
+      );
+    });
   });
 });
