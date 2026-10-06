@@ -336,7 +336,11 @@ import { isHeartbeat, AutoDJCommandAction, type AutoDJStatus } from '@wxyc/share
 
 ## Call-Number Parity Corpus
 
-`src/test-utils/call-number-cases.json` (typed loader: `callNumberCases` in `@wxyc/shared/test-utils`) is the shared corpus for the three shelf call-number composers: library-metadata-lookup `LibraryItem.call_number`, Backend-Service `computeCallNumber`, and dj-site `libraryCode.ts`. Each row gives neutral inputs plus `full` (the LML/Backend string) and `artist_half` / `release_half` (dj-site's formatter outputs, which omit the format word). An optional `pending` object, keyed by consumer (`lml`, `backend`, `djsite`), names the open ticket that will close that consumer's known divergence; the consumer PR that closes that ticket removes its own marker when it adopts the corpus. The `meta.decisions` block records the choices the corpus forces. Non-TS consumers vendor the file from the published tarball and pin its SHA-256, as with the charset corpus.
+`src/test-utils/call-number-cases.json` (typed loader: `callNumberCases` in `@wxyc/shared/test-utils`) is the shared corpus for the three shelf call-number composers: library-metadata-lookup `LibraryItem.call_number`, Backend-Service `computeCallNumber`, and dj-site `libraryCode.ts`. Each row gives neutral inputs plus `full` (the LML/Backend string) and `artist_half` / `release_half` (dj-site's formatter outputs, which omit the format word). The corpus states target outputs only; it records no consumer's divergence. The `meta.decisions` block records the choices the corpus forces.
+
+**Vendoring.** No published `@wxyc/shared` release carries the file, so consumers vendor the raw file from a pinned wxyc-shared commit (`https://raw.githubusercontent.com/WXYC/wxyc-shared/<commit-sha>/src/test-utils/call-number-cases.json`) and commit its SHA-256 next to it as `call-number-cases.json.sha256`, as with the charset corpus. Bumping the pin is a deliberate re-vendor in the consumer's own PR.
+
+**Known divergences live in the consumer.** Each consumer keeps a local `KNOWN_DIVERGENCES` map (row id to that repo's open ticket, `owner/repo#N`) next to its corpus-driven test. Listed rows are expected to fail. A stale-entry self-check fails when a listed row starts passing, naming the entry to delete, so the PR that closes a divergence adopts the row's target and deletes its own entry without touching this repo.
 
 ## Charset Torture Corpus
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { callNumberCorpus, callNumberCases, CALL_NUMBER_CONSUMERS } from '../src/test-utils/call-number-cases.js';
+import { callNumberCorpus, callNumberCases } from '../src/test-utils/call-number-cases.js';
 
 const INPUT_FIELDS = [
   'genre',
@@ -16,7 +16,7 @@ describe('call-number corpus shape', () => {
   it('exposes a meta block with description, version, schema, and decisions', () => {
     expect(callNumberCorpus.meta.description).toMatch(/call number/i);
     expect(callNumberCorpus.meta.version).toBe(1);
-    for (const field of [...INPUT_FIELDS, 'id', 'why', 'full', 'artist_half', 'release_half', 'pending']) {
+    for (const field of [...INPUT_FIELDS, 'id', 'why', 'full', 'artist_half', 'release_half']) {
       expect(callNumberCorpus.meta.schema[field], field).toBeTruthy();
     }
     expect(callNumberCorpus.meta.decisions.length).toBeGreaterThanOrEqual(2);
@@ -56,21 +56,16 @@ describe('call-number corpus shape', () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it('keys pending markers by known consumer with an owner/repo#N ticket ref, never this corpus\'s own issue', () => {
-    for (const c of callNumberCases) {
-      for (const [consumer, ref] of Object.entries(c.pending ?? {})) {
-        expect(CALL_NUMBER_CONSUMERS, c.id).toContain(consumer);
-        expect(ref, c.id).toMatch(/^[\w.-]+\/[\w.-]+#\d+$/);
-        expect(ref, c.id).not.toBe('WXYC/wxyc-shared#585');
-      }
-    }
+  it('states target outputs only: no consumer divergence is recorded in the corpus', () => {
+    expect(callNumberCorpus.meta.schema).not.toHaveProperty('pending');
+    for (const c of callNumberCases) expect(c, c.id).not.toHaveProperty('pending');
   });
 
   it('has kebab-case ids', () => {
     for (const c of callNumberCases) expect(c.id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
   });
 
-  it('records the forced partial-row divergence on Backend for every partial row', () => {
+  it('pins exactly the three forced partial rows', () => {
     // Partial: a release number with no artist half to hang it on (no letters, or no artist number),
     // outside the V/A and legacy Z- compilation forms, which have their own rules.
     const partial = callNumberCases.filter((c) => {
@@ -81,6 +76,5 @@ describe('call-number corpus shape', () => {
     expect(partial.map((c) => c.id).sort()).toEqual(
       ['genre-format-release-no-artist-half', 'letters-without-artist-number', 'release-only'].sort(),
     );
-    for (const c of partial) expect(c.pending?.backend, c.id).toBe('WXYC/Backend-Service#2827');
   });
 });

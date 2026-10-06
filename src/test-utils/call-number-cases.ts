@@ -6,15 +6,10 @@
  * `libraryCode.ts` formatters. Each consumer drives its tests from these rows.
  *
  * Canonical JSON: src/test-utils/call-number-cases.json. Non-TS consumers
- * extract that file from the published @wxyc/shared tarball and pin its
- * SHA-256, as with the charset torture corpus.
+ * vendor the raw file from a pinned wxyc-shared commit plus its .sha256.
  */
 
 import data from './call-number-cases.json' with { type: 'json' };
-
-export const CALL_NUMBER_CONSUMERS = ['lml', 'backend', 'djsite'] as const;
-
-export type CallNumberConsumer = (typeof CALL_NUMBER_CONSUMERS)[number];
 
 export interface CallNumberCase {
   id: string;
@@ -34,8 +29,6 @@ export interface CallNumberCase {
   artist_half: string | null;
   /** dj-site `formatReleaseCode`; null when the row has no release number. */
   release_half: string | null;
-  /** Ticket that closes a consumer's known divergence from this row. */
-  pending?: Partial<Record<CallNumberConsumer, string>>;
 }
 
 export interface CallNumberCorpus {
