@@ -36,7 +36,7 @@
       },
       {
         "decision": "A volume letter is trimmed and upper-cased: \" b \" renders -B, and a whitespace-only letter renders no hyphen.",
-        "rationale": "Decided 2026-10-05. Backend's releaseHalf and wxyc-catalog's normalize_volume_letters (applied by discogs-etl#439 when it builds library.db) already trim and upper-case, and no shelf label carries whitespace. tubafrenzy's LibraryRelease.getCallNumbersAndLetters does isBlank() then toUpperCase() with no trim, and dj-site's formatReleaseCode follows it, so dj-site would render \"651- B \" for a padded letter; no production row is known to be padded, so that divergence is latent."
+        "rationale": "Decided 2026-10-05. Backend's releaseHalf and wxyc-catalog's normalize_volume_letters (applied by discogs-etl#439 when it builds library.db) already trim and upper-case, and no shelf label carries whitespace. tubafrenzy's LibraryRelease.getCallNumbersAndLetters does isBlank() then toUpperCase() with no trim, and dj-site's formatReleaseCode follows it, so dj-site would render \"3- B \" for a padded letter such as the volume-letter-padded row (ST 12/3, \" b \"); no production row is known to be padded, so that divergence is latent."
       }
     ]
   },
