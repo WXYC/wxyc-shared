@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.12.0
+  version: 11.13.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4787,7 +4787,7 @@ components:
           description: >
             The record's confirmed FCC notes, printed beside the review's own
             `fcc` line. A note that is reported but not yet confirmed does
-            not print. Empty when there are none.
+            not print. Empty when there are none. See `GET /fcc-notes`.
 
     IntakeSlipFccNote:
       type: object
@@ -4796,6 +4796,117 @@ components:
         - track
         - note
       properties:
+        track:
+          type: string
+        note:
+          type: string
+
+    FccNoteStatus:
+      type: string
+      enum: [reported, confirmed]
+
+    FccNote:
+      type: object
+      description: >
+        An FCC note on a record, separate from any review's own `fcc` field.
+        Never published outside the station.
+      required:
+        - id
+        - album_id
+        - intake_item_id
+        - track
+        - note
+        - status
+        - reported_by
+        - reported_by_user_id
+        - reported_at
+        - confirmed_by
+        - confirmed_at
+        - artist_name
+        - album_title
+      properties:
+        id:
+          type: integer
+        album_id:
+          type: integer
+          nullable: true
+          description: The library release the note is about.
+        intake_item_id:
+          type: integer
+          nullable: true
+          description: >
+            The intake item the note is about. At least one of the two is set.
+            Filing an intake item stamps its notes with the release it was
+            filed as, so a note reported against an item then carries both.
+        track:
+          type: string
+          description: Which track, as the reporter wrote it (for example `B2` or `Back, Baby`).
+        note:
+          type: string
+          description: What is in it.
+        status:
+          allOf:
+            - $ref: '#/components/schemas/FccNoteStatus'
+          description: >
+            `reported`: visible to every DJ as reported and not yet confirmed.
+            `confirmed`: a music director has confirmed it; only confirmed
+            notes print on the slip (`IntakeSlip.fcc_notes`).
+        reported_by:
+          type: string
+          maxLength: 128
+          description: >
+            Display-name snapshot of the reporter, the public-safe account
+            display name. Shown inside the station only; never for client
+            telemetry.
+        reported_by_user_id:
+          type: string
+          nullable: true
+          description: '`null` once that account has been deleted.'
+        reported_at:
+          type: string
+          format: date-time
+        confirmed_by:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: >
+            Display-name snapshot of the music director who confirmed the
+            note, taken at the time, like `reported_by`; `null` while
+            `reported`. There is no account-id field for the confirmer.
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        artist_name:
+          type: string
+          maxLength: 128
+          description: &fcc-note-record >
+            The record the note is about, read at response time: the library
+            release's artist and title when `album_id` is set, otherwise the
+            intake item's. Carried on every note so a list that spans records
+            can render a row without a second request.
+        album_title:
+          type: string
+          maxLength: 128
+          description: *fcc-note-record
+
+    NewFccNoteRequest:
+      type: object
+      description: >
+        Send exactly one of `album_id` and `intake_item_id`. `track` and
+        `note` must not be blank.
+      required:
+        - track
+        - note
+      properties:
+        album_id:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        intake_item_id:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
         track:
           type: string
         note:
@@ -4826,7 +4937,9 @@ components:
         fcc:
           type: string
           nullable: true
-          description: FCC notes. Never published outside the station.
+          description: >
+            The review's own FCC line. Never published outside the station.
+            Notes on the record that any DJ can report are `FccNote`.
         publish_website:
           type: boolean
         publish_apps:
@@ -13943,7 +14056,7 @@ paths:
         `album_id` (and `rotation_id` when the new release entered rotation).
         Filing clears the holder fields (`checked_out_by`, `checked_out_at`)
         and any request fields (`requested_dj_id`, `requested_at`), because
-        the music director has the record in hand. The 409 is an `IntakeConflictError` (`state_changed`, `not_reviewed`),
+        the music director has the record in hand. Filing stamps the item's FCC notes with the release. The 409 is an `IntakeConflictError` (`state_changed`, `not_reviewed`),
         or a `LibraryFilingConflictError` when the new-release arm collides
         with the catalog. Delivered by WXYC/Backend-Service#2803.
       security:
@@ -14098,6 +14211,85 @@ paths:
           description: No bearer token
         '403':
           description: 'Caller lacks the `album_reviews: read` permission'
+
+  /fcc-notes:
+    post:
+      x-wxyc-service: backend-service
+      summary: Report an FCC note on a record
+      description: >
+        Grant: `reviews: write`. Delivered by WXYC/Backend-Service#2862. Any
+        DJ may report a note on any library release or intake item; there is
+        no hold requirement. The note starts `reported` and is visible to
+        every DJ at once. The music directors are notified.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewFccNoteRequest'
+      responses:
+        '200':
+          description: The new note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FccNote'
+        '400':
+          description: Both or neither of `album_id` and `intake_item_id`, a blank `track` or `note`, an id out of bounds, or a subject that names no release or item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: write` permission'
+    get:
+      x-wxyc-service: backend-service
+      summary: List a record's FCC notes
+      description: >
+        Grant: `reviews: read`. Delivered by WXYC/Backend-Service#2862. Send
+        exactly one of `album_id` and `intake_item_id`; neither, or both, is a
+        400. Returns notes of both statuses, `reported_at` ascending, then
+        `id` ascending. Not paginated: a bare array. The `album_id` list
+        includes notes that were reported against an intake item and stamped
+        with the release at filing.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: album_id
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2147483647
+        - name: intake_item_id
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2147483647
+      responses:
+        '200':
+          description: The record's notes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FccNote'
+        '400':
+          description: Both or neither filter, or a value that is not a positive int4
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: read` permission'
 
   /reviews:
     get:
