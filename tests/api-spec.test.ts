@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.13.0');
+      expect(spec.info.version).toBe('11.13.1');
     });
 
     it('should have components section', () => {
@@ -9784,7 +9784,25 @@ describe('OpenAPI Specification', () => {
       const description = String(propertyOf('AlbumSearchResult', 'code_volume_letters')?.description);
       expect(description).toMatch(/GET \/library(?!\/)/);
       expect(description).toMatch(/GET \/library\/query/);
-      expect(description).not.toMatch(/does not yet|2886/);
+    });
+  });
+
+  describe('descriptions carry no consumer-status prose (#600)', () => {
+    // Which side does or does not read a field "yet" goes false the day the ticket lands.
+    const CONSUMER_STATUS = /does\s+not\s+(send|read|carry)[^.]*yet|does\s+not\s+yet\s+\w+|does\s+not\s+set[^.]*yet|not\s+yet\s+(\(|live)/i;
+
+    it('no api.yaml description says a consumer or producer does not do something yet', () => {
+      const offenders: string[] = [];
+      const walk = (node: unknown, path: string): void => {
+        if (Array.isArray(node)) return node.forEach((v, i) => walk(v, `${path}[${i}]`));
+        if (node === null || typeof node !== 'object') return;
+        for (const [k, v] of Object.entries(node)) {
+          if (k === 'description' && typeof v === 'string' && CONSUMER_STATUS.test(v)) offenders.push(path);
+          else walk(v, `${path}.${k}`);
+        }
+      };
+      walk(spec, '$');
+      expect(offenders).toEqual([]);
     });
   });
 

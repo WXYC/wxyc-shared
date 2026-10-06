@@ -61,6 +61,12 @@ describe('call-number corpus shape', () => {
     for (const c of callNumberCases) expect(c, c.id).not.toHaveProperty('pending');
   });
 
+  it('carries no consumer-status prose in meta or row text (#600): status lives in the README, not the hashed file', () => {
+    const status = /does not (send|read|carry)[^.]*yet|not yet \(|reads? \S+ yet/i;
+    expect(JSON.stringify(callNumberCorpus.meta)).not.toMatch(status);
+    for (const c of callNumberCases) expect(c.why, c.id).not.toMatch(status);
+  });
+
   it('has kebab-case ids', () => {
     for (const c of callNumberCases) expect(c.id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
   });

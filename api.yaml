@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.13.0
+  version: 11.13.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -156,11 +156,10 @@ components:
         why the two gates differ.
 
 
-        Not yet live on the wire: Backend-Service gates the whole
-        handshake behind `FLOWSHEET_TAKEOVER_ENABLED`, shipping OFF
-        (WXYC/Backend-Service#2233). See that 409 for what changes
-        at the flip, and why to start sending this field before it
-        rather than after.
+        Backend-Service gates the whole handshake behind
+        `FLOWSHEET_TAKEOVER_ENABLED` (WXYC/Backend-Service#2233); the
+        flag decides whether this field is enforced. See that 409 for
+        what the flag changes; send this field regardless of the flag.
 
 
         An explicit JSON `null` is folded into absence and answered
@@ -2618,7 +2617,7 @@ components:
         against a client generated from this spec. That leniency is deliberate
         and load-bearing: this row is also the iOS Spotlight clone's shape, and
         wxyc-ios-64 regenerates from this SSOT on its own cadence. A required
-        key the server does not yet emit would not degrade one field — it would
+        key the server does not emit would not degrade one field — it would
         fail EVERY NDJSON line and take the whole on-device clone with it. Same
         reasoning as `popularity` (BS#1486 Phase-2 Track 3). Note that oasdiff
         does NOT flag adding a required response property, so a green
@@ -5101,16 +5100,14 @@ components:
             it. NOT the compilation-section letter (`code_comp_letter`, a
             separate field). Null when the release has no volume letter (most
             catalogued rows), and always null on an unlinked rotation row (no
-            library row). Optional: Backend does not send it yet; it will with
-            WXYC/Backend-Service#2917.
+            library row). Optional.
         genre_id:
           type: integer
           nullable: true
           description: >
             The release's shelf genre (`library.genre_id`), the id that gates
             `code_comp_letter`. Null on an unlinked rotation row (no library
-            row). Optional: Backend does not send it yet; it will with
-            WXYC/Backend-Service#2917.
+            row). Optional.
         code_number:
           type: integer
           nullable: true
@@ -6578,15 +6575,13 @@ components:
             (varchar(4)). Volumes of one set share a call number, so this
             tells them apart. Stored RAW: the wire does not trim or case-fold
             it. NOT the compilation-section letter (`code_comp_letter`, a
-            separate field). Optional: Backend does not send it yet; it will
-            with WXYC/Backend-Service#2917.
+            separate field). Optional.
         genre_id:
           type: integer
           description: >
             The release's shelf genre (`library.genre_id`). The id that gates
             `code_comp_letter`: a consumer rendering the section letter needs
-            it to know whether the letter applies. Optional: Backend does not
-            send it yet; it will with WXYC/Backend-Service#2917.
+            it to know whether the letter applies. Optional.
         format_name:
           type: string
         genre_name:
@@ -9336,10 +9331,11 @@ components:
     # `include_tracks` was false or omitted.
     #
     # LML serves this endpoint without `response_model_exclude_none` and
-    # sets this field nowhere yet, so `tracks_contract_version` ships
-    # `null` — never an omitted key — on every production response today
-    # (WXYC/wxyc-shared#310); `nullable: true` documents that wire instead
-    # of describing one nobody emits, the same treatment as `tracks` above.
+    # sets this field to 1 only when the request set `include_tracks`
+    # (LML#1138), so `tracks_contract_version` ships `null` — never an
+    # omitted key — on every other response (WXYC/wxyc-shared#310);
+    # `nullable: true` documents that wire instead of describing one
+    # nobody emits, the same treatment as `tracks` above.
     # That also means a presence probe reads TRUE against the producer
     # that implements none of this — the inverse of what the marker exists
     # to signal. A consumer MUST test for the value `1` and
@@ -9926,11 +9922,10 @@ components:
             Absent or NULL otherwise: both when `include_tracks` was
             false or omitted, and when the producer predates this field
             entirely, or has implemented only one of the two arms above.
-            LML does not set this field anywhere yet and serves this
-            endpoint without `response_model_exclude_none`, so it ships
-            `null` — never an omitted key — on every response in
-            production today (WXYC/wxyc-shared#310); `nullable: true`
-            documents that wire instead of describing one nobody emits,
+            LML serves this endpoint without
+            `response_model_exclude_none`, so when LML leaves the field
+            unset it ships `null` — never an omitted key
+            (WXYC/wxyc-shared#310); `nullable: true` documents that wire,
             the same treatment as `tracks` / `tracks_attempted` above.
 
 
@@ -12625,14 +12620,13 @@ paths:
             documented on that schema rather than restated here.
 
 
-            **Not yet live on the wire.** Backend-Service gates the whole
-            handshake behind `FLOWSHEET_TAKEOVER_ENABLED`, which ships OFF
-            (WXYC/Backend-Service#2233). While the flag is off, an absent
-            `intent` still silently co-hosts and neither this 409 nor the
-            intent half of the 400 above is reachable. This document describes
-            the end state so clients can be written against it first; a client
-            that omits `intent` will start receiving 409s the moment the flag
-            flips, so send an explicit value before then rather than after.
+            Backend-Service gates the whole handshake behind
+            `FLOWSHEET_TAKEOVER_ENABLED` (WXYC/Backend-Service#2233). While
+            the flag is off, an absent `intent` silently co-hosts and neither
+            this 409 nor the intent half of the 400 above is returned. This
+            document describes the behavior with the flag on; a client that
+            omits `intent` receives this 409 once the flag is on, so send an
+            explicit value regardless of the flag.
           content:
             application/json:
               schema:
@@ -17393,12 +17387,11 @@ paths:
         producer too, not evidence the producer predates the flag.
 
 
-        LML does not set this field anywhere yet and serves this endpoint
-        without `response_model_exclude_none`, so `tracks_contract_version`
-        ships `null` — never an omitted key — on every response in
-        production today (WXYC/wxyc-shared#310). A presence check
-        therefore reads TRUE against the producer that implements none
-        of this, the inverse of what the marker exists to signal. A
+        LML serves this endpoint without `response_model_exclude_none`,
+        so when LML leaves `tracks_contract_version` unset it ships
+        `null` — never an omitted key (WXYC/wxyc-shared#310). A presence
+        check therefore reads TRUE against a producer that implements
+        none of this, the inverse of what the marker exists to signal. A
         consumer MUST test for the value `1` and
         must never test for key presence: absent, `null`, and a producer
         that predates this field must all read "not supported", and only
