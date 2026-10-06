@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.11.0
+  version: 11.12.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4519,6 +4519,7 @@ components:
         - on_cover
         - printed_revision_id
         - printed_at
+        - revision_count
       properties:
         id:
           type: integer
@@ -4624,12 +4625,94 @@ components:
           description: >
             The revision of this review that was most recently printed;
             `null` if it has never been printed. When it is not the current
-            revision, the printed slip is out of date.
+            revision, the printed slip is out of date. Its `id` is one of the
+            entries of `GET /reviews/{id}/revisions`.
         printed_at:
           type: string
           format: date-time
           nullable: true
           description: When that print happened.
+        revision_count:
+          type: integer
+          minimum: 0
+          description: >
+            How many revisions the review has: `0` for a draft, `1` once
+            submitted, more after edits. Above `1` means there is history to
+            show (`GET /reviews/{id}/revisions`).
+
+    ReviewRevision:
+      type: object
+      description: >
+        One saved version of a submitted review, as listed by
+        `GET /reviews/{id}/revisions`. Publishing consent (`publish_*`,
+        `credit`) is not versioned. Drafts are not versioned: a review has no
+        revisions until it is submitted. Deleting a review deletes its
+        revisions.
+      required:
+        - id
+        - review_id
+        - revision
+        - edited_by
+        - edited_by_user_id
+        - edited_at
+        - review
+        - artist_blurb
+        - buzzwords
+        - recommended_tracks
+        - fcc
+      properties:
+        id:
+          type: integer
+        review_id:
+          type: integer
+        revision:
+          type: integer
+          minimum: 1
+          description: >
+            1-based. Revision 1 is written when the review is submitted; each
+            later edit of the submitted review writes the next.
+        edited_by:
+          type: string
+          maxLength: 128
+          nullable: true
+          description: >
+            Display-name snapshot taken at the time. Revision 1 names the
+            review's author: it is a copy of `Review.author`, whoever pressed
+            submit, so for a review a music director recorded on someone's
+            behalf it is the name the music director typed. A later revision
+            names whoever made that edit; for a music director's edit of
+            someone else's review, the music director. Station-only, with the
+            caveat on `Review.author`.
+        edited_by_user_id:
+          type: string
+          nullable: true
+          description: >
+            Revision 1 carries the review's `author_user_id` (null for an
+            author with no linked account); a later revision carries the
+            editor's account. `null` once that account has been deleted.
+        edited_at:
+          type: string
+          format: date-time
+        review:
+          type: string
+          nullable: true
+          description: The review text as saved by this edit.
+        artist_blurb:
+          type: string
+          nullable: true
+          description: The artist blurb as saved by this edit.
+        buzzwords:
+          type: string
+          nullable: true
+          description: The buzzwords as saved by this edit.
+        recommended_tracks:
+          type: string
+          nullable: true
+          description: The recommended tracks as saved by this edit.
+        fcc:
+          type: string
+          nullable: true
+          description: The FCC notes as saved by this edit. Never published outside the station.
 
     IntakeSlip:
       type: object
@@ -4688,7 +4771,9 @@ components:
           nullable: true
         revision_id:
           type: integer
-          description: The id of the review revision this slip printed.
+          description: >
+            The id of the review revision this slip printed. Its `id` is one of
+            the entries of `GET /reviews/{id}/revisions`.
         fcc_notes:
           type: array
           items:
@@ -14178,7 +14263,10 @@ paths:
         email carries no review text), and the review's history shows the edit
         under the music director's name. An edit that changes `fcc` on a
         review that has been printed notifies the music directors, so they can
-        reprint. A draft the caller may not see is a 404.
+        reprint. A draft the caller may not see is a 404. An edit of a
+        submitted review writes a new revision under the editor's name. An
+        edit of a draft writes none, and neither does a request that changes
+        only `publish_*` or `credit`, or changes nothing.
         Delivered by WXYC/Backend-Service#2802.
       security:
         - BearerAuth: []
@@ -14225,8 +14313,7 @@ paths:
         citation, is refused with `accepted_review`. A music director deleting the accepted review of an
         item not yet filed returns the item to `checked_out` if someone holds
         it, otherwise to `pool`. Deleting a review deletes its edit history.
-        Delivered by
-        WXYC/Backend-Service#2802.
+        Delivered by WXYC/Backend-Service#2854.
       security:
         - BearerAuth: []
       responses:
@@ -14272,7 +14359,8 @@ paths:
         Submitting a review attached to an intake item notifies the music
         directors; a library-release review notifies nobody. A `typed` review needs
         non-null `review` text; a handwritten review may be submitted with no
-        text. Delivered by WXYC/Backend-Service#2802.
+        text. Submitting writes revision 1. Delivered by
+        WXYC/Backend-Service#2854.
       security:
         - BearerAuth: []
       responses:
@@ -14304,6 +14392,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewConflictError'
+
+  /reviews/{id}/revisions:
+    parameters:
+      - $ref: '#/components/parameters/ReviewId'
+    get:
+      x-wxyc-service: backend-service
+      summary: List a review's edit history
+      description: >
+        Grant: `reviews: read`. Delivered by WXYC/Backend-Service#2861.
+        Visible to exactly who can see the review: a draft the caller may not
+        see is a 404, and a draft the caller can see answers an empty array.
+        Returns a bare array, newest first, not paginated.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The review's revisions, ordered by `revision` descending (newest first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReviewRevision'
+        '400':
+          description: A malformed id (a non-digit value, zero, or past 2147483647)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: read` permission'
+        '404':
+          description: No such review, or a draft the caller may not see
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /library/query:
     get:
