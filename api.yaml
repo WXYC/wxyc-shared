@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.14.0
+  version: 11.15.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4622,9 +4622,8 @@ components:
             Computed. `true` when this review is the accepted review of an
             intake item, or is the review in the latest print-log entry of a
             copy or of a library release (`POST /library/{id}/print`). An
-            author cannot delete a review
-            that is in use (`ReviewConflictReason` `in_use`), but may still
-            edit it.
+            author cannot delete a review that is in use
+            (`ReviewConflictReason` `in_use`), but may still edit it.
         on_cover:
           type: boolean
           description: >
@@ -16789,7 +16788,10 @@ paths:
         '403':
           description: "Caller lacks the `reviews: manage` grant"
         '404':
-          description: No such library release
+          description: >-
+            No such library release. The release is resolved before the
+            review: a well-formed request for a release that does not exist
+            is a 404 whatever `review_id` it names.
           content:
             application/json:
               schema:
