@@ -9835,7 +9835,7 @@ describe('OpenAPI Specification', () => {
 
     it('pins the revision sentences and the not-versioned description', () => {
       const p = revision().properties!;
-      expect(flat(p.revision?.description)).toBe('1-based. Revision 1 is written when the review is submitted; each later edit of the submitted review writes the next.');
+      expect(flat(p.revision?.description)).toBe('1-based. Revision 1 is written when the review is submitted; each later edit of the submitted review writes the next. A review submitted before edit history began has none until its first edit, which writes revision 1 (its text before that edit, under its author, dated when it was submitted, or at its last write when that is unknown) and then revision 2 for the edit.');
       expect(flat(p.edited_by?.description)).toContain("Display-name snapshot taken at the time. Revision 1 names the review's author: it is a copy of `Review.author`, whoever pressed submit, so for a review a music director recorded on someone's behalf it is the name the music director typed. A later revision names whoever made that edit; for a music director's edit of someone else's review, the music director. Station-only, with the caveat on `Review.author`.");
       expect(flat(p.edited_by_user_id?.description)).toBe("Revision 1 carries the review's `author_user_id` (null for an author with no linked account); a later revision carries the editor's account. `null` once that account has been deleted.");
       expect(flat(revision().description)).toContain('Publishing consent (`publish_*`, `credit`) is not versioned. Drafts are not versioned: a review has no revisions until it is submitted. Deleting a review deletes its revisions.');
@@ -9863,7 +9863,7 @@ describe('OpenAPI Specification', () => {
       expect(review.required).toContain('revision_count');
       expect(review.properties?.revision_count).toMatchObject({ type: 'integer', minimum: 0 });
       expect(review.properties?.revision_count?.nullable).toBeUndefined();
-      expect(flat(review.properties?.revision_count?.description)).toBe('How many revisions the review has: `0` for a draft, `1` once submitted, more after edits. Above `1` means there is history to show (`GET /reviews/{id}/revisions`).');
+      expect(flat(review.properties?.revision_count?.description)).toBe('How many revisions the review has: `0` for a draft, `1` once submitted, more after edits. A review submitted before edit history began counts `0` until its first edit, which brings it to `2`. Above `1` means there is history to show (`GET /reviews/{id}/revisions`).');
     });
 
     it('states when a revision is written on submit and PATCH', () => {
