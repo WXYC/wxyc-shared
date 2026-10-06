@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.13.1
+  version: 11.14.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -96,6 +96,17 @@ components:
         maximum: 2147483647
       description: >-
         The review's id. Must be a positive int4; a non-digit value, zero, or
+        a value past 2147483647 is a 400.
+    FccNoteId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+      description: >-
+        The FCC note's id. Must be a positive int4; a non-digit value, zero, or
         a value past 2147483647 is a 400.
 
   schemas:
@@ -14245,12 +14256,20 @@ paths:
       x-wxyc-service: backend-service
       summary: List a record's FCC notes
       description: >
-        Grant: `reviews: read`. Delivered by WXYC/Backend-Service#2862. Send
-        exactly one of `album_id` and `intake_item_id`; neither, or both, is a
-        400. Returns notes of both statuses, `reported_at` ascending, then
-        `id` ascending. Not paginated: a bare array. The `album_id` list
-        includes notes that were reported against an intake item and stamped
-        with the release at filing.
+        Delivered by WXYC/Backend-Service#2862 (a record's list) and
+        WXYC/Backend-Service#2863 (the waiting list). A list is one of two
+        shapes. A record's list sends exactly one of `album_id` and
+        `intake_item_id` (grant `reviews: read`) and returns notes of both
+        statuses, or only one when `status` is also sent. The music directors'
+        waiting list sends `status=reported` and neither subject (grant
+        `reviews: manage`) and returns every unconfirmed note on every record,
+        oldest first, each carrying `artist_name`, `album_title` and its
+        subject ids so a row can be rendered and linked without a second
+        request. Anything else is a 400: both subjects, no subject without
+        `status=reported`, or `status=confirmed` with no subject. Both shapes
+        return `reported_at` ascending, then `id` ascending. Not paginated: a
+        bare array. The `album_id` list includes notes that were reported
+        against an intake item and stamped with the release at filing.
       security:
         - BearerAuth: []
       parameters:
@@ -14266,9 +14285,13 @@ paths:
             type: integer
             minimum: 1
             maximum: 2147483647
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/FccNoteStatus'
       responses:
         '200':
-          description: The record's notes
+          description: The record's notes, or every unconfirmed note
           content:
             application/json:
               schema:
@@ -14276,7 +14299,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/FccNote'
         '400':
-          description: Both or neither filter, or a value that is not a positive int4
+          description: Both subjects, no subject without `status=reported`, `status=confirmed` with no subject, a value that is not a positive int4, or a `status` that is not an `FccNoteStatus` value
           content:
             application/json:
               schema:
@@ -14284,7 +14307,76 @@ paths:
         '401':
           description: No bearer token
         '403':
-          description: 'Caller lacks the `reviews: read` permission'
+          description: 'Caller lacks `reviews: read`, or sent no subject and lacks `reviews: manage`'
+
+  /fcc-notes/{id}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/FccNoteId'
+    post:
+      x-wxyc-service: backend-service
+      summary: Confirm an FCC note
+      description: >
+        Grant: `reviews: manage`. Delivered by WXYC/Backend-Service#2863. Sets
+        `status` to `confirmed` and stamps `confirmed_by` and `confirmed_at`.
+        Confirming a note that is already confirmed answers 200 and changes
+        nothing.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FccNote'
+        '400':
+          description: A malformed id (a non-digit value, zero, or past 2147483647)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: manage` permission'
+        '404':
+          description: No such note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /fcc-notes/{id}:
+    parameters:
+      - $ref: '#/components/parameters/FccNoteId'
+    delete:
+      x-wxyc-service: backend-service
+      summary: Remove an FCC note
+      description: >
+        Delivered by WXYC/Backend-Service#2863. Grant: `reviews: manage` for
+        any note; `reviews: write` for the reporter, and only while the note
+        is still `reported`.
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: The note is removed
+        '400':
+          description: A malformed id (a non-digit value, zero, or past 2147483647)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: Caller lacks the grant, or is not the reporter, or is the reporter of a note already confirmed
+        '404':
+          description: No such note
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /reviews:
     get:

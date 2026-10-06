@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.13.1');
+      expect(spec.info.version).toBe('11.14.0');
     });
 
     it('should have components section', () => {
@@ -4113,7 +4113,7 @@ describe('OpenAPI Specification', () => {
     // Derived from the path prefix, not from a `$ref` to the id parameter: a new /intake/{id}/... or
     // /reviews/{id}/... route that declares its `id` inline would otherwise slip past both the parameter check
     // and the 400 check. `spec` is populated in `beforeAll`, so the list is built inside the tests.
-    const idFamilies: Array<[string, string]> = [['/intake/{id}', 'IntakeId'], ['/reviews/{id}', 'ReviewId']];
+    const idFamilies: Array<[string, string]> = [['/intake/{id}', 'IntakeId'], ['/reviews/{id}', 'ReviewId'], ['/fcc-notes/{id}', 'FccNoteId']];
     const idOperations = (prefix: string): Array<[string, string]> =>
       Object.entries(spec.paths as Record<string, Record<string, unknown>>)
         .filter(([path]) => path === prefix || path.startsWith(`${prefix}/`))
@@ -9983,29 +9983,76 @@ describe('OpenAPI Specification', () => {
     });
 
     it('declares GET /fcc-notes as a bare array with two bounded filters', () => {
-      expectBackendRoute('/fcc-notes', 'get', { grant: 'Grant: `reviews: read`.', issue: 'WXYC/Backend-Service#2862' });
+      expectBackendRoute('/fcc-notes', 'get', { grant: 'reviews: read', issue: 'WXYC/Backend-Service#2862' });
       const o = operation('/fcc-notes', 'get');
       expect(o.summary).toBe("List a record's FCC notes");
       expect((o.parameters as any[]).map((q) => [q.name, q.schema])).toEqual([
         ['album_id', { type: 'integer', minimum: 1, maximum: 2147483647 }],
         ['intake_item_id', { type: 'integer', minimum: 1, maximum: 2147483647 }],
+        ['status', ref('FccNoteStatus')],
       ]);
       // Both are query parameters and neither is required on its own: exactly one must be sent.
       for (const q of o.parameters as any[]) {
         expect(q.in).toBe('query');
         expect(q.required).toBeUndefined();
       }
-      expect(o.responses?.['400']?.description).toBe('Both or neither filter, or a value that is not a positive int4');
+      expect(flat(o.responses?.['400']?.description)).toBe(
+        'Both subjects, no subject without `status=reported`, `status=confirmed` with no subject, a value that is not a positive int4, or a `status` that is not an `FccNoteStatus` value',
+      );
+      expect(flat(o.responses?.['403']?.description)).toBe('Caller lacks `reviews: read`, or sent no subject and lacks `reviews: manage`');
       expect(responseSchema('/fcc-notes', 'get', '200')).toEqual({ type: 'array', items: ref('FccNote') });
       expect(responseSchema('/fcc-notes', 'get', '400')).toEqual(ref('ApiErrorResponse'));
       const text = flat(o.description);
-      expect(text).toContain('Send exactly one of `album_id` and `intake_item_id`; neither, or both, is a 400.');
-      expect(text).toContain('Returns notes of both statuses, `reported_at` ascending, then `id` ascending. Not paginated: a bare array.');
+      expect(text).toContain(
+        "A list is one of two shapes. A record's list sends exactly one of `album_id` and `intake_item_id` (grant `reviews: read`) and returns notes of both statuses, or only one when `status` is also sent. The music directors' waiting list sends `status=reported` and neither subject (grant `reviews: manage`) and returns every unconfirmed note on every record, oldest first, each carrying `artist_name`, `album_title` and its subject ids so a row can be rendered and linked without a second request. Anything else is a 400: both subjects, no subject without `status=reported`, or `status=confirmed` with no subject.",
+      );
+      expect(text).not.toContain('neither, or both, is a 400');
+      expect(text).toContain('WXYC/Backend-Service#2863');
+      expect(text).toContain('`reported_at` ascending, then `id` ascending. Not paginated: a bare array.');
       expect(text).toContain('The `album_id` list includes notes that were reported against an intake item and stamped with the release at filing.');
     });
 
-    it.each(['get', 'post'])('declares no 409 on %s /fcc-notes', (method) => {
-      expect(operation('/fcc-notes', method).responses?.['409']).toBeUndefined();
+    it('declares the FccNoteId path parameter', () => {
+      const p = (spec.components as any).parameters.FccNoteId;
+      expect(p.name).toBe('id');
+      expect(p.in).toBe('path');
+      expect(p.required).toBe(true);
+    });
+
+    it('declares POST /fcc-notes/{id}/confirm', () => {
+      expectBackendRoute('/fcc-notes/{id}/confirm', 'post', { grant: 'Grant: `reviews: manage`.', issue: 'WXYC/Backend-Service#2863' });
+      const o = operation('/fcc-notes/{id}/confirm', 'post');
+      expect(o.summary).toBe('Confirm an FCC note');
+      expect((o as any).security).toEqual([{ BearerAuth: [] }]);
+      expect(flat(o.description)).toContain(
+        'Sets `status` to `confirmed` and stamps `confirmed_by` and `confirmed_at`. Confirming a note that is already confirmed answers 200 and changes nothing.',
+      );
+      expect(responseSchema('/fcc-notes/{id}/confirm', 'post', '200')).toEqual(ref('FccNote'));
+      for (const code of ['401', '403', '404']) expect(o.responses?.[code], code).toBeDefined();
+    });
+
+    it('declares DELETE /fcc-notes/{id}', () => {
+      expectBackendRoute('/fcc-notes/{id}', 'delete', { grant: 'Grant: `reviews: manage` for any note', issue: 'WXYC/Backend-Service#2863' });
+      const o = operation('/fcc-notes/{id}', 'delete');
+      expect(o.summary).toBe('Remove an FCC note');
+      expect((o as any).security).toEqual([{ BearerAuth: [] }]);
+      expect(flat(o.description)).toContain(
+        'Grant: `reviews: manage` for any note; `reviews: write` for the reporter, and only while the note is still `reported`.',
+      );
+      expect(o.responses?.['204']).toBeDefined();
+      expect(flat(o.responses?.['403']?.description)).toBe(
+        'Caller lacks the grant, or is not the reporter, or is the reporter of a note already confirmed',
+      );
+      for (const code of ['401', '404']) expect(o.responses?.[code], code).toBeDefined();
+    });
+
+    it.each([
+      ['/fcc-notes', 'get'],
+      ['/fcc-notes', 'post'],
+      ['/fcc-notes/{id}/confirm', 'post'],
+      ['/fcc-notes/{id}', 'delete'],
+    ])('declares no 409 on %s %s', (path, method) => {
+      expect(operation(path, method).responses?.['409']).toBeUndefined();
     });
 
     it('carries the cross-reference sentences', () => {
