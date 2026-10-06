@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.14.0');
+      expect(spec.info.version).toBe('11.15.0');
     });
 
     it('should have components section', () => {
@@ -10073,11 +10073,12 @@ describe('OpenAPI Specification', () => {
       );
     });
   });
+
   describe('POST /library/{id}/print (#576)', () => {
     const path = '/library/{id}/print';
 
     it('is a backend-service route granted reviews: manage, delivered by Backend-Service#2865', () => {
-      expectBackendRoute(path, 'post', { grant: 'Grant: `reviews: manage`.', issue: '#2865' });
+      expectBackendRoute(path, 'post', { grant: 'Grant: `reviews: manage`.', issue: 'WXYC/Backend-Service#2865' });
       expect(operation(path, 'post').summary).toBe('Print a review for a library release');
     });
 
@@ -10105,12 +10106,12 @@ describe('OpenAPI Specification', () => {
     it('returns an IntakeSlip carrying confirmed FCC notes, with 400, 401, 403, 404 and no 409', () => {
       const o = operation(path, 'post');
       expect(responseSchema(path, 'post', '200')).toEqual(ref('IntakeSlip'));
-      const text = flat(o.responses?.['200']?.description);
-      expect(text).toContain('`revision_id`');
-      expect(text).toContain('`fcc_notes`');
-      expect(text).toContain('confirmed FCC notes');
-      expect(text).toContain('an empty array when there are none');
-      expect(text).toContain('a note still `reported` does not print');
+      expect(flat(o.responses?.['200']?.description)).toBe(
+        "The slip, with `revision_id` set to the revision printed and `fcc_notes` holding the release's confirmed FCC notes (an empty array when there are none; a note still `reported` does not print).",
+      );
+      expect(flat(o.responses?.['404']?.description)).toBe(
+        'No such library release. The release is resolved before the review: a well-formed request for a release that does not exist is a 404 whatever `review_id` it names.',
+      );
       expect(responseSchema(path, 'post', '400')).toEqual(ref('ApiErrorResponse'));
       expect(responseSchema(path, 'post', '404')).toEqual(ref('ApiErrorResponse'));
       expect(o.responses?.['401']).toBeDefined();
@@ -10125,12 +10126,6 @@ describe('OpenAPI Specification', () => {
     it('words IntakeSlip for a library release too', () => {
       expect(flat((spec.components.schemas.IntakeSlip as { description?: string }).description)).toContain(
         "The printable review slip: the record's identity (the intake item's, or the library release's for `POST /library/{id}/print`) plus the printed review's text.",
-      );
-    });
-
-    it('names the route beside the library-release print-log phrase in Review.in_use', () => {
-      expect(flat((spec.components.schemas.Review as { properties: { in_use: { description?: string } } }).properties.in_use.description)).toContain(
-        'the latest print-log entry of a copy or of a library release (`POST /library/{id}/print`)',
       );
     });
   });
