@@ -4491,9 +4491,9 @@ components:
       description: >
         An in-app DJ album review, the station's printed slip plus publishing
         consent. Attached to an intake item or to a library release (at least
-        one of `intake_item_id` and `album_id` is set). FCC notes (`fcc`) are
-        never published outside the station. In v1 the service stores consent
-        (`publish_*`, `credit`) and publishes nothing.
+        one of `intake_item_id` and `album_id` is set). The review's own FCC
+        line (`fcc`) is never published outside the station. In v1 the service
+        stores consent (`publish_*`, `credit`) and publishes nothing.
       required:
         - id
         - album_id
@@ -14220,7 +14220,8 @@ paths:
         Grant: `reviews: write`. Delivered by WXYC/Backend-Service#2862. Any
         DJ may report a note on any library release or intake item; there is
         no hold requirement. The note starts `reported` and is visible to
-        every DJ at once. The music directors are notified.
+        every DJ at once. Every music director is emailed about the report
+        (WXYC/Backend-Service#2863), unless a music director reported it.
       security:
         - BearerAuth: []
       requestBody:
