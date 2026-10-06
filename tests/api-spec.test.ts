@@ -4140,6 +4140,12 @@ describe('OpenAPI Specification', () => {
       expect(ops).toContainEqual(['get', '/reviews/{id}/revisions']);
     });
 
+    it('finds the /fcc-notes/{id} operations, including /confirm and DELETE', () => {
+      const ops = idOperations('/fcc-notes/{id}');
+      expect(ops).toContainEqual(['post', '/fcc-notes/{id}/confirm']);
+      expect(ops).toContainEqual(['delete', '/fcc-notes/{id}']);
+    });
+
     describe.each(idFamilies)('%s', (prefix, param) => {
       it(`uses the shared ${param} parameter on every operation`, () => {
         const paths = spec.paths as Record<string, { parameters?: unknown[] }>;
@@ -9982,16 +9988,16 @@ describe('OpenAPI Specification', () => {
       expect(responseSchema('/fcc-notes', 'post', '400')).toEqual(ref('ApiErrorResponse'));
     });
 
-    it('declares GET /fcc-notes as a bare array with two bounded filters', () => {
+    it('declares GET /fcc-notes as a bare array: a record\'s list or the waiting list, with three bounded query parameters', () => {
       expectBackendRoute('/fcc-notes', 'get', { grant: 'reviews: read', issue: 'WXYC/Backend-Service#2862' });
       const o = operation('/fcc-notes', 'get');
-      expect(o.summary).toBe("List a record's FCC notes");
+      expect(o.summary).toBe("List a record's FCC notes, or the music directors' waiting list");
       expect((o.parameters as any[]).map((q) => [q.name, q.schema])).toEqual([
         ['album_id', { type: 'integer', minimum: 1, maximum: 2147483647 }],
         ['intake_item_id', { type: 'integer', minimum: 1, maximum: 2147483647 }],
         ['status', ref('FccNoteStatus')],
       ]);
-      // Both are query parameters and neither is required on its own: exactly one must be sent.
+      // All three are optional query parameters, because the two request shapes use different ones: a record's list sends exactly one subject (`album_id` or `intake_item_id`) with an optional `status`, and the waiting list sends `status=reported` with no subject.
       for (const q of o.parameters as any[]) {
         expect(q.in).toBe('query');
         expect(q.required).toBeUndefined();
@@ -9999,7 +10005,7 @@ describe('OpenAPI Specification', () => {
       expect(flat(o.responses?.['400']?.description)).toBe(
         'Both subjects, no subject without `status=reported`, `status=confirmed` with no subject, a value that is not a positive int4, or a `status` that is not an `FccNoteStatus` value',
       );
-      expect(flat(o.responses?.['403']?.description)).toBe('Caller lacks `reviews: read`, or sent no subject and lacks `reviews: manage`');
+      expect(flat(o.responses?.['403']?.description)).toBe('Caller lacks `reviews: read`, or asked for the waiting list (`status=reported` and no subject) and lacks `reviews: manage`');
       expect(responseSchema('/fcc-notes', 'get', '200')).toEqual({ type: 'array', items: ref('FccNote') });
       expect(responseSchema('/fcc-notes', 'get', '400')).toEqual(ref('ApiErrorResponse'));
       const text = flat(o.description);

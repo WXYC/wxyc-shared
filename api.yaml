@@ -14254,7 +14254,7 @@ paths:
           description: 'Caller lacks the `reviews: write` permission'
     get:
       x-wxyc-service: backend-service
-      summary: List a record's FCC notes
+      summary: List a record's FCC notes, or the music directors' waiting list
       description: >
         Delivered by WXYC/Backend-Service#2862 (a record's list) and
         WXYC/Backend-Service#2863 (the waiting list). A list is one of two
@@ -14307,7 +14307,7 @@ paths:
         '401':
           description: No bearer token
         '403':
-          description: 'Caller lacks `reviews: read`, or sent no subject and lacks `reviews: manage`'
+          description: 'Caller lacks `reviews: read`, or asked for the waiting list (`status=reported` and no subject) and lacks `reviews: manage`'
 
   /fcc-notes/{id}/confirm:
     parameters:
