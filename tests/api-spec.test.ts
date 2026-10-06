@@ -3777,7 +3777,7 @@ describe('OpenAPI Specification', () => {
       // Decision 39: overdue follows the checkout, not the state.
       expect(flat(item.properties?.overdue?.description)).toBe('True while the record\'s checkout is more than 14 days old (`checked_out_at`), in `checked_out` or `reviewed`; a reviewed record that has been returned has no checkout and is never overdue.');
       // Decision 36: accepting a review clears a pending request.
-      expect(flat(item.properties?.requested_dj_id?.description)).toContain('later transitions may leave it set (a checkout or accepting a review clears a stale request\'s fields)');
+      expect(flat(item.properties?.requested_dj_id?.description)).toContain('later transitions may leave it set (a checkout clears the request\'s fields, and accepting a review withdraws a pending request)');
       // Decision 38: a deleted holder on a `reviewed` item is returnable.
       expect(flat(item.properties?.checked_out_by?.description)).toContain('`null` while `checked_out_at` is set, in `checked_out` or `reviewed`, means the holder\'s account has since been deleted');
       expect(flat(item.properties?.printed_at?.description)).toBe("When this item's slip was last printed: the time of its latest print-log entry.");
@@ -4399,6 +4399,8 @@ describe('OpenAPI Specification', () => {
       // WXYC/Backend-Service#2860 lands; say so the way PATCH /intake/{id}
       // names its citation rules.
       expect(text).toContain('Delivered by WXYC/Backend-Service#2798 (handing back a `reviewed` item: WXYC/Backend-Service#2860).');
+      // Decision 38: a `reviewed` item whose holder's account is gone is returnable by a music director.
+      expect(text).toContain("A `reviewed` item whose holder's account has been deleted (`checked_out_by` null, `checked_out_at` set) is returned by a music director the same way a `checked_out` one is.");
     });
 
     it('documents the single-key citation switch on IntakeItemPatch', () => {
@@ -9615,17 +9617,20 @@ describe('OpenAPI Specification', () => {
         /`subject_not_held`: a DJ's `POST \/reviews` names an `intake_item_id` the caller does not currently hold \(effective state `checked_out` or `reviewed`, with `checked_out_by` the caller\)/
       );
       expect(reasons).toMatch(/an on-behalf create \(`reviews: manage`\) is exempt from the hold rule/);
-      expect(reasons).toContain("`in_use`: an author deleting their own review while it is in use, meaning it is the accepted review of an intake item or the review most recently printed for a copy. The author may still edit it. A caller with `reviews: manage` is never refused with `in_use`.");
-      expect(reasons).toContain("`accepted_review`: a caller with `reviews: manage` deleting the accepted review of a `filed` or `finalized` intake item that carries no citation. Accept another review for the item first (`POST /intake/{id}/accept-review`). Deleting the accepted review of an item that is not yet filed is allowed: the item returns to `checked_out` if someone holds it, otherwise to `pool`.");
+      expect(reasons).toContain("`in_use`: an author deleting their own review while it is in use, meaning it is the accepted review of an intake item or the review in the latest print-log entry of a copy or of a library release. The author may still edit it. A caller with `reviews: manage` is never refused with `in_use`.");
+      expect(reasons).toContain("`accepted_review`: a caller with `reviews: manage` deleting the accepted review of a `filed` or `finalized` intake item, whether or not the item carries a citation. Accept another review for the item first (`POST /intake/{id}/accept-review`). Deleting the accepted review of an item that is not yet filed is allowed: the item returns to `checked_out` if someone holds it, otherwise to `pool`.");
+      // Decision 40: a citation does not exempt a filed record's cover review.
+      expect(reasons).not.toContain('no citation');
       const acceptedReview = reasons.slice(reasons.indexOf('`accepted_review`:'));
       expect(acceptedReview).not.toMatch(/\bcit(e|es|ed|ing)\b/i);
       expect(flat(operation('/reviews', 'post').responses?.['409']?.description)).toMatch(
         /does not hold \(an on-behalf create is exempt\)/
       );
       const remove = flat(operation('/reviews/{id}', 'delete').description);
-      expect(remove).toContain('Who may do this: the author, unless the review is in use; `reviews: manage` for any review, unless it is the accepted review of a filed or finalized item with no citation.');
-      expect(remove).toContain("An author's delete of a review that is in use is refused with `in_use`. A music director's delete of the accepted review of a `filed` or `finalized` item that has no citation is refused with `accepted_review`. A music director deleting the accepted review of an item not yet filed returns the item to `checked_out` if someone holds it, otherwise to `pool`. Deleting a review deletes its edit history.");
+      expect(remove).toContain('Who may do this: the author, unless the review is in use; `reviews: manage` for any review, unless it is the accepted review of a filed or finalized item, cited or not.');
+      expect(remove).toContain("An author's delete of a review that is in use is refused with `in_use`. A music director's delete of the accepted review of a `filed` or `finalized` item, whether or not the item carries a citation, is refused with `accepted_review`. A music director deleting the accepted review of an item not yet filed returns the item to `checked_out` if someone holds it, otherwise to `pool`. Deleting a review deletes its edit history.");
       expect(remove).not.toContain('last_review');
+      expect(remove).not.toContain('no citation');
     });
 
     it.each([
