@@ -38,17 +38,3 @@
 # claiming a count is wrong the moment someone appends an entry below it, and no
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
-
-# wxyc-shared#608 follow-up (BS#3022, BS#3023): the refile endpoint, its 409
-# `reason` enum and its 404 body were first declared in unpublished 11.16.0
-# (wxyc-shared#608); nothing has been published since 10.7.0 (package.json and
-# the newest package version). The endpoint is live, but its only callers
-# hand-write its types: dj-site maps an unrecognized 409 `reason` to its generic
-# non-retryable refusal (`artistRefileOutcome.ts`), and no generated client
-# calls it (the Swift config uses `enumUnknownDefaultCase: true` anyway). The
-# two 404 lines are oasdiff reading a free-string `code` narrowed to a closed
-# enum, which removes values rather than adding them. Ruled a minor
-# (11.16.0 to 11.17.0), as wxyc-shared#570 was.
-post /library/artists/{id}/refile added the new `various_artists_section` enum value to the `reason` response property for the response status `409`
-post /library/artists/{id}/refile added the new `artist_not_found` enum value to the `code` response property for the response status `404`
-post /library/artists/{id}/refile added the new `artist_not_filed_in_genre` enum value to the `code` response property for the response status `404`
