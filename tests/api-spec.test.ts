@@ -10208,8 +10208,8 @@ describe('OpenAPI Specification', () => {
       expect(responseSchema(path, 'post', '503')).toEqual(ref('LockUnavailableRefusal'));
       const badRequest = flat(operation(path, 'post').responses?.['400']?.description);
       expect(badRequest).toMatch(/`V\/A` \(including `v\/a`, after trimming and upper-casing\), refused before any lock/);
-      expect(flat(operation(path, 'post').responses?.['404']?.description)).toContain('`Genre not found`');
       const notFound = flat(operation(path, 'post').responses?.['404']?.description);
+      expect(notFound).toContain('`Genre not found`');
       expect(notFound).toContain('artist_not_found');
       expect(notFound).toContain('Artist not filed under genre');
     });
@@ -10230,6 +10230,10 @@ describe('OpenAPI Specification', () => {
       expect(flat(s.properties.code_letters.description)).toMatch(/1 to 4 characters from A-Z, a-z, 0-9 and `\/`/);
       expect(flat(s.properties.code_letters.description)).toMatch(/`V\/A` \(after trimming and upper-casing\) is a 400, before any lock/);
       expect(flat(s.description)).toContain('What counts as a change');
+      expect(flat(s.description)).toMatch(/Sending the stored value back, in any case or spacing, is never a change/);
+      expect(flat(s.description)).toMatch(/another genre membership or any\s+release filed in a genre other than `genre_id`/);
+      expect(flat(s.description)).not.toMatch(/`ja`/);
+      expect(flat(s.description)).toMatch(/equal to `genre_id` is treated as absent before\s+any check/);
       expect(flat(s.properties.to_genre_id.description)).toMatch(/Absent or equal to `genre_id`\s+means the artist stays in that genre/);
       expect(flat(s.properties.to_genre_id.description)).toContain('a different genre in which the artist already has a membership or any release');
       expect(s.properties.to_genre_id).toMatchObject({ type: 'integer', minimum: 1, maximum: 2147483647 });
@@ -10278,11 +10282,12 @@ describe('OpenAPI Specification', () => {
       expect(error.properties.reason).toEqual(ref('ArtistRefileConflictReason'));
       expect(error.properties.artist.allOf).toEqual([ref('Artist')]);
       expect(error.properties.memberships.type).toBe('array');
-      expect(error.required).not.toContain('memberships');
-      expect(error.properties.memberships.minItems).toBe(2);
+      expect(error.properties.memberships.minItems).toBeUndefined();
       expect(error.properties.memberships.items).toEqual(ref('ArtistGenreMembership'));
       expect(sch('ArtistGenreMembership').required).toEqual(['genre_id', 'code_artist_number']);
       expect(flat(error.properties.memberships.description)).toMatch(/Present only on `letters_shared_across_genres`/);
+      expect(flat(error.properties.memberships.description)).toContain('including the requested one');
+      expect(flat(sch('ArtistRefileConflictReason').description)).toMatch(/another genre membership or any\s+release filed in a genre other than `genre_id`/);
       expect(flat(error.description)).toContain('memberships');
     });
 
@@ -10319,11 +10324,13 @@ describe('OpenAPI Specification', () => {
     it('documents the refusal order and the lettered-section exception to the no-op 200', () => {
       const d = flat(operation(path, 'post').description);
       expect(d).toMatch(/Outside a lettered compilation section or a Various Artists bucket/);
-      expect(d).toMatch(/Before the shelf lock: the 400s, then a 404 `genre_not_found`/);
+      expect(d).toMatch(/Before any lock: the 400s, then a 404 `genre_not_found`/);
+      expect(d).toMatch(/`artist_not_found` after that row lock and before the shelf lock/);
+      expect(d).toMatch(/\{genre_id: 999, to_genre_id: 999\}/);
       expect(d).toMatch(
         /`lettered_compilation_section`, `various_artists_section`, `letters_shared_across_genres`, `already_filed_in_genre`, the no-op 200, `artist_code_conflict`, and finally the write 200/
       );
-      expect(d).toMatch(/503 `lock_unavailable` can precede any of the post-lock outcomes/);
+      expect(d).toMatch(/503 `lock_unavailable` can precede any outcome decided under a lock/);
       expect(flat(sch('ArtistRefileConflictError').description)).toMatch(/Purpose-built/);
       expect(flat(sch('LockUnavailableRefusal').description)).toMatch(/concurrent re-file/);
     });
