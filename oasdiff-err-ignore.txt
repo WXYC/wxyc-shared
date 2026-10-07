@@ -39,13 +39,3 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # their leading `#`, so prose in this header is never read as an entry.
-
-# wxyc-shared#613 (BS#3034): the refile endpoint is still unpublished (first
-# declared in 11.16.0; the latest published release is 10.7.0), so no consumer
-# can depend on its `reason` / `code` enums being closed at their current width.
-# Ruled a minor (11.18.0 -> 11.19.0), as #570 and 030365f were.
-# These are the three values the letters/genre extension adds. dj-site's refile
-# interpreter already treats an unknown 409 reason generically.
-post /library/artists/{id}/refile added the new `letters_shared_across_genres` enum value to the `reason` response property for the response status `409`
-post /library/artists/{id}/refile added the new `already_filed_in_genre` enum value to the `reason` response property for the response status `409`
-post /library/artists/{id}/refile added the new `genre_not_found` enum value to the `code` response property for the response status `404`
