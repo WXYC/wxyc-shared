@@ -5617,18 +5617,27 @@ components:
         release filed under it into `to_genre_id`.
 
 
-        **What counts as a change.** Each axis is compared exactly
-        against the stored value. Letters change when `code_letters` is
-        present and its normalized form (trimmed, upper-cased) differs
-        from the stored `code_letters`; to keep the current letters,
-        omit the field. Sending the stored value is not a change, but a
-        non-canonical stored value is: with `ja` stored, sending `JA`
-        moves the artist into the `JA` bucket, and occupancy is checked
-        there. The genre changes when `to_genre_id` is present and
-        differs from `genre_id`. The number changes when
-        `code_artist_number` differs from the stored number. A request
-        that changes none of the three is a no-op 200 (`changed: false`).
-        `letters_shared_across_genres` fires only on a letters change.
+        **What counts as a change.** Letters change when `code_letters`
+        is present and its normalized form (trimmed, upper-cased)
+        differs from the normalized stored `code_letters`. Sending the
+        stored value back, in any case or spacing, is never a change, so
+        a client that pre-fills the field from the card cannot turn a
+        number-only edit into a re-letter; omitting the field also keeps
+        the letters. A real change writes the normalized value, and
+        occupancy is checked against artists whose stored `code_letters`
+        equal the destination letters exactly (every stored value is
+        already trimmed and upper-case; WXYC/Backend-Service#2199 tracks
+        the create paths that could store another). The genre changes
+        when `to_genre_id` is present and differs from `genre_id`; a
+        `to_genre_id` equal to `genre_id` is treated as absent before
+        any check. The number changes when `code_artist_number` differs
+        from the stored number. A request that changes none of the three
+        is a no-op 200 (`changed: false`).
+        `letters_shared_across_genres` fires only on a letters change,
+        and only when the artist has another genre membership or any
+        release filed in a genre other than `genre_id` (letters are
+        artist-global, so those releases would be re-lettered too,
+        outside `releases_to_relabel`).
       required:
         - genre_id
         - code_artist_number
@@ -5657,17 +5666,21 @@ components:
             trims and upper-cases it. Not constrained by a schema
             pattern; the server validates. `V/A` (after trimming and
             upper-casing) is a 400, before any lock. Omit it to keep the
-            current letters; see "What counts as a change" on
-            `RefileArtistRequest`. Letters are artist-global: a change on
-            an artist with more than one genre membership is refused
-            (409 `letters_shared_across_genres`).
+            current letters; sending the stored value back is not a
+            change (see "What counts as a change" on
+            `RefileArtistRequest`). Letters are artist-global: a change
+            on an artist with another genre membership, or any release in
+            another genre, is refused (409
+            `letters_shared_across_genres`).
         to_genre_id:
           type: integer
           minimum: 1
           maximum: 2147483647
           description: >
             Optional. The destination genre. Absent or equal to `genre_id`
-            means the artist stays in that genre. An unknown id is a 404
+            means the artist stays in that genre; an equal value is
+            treated as absent before any check, so the `genre_not_found`
+            check does not apply to it. An unknown id is a 404
             `genre_not_found`; a different genre in which the artist
             already has a membership or any release is refused (409
             `already_filed_in_genre`).
@@ -5719,8 +5732,8 @@ components:
                 so this is the count of physical records whose shelf
                 labels now need replacing. Also present when `changed`
                 is `false`, where nothing re-labelled and the count is
-                informational; all three `previous_*` fields then equal
-                the card's values.
+                informational; the `previous_*` fields that are present
+                then equal the card's values.
 
     ArtistRefileConflictReason:
       type: string
@@ -5748,9 +5761,10 @@ components:
         Rock/Soundtracks section is still `lettered_compilation_section`;
         that check comes first.
         `letters_shared_across_genres` means the request changes
-        `code_letters` on an artist with another genre membership, and
-        letters are artist-global, so the change would re-letter that
-        shelf too; the 409 lists every membership in `memberships`. A
+        `code_letters` on an artist with another genre membership or any
+        release filed in a genre other than `genre_id`, and letters are
+        artist-global, so the change would re-letter that shelf or those
+        releases too; the 409 lists every membership in `memberships`. A
         letters change is defined in `RefileArtistRequest` ("What counts
         as a change"). `already_filed_in_genre` means the artist already
         has a membership, or any release, in `to_genre_id`, a genre
@@ -5815,10 +5829,9 @@ components:
             which have no occupant to name.
         memberships:
           type: array
-          minItems: 2
           description: >
-            Present only on `letters_shared_across_genres`: every genre
-            membership the artist has, including the requested one, so the
+            Present only on `letters_shared_across_genres`: lists every
+            genre membership, including the requested one, so the
             client can show which shelves a letters change would touch.
           items:
             $ref: '#/components/schemas/ArtistGenreMembership'
@@ -16194,23 +16207,32 @@ paths:
         `changed: false`, and writes nothing.
 
 
-        A letters change on an artist with another genre membership is a
-        409 `letters_shared_across_genres` (letters are artist-global),
+        A letters change on an artist with another genre membership, or
+        any release in another genre, is a 409
+        `letters_shared_across_genres` (letters are artist-global),
         and a genre move onto a genre the artist already has a membership
         or any release in is a 409 `already_filed_in_genre`.
 
 
-        Order. Before the shelf lock: the 400s, then a 404
-        `genre_not_found` for an unknown `to_genre_id`. After the lock:
-        the 404s (`artist_not_found`, `artist_not_filed_in_genre`), then
+        Order. A `to_genre_id` equal to `genre_id` is treated as absent
+        first, so `{genre_id: 999, to_genre_id: 999}` answers like a
+        request without `to_genre_id`. Before any lock: the 400s, then a
+        404 `genre_not_found` for an unknown `to_genre_id`. The server
+        then locks the artist row, and decides a 404 `artist_not_found`
+        after that row lock and before the shelf lock. A 404
+        `artist_not_filed_in_genre` is decided after reading the
+        membership, still before the shelf lock, or when the artist's own
+        row is missing from the locked set. The shelf (destination
+        bucket) key is computed from the letters read under the
+        artist-row lock. After the shelf lock:
         `lettered_compilation_section`, `various_artists_section`,
         `letters_shared_across_genres`, `already_filed_in_genre`, the
         no-op 200, `artist_code_conflict`, and finally the write 200. A
         concurrent insert of the (artist, `to_genre_id`) membership
         after the `already_filed_in_genre` check answers 409
         `already_filed_in_genre` at the write step. A 503
-        `lock_unavailable` can precede any of the post-lock outcomes,
-        since they are decided after the lock.
+        `lock_unavailable` can precede any outcome decided under a lock,
+        that is, every one after the `genre_not_found` check.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
         - BearerAuth: []
@@ -16259,6 +16281,10 @@ paths:
             until every deployed client keys on `code`, since a client
             that receives no `code` falls back to it. That fallback
             applies only to the two artist cases.
+            `genre_not_found` is decided before any lock; `artist_not_found`
+            after the artist-row lock and before the shelf lock;
+            `artist_not_filed_in_genre` after the membership read, before
+            the shelf lock.
           content:
             application/json:
               schema:
