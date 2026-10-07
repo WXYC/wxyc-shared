@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.22.0');
+      expect(spec.info.version).toBe('11.23.0');
     });
 
     it('should have components section', () => {
@@ -10383,7 +10383,13 @@ describe('OpenAPI Specification', () => {
     it('builds ArtistRefileResult on ArtistCard plus the re-file fields', () => {
       expect(sch('ArtistRefileResult').allOf[0]).toEqual(ref('ArtistCard'));
       expect(requiredKeysOf('ArtistRefileResult')).toEqual(
-        expect.arrayContaining(['changed', 'previous_code_artist_number', 'releases_to_relabel'])
+        expect.arrayContaining([
+          'changed',
+          'previous_code_artist_number',
+          'previous_code_letters',
+          'previous_genre_id',
+          'releases_to_relabel',
+        ])
       );
       expect(propertyKeysOf('ArtistRefileResult').sort()).toEqual(
         [
@@ -10397,9 +10403,7 @@ describe('OpenAPI Specification', () => {
       );
       expect(propertyOf('ArtistRefileResult', 'changed')?.type).toBe('boolean');
       expect(propertyOf('ArtistRefileResult', 'previous_code_artist_number')?.type).toBe('integer');
-      // Optional until the Backend ships (BS#3035), like ArtistCard.code_comp_letter.
-      expect(requiredKeysOf('ArtistRefileResult')).not.toContain('previous_code_letters');
-      expect(requiredKeysOf('ArtistRefileResult')).not.toContain('previous_genre_id');
+      // Required since the Backend deployed BS#3035: the server always sends both, never null.
       expect(propertyOf('ArtistRefileResult', 'previous_code_letters')?.type).toBe('string');
       expect(propertyOf('ArtistRefileResult', 'previous_genre_id')?.type).toBe('integer');
       expect(propertyOf('ArtistRefileResult', 'releases_to_relabel')?.type).toBe('integer');
