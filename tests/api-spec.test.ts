@@ -10206,6 +10206,9 @@ describe('OpenAPI Specification', () => {
       expect(responseSchema(path, 'post', '404')).toEqual(ref('ArtistRefileNotFoundError'));
       expect(responseSchema(path, 'post', '409')).toEqual(ref('ArtistRefileConflictError'));
       expect(responseSchema(path, 'post', '503')).toEqual(ref('LockUnavailableRefusal'));
+      const badRequest = flat(operation(path, 'post').responses?.['400']?.description);
+      expect(badRequest).toMatch(/`V\/A` \(including `v\/a`, after trimming and upper-casing\), refused before any lock/);
+      expect(flat(operation(path, 'post').responses?.['404']?.description)).toContain('`Genre not found`');
       const notFound = flat(operation(path, 'post').responses?.['404']?.description);
       expect(notFound).toContain('artist_not_found');
       expect(notFound).toContain('Artist not filed under genre');
@@ -10221,10 +10224,16 @@ describe('OpenAPI Specification', () => {
         'genre_id',
         'to_genre_id',
       ]);
-      expect(s.properties.code_letters).toMatchObject({ type: 'string', pattern: '^\\s*[A-Za-z0-9/]{1,4}\\s*$' });
+      expect(s.properties.code_letters.type).toBe('string');
+      // No pattern: swift6 emits a literal `/` as an invalid `\/` escape.
+      expect(s.properties.code_letters.pattern).toBeUndefined();
+      expect(flat(s.properties.code_letters.description)).toMatch(/1 to 4 characters from A-Z, a-z, 0-9 and `\/`/);
+      expect(flat(s.properties.code_letters.description)).toMatch(/`V\/A` \(after trimming and upper-casing\) is a 400, before any lock/);
+      expect(flat(s.description)).toContain('What counts as a change');
+      expect(flat(s.properties.to_genre_id.description)).toMatch(/Absent or equal to `genre_id`\s+means the artist stays in that genre/);
+      expect(flat(s.properties.to_genre_id.description)).toContain('a different genre in which the artist already has a membership or any release');
       expect(s.properties.to_genre_id).toMatchObject({ type: 'integer', minimum: 1, maximum: 2147483647 });
       expect(flat(s.properties.code_letters.description)).toMatch(/trims and upper-cases/);
-      expect(flat(s.properties.code_letters.description)).toContain('V/A');
       expect(flat(s.description)).toContain('letters_shared_across_genres');
       expect(s.properties.genre_id).toMatchObject({ type: 'integer', minimum: 1, maximum: 2147483647 });
       expect(s.properties.code_artist_number).toMatchObject({ type: 'integer', minimum: 0, maximum: 2147483647 });
@@ -10234,13 +10243,7 @@ describe('OpenAPI Specification', () => {
     it('builds ArtistRefileResult on ArtistCard plus the re-file fields', () => {
       expect(sch('ArtistRefileResult').allOf[0]).toEqual(ref('ArtistCard'));
       expect(requiredKeysOf('ArtistRefileResult')).toEqual(
-        expect.arrayContaining([
-          'changed',
-          'previous_code_artist_number',
-          'previous_code_letters',
-          'previous_genre_id',
-          'releases_to_relabel',
-        ])
+        expect.arrayContaining(['changed', 'previous_code_artist_number', 'releases_to_relabel'])
       );
       expect(propertyKeysOf('ArtistRefileResult').sort()).toEqual(
         [
@@ -10254,6 +10257,9 @@ describe('OpenAPI Specification', () => {
       );
       expect(propertyOf('ArtistRefileResult', 'changed')?.type).toBe('boolean');
       expect(propertyOf('ArtistRefileResult', 'previous_code_artist_number')?.type).toBe('integer');
+      // Optional until the Backend ships (BS#3035), like ArtistCard.code_comp_letter.
+      expect(requiredKeysOf('ArtistRefileResult')).not.toContain('previous_code_letters');
+      expect(requiredKeysOf('ArtistRefileResult')).not.toContain('previous_genre_id');
       expect(propertyOf('ArtistRefileResult', 'previous_code_letters')?.type).toBe('string');
       expect(propertyOf('ArtistRefileResult', 'previous_genre_id')?.type).toBe('integer');
       expect(propertyOf('ArtistRefileResult', 'releases_to_relabel')?.type).toBe('integer');
@@ -10272,8 +10278,12 @@ describe('OpenAPI Specification', () => {
       expect(error.properties.reason).toEqual(ref('ArtistRefileConflictReason'));
       expect(error.properties.artist.allOf).toEqual([ref('Artist')]);
       expect(error.properties.memberships.type).toBe('array');
-      expect(error.properties.memberships.items.required).toEqual(['genre_id', 'code_artist_number']);
       expect(error.required).not.toContain('memberships');
+      expect(error.properties.memberships.minItems).toBe(2);
+      expect(error.properties.memberships.items).toEqual(ref('ArtistGenreMembership'));
+      expect(sch('ArtistGenreMembership').required).toEqual(['genre_id', 'code_artist_number']);
+      expect(flat(error.properties.memberships.description)).toMatch(/Present only on `letters_shared_across_genres`/);
+      expect(flat(error.description)).toContain('memberships');
     });
 
     it('names the Various Artists refusal structurally', () => {

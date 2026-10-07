@@ -5535,8 +5535,8 @@ components:
         real fields on the `/wxycdb` artist-card form but are not writable
         on this endpoint — sending one is a 400 naming why, not silently
         dropped. `code_artist_number`, `code_letters` and `genre_id` are all
-        changed with `POST /library/artists/{id}/refile`. Do not confuse this `artist_name` with
-        `UpdateAlbumRequest`'s absent one: this endpoint renames the
+        changed with `POST /library/artists/{id}/refile`. Do not confuse
+        this `artist_name` with `UpdateAlbumRequest`'s absent one: this endpoint renames the
         artist row directly; the album PATCH never accepts `artist_name`
         at all, on any artist.
       properties:
@@ -5615,6 +5615,20 @@ components:
         `letters_shared_across_genres`) rather than re-lettering the
         other shelves too. A genre move carries the membership and every
         release filed under it into `to_genre_id`.
+
+
+        **What counts as a change.** Each axis is compared exactly
+        against the stored value. Letters change when `code_letters` is
+        present and its normalized form (trimmed, upper-cased) differs
+        from the stored `code_letters`; to keep the current letters,
+        omit the field. Sending the stored value is not a change, but a
+        non-canonical stored value is: with `ja` stored, sending `JA`
+        moves the artist into the `JA` bucket, and occupancy is checked
+        there. The genre changes when `to_genre_id` is present and
+        differs from `genre_id`. The number changes when
+        `code_artist_number` differs from the stored number. A request
+        that changes none of the three is a no-op 200 (`changed: false`).
+        `letters_shared_across_genres` fires only on a letters change.
       required:
         - genre_id
         - code_artist_number
@@ -5636,16 +5650,17 @@ components:
             move it is the number in the destination shelf.
         code_letters:
           type: string
-          pattern: '^\s*[A-Za-z0-9/]{1,4}\s*$'
           description: >
-            Optional. The new call letters, in the set `GET
-            /library/artists/by-code` accepts (one to four letters, digits
-            or `/`, surrounding whitespace allowed). The server trims and
-            upper-cases it and refuses `V/A` (409
-            `various_artists_section`). Absent means the letters do not
-            change. Letters are artist-global: a change on an artist with
-            more than one genre membership is refused (409
-            `letters_shared_across_genres`).
+            Optional. The new call letters: 1 to 4 characters from A-Z,
+            a-z, 0-9 and `/`, after trimming surrounding whitespace (the
+            set `GET /library/artists/by-code` accepts). The server
+            trims and upper-cases it. Not constrained by a schema
+            pattern; the server validates. `V/A` (after trimming and
+            upper-casing) is a 400, before any lock. Omit it to keep the
+            current letters; see "What counts as a change" on
+            `RefileArtistRequest`. Letters are artist-global: a change on
+            an artist with more than one genre membership is refused
+            (409 `letters_shared_across_genres`).
         to_genre_id:
           type: integer
           minimum: 1
@@ -5653,8 +5668,8 @@ components:
           description: >
             Optional. The destination genre. Absent or equal to `genre_id`
             means the artist stays in that genre. An unknown id is a 404
-            `genre_not_found`; an artist that already has a membership, or
-            any release, in this genre is refused (409
+            `genre_not_found`; a different genre in which the artist
+            already has a membership or any release is refused (409
             `already_filed_in_genre`).
 
     ArtistRefileResult:
@@ -5670,40 +5685,42 @@ components:
           required:
             - changed
             - previous_code_artist_number
-            - previous_code_letters
-            - previous_genre_id
             - releases_to_relabel
           properties:
             changed:
               type: boolean
               description: >
-                `false` when the requested number already was the
-                artist's number in that genre; nothing was written.
+                `false` when the letters, the genre and the number all
+                were unchanged, by the rule in `RefileArtistRequest`
+                ("What counts as a change"); nothing was written.
             previous_code_artist_number:
               type: integer
               description: The artist number before this request.
             previous_code_letters:
               type: string
               description: >
-                The call letters before this request. Equals the card's
-                `code_letters` when the letters did not change.
+                Optional: a server that predates WXYC/Backend-Service#3035
+                omits it. The call letters before this request. Equals the
+                card's `code_letters` when the letters did not change.
             previous_genre_id:
               type: integer
               description: >
-                The genre before this request. Equals the card's
+                Optional: a server that predates WXYC/Backend-Service#3035
+                omits it. The genre before this request. Equals the card's
                 `genre_id` when the artist did not move. The card is the
                 destination membership, so after a genre move its
                 `genre_id` is `to_genre_id`.
             releases_to_relabel:
               type: integer
               description: >
-                How many releases are filed under this (artist, genre)
-                membership. Every one re-labels in the database at once,
+                How many releases are filed under the destination
+                (artist, genre) membership, counted after the writes.
+                Every one re-labels in the database at once,
                 so this is the count of physical records whose shelf
                 labels now need replacing. Also present when `changed`
                 is `false`, where nothing re-labelled and the count is
-                informational; `previous_code_artist_number` then equals
-                `code_artist_number`.
+                informational; all three `previous_*` fields then equal
+                the card's values.
 
     ArtistRefileConflictReason:
       type: string
@@ -5721,7 +5738,7 @@ components:
         existing conflict handling recognizes it.
         `lettered_compilation_section` means the membership is a
         lettered compilation section, whose artist number is fixed at 0.
-        `various_artists_section` means the membership is a Various
+        `various_artists_section` means the source membership is a Various
         Artists bucket, identified structurally and never by the artist's
         name: its `code_letters` (trimmed, case-insensitive) is `V/A`, or
         (trimmed, case-sensitive) starts with `Z-`, the legacy spelling,
@@ -5733,9 +5750,13 @@ components:
         `letters_shared_across_genres` means the request changes
         `code_letters` on an artist with another genre membership, and
         letters are artist-global, so the change would re-letter that
-        shelf too; the 409 lists every membership in `memberships`.
-        `already_filed_in_genre` means the artist already has a
-        membership, or any release, in `to_genre_id`.
+        shelf too; the 409 lists every membership in `memberships`. A
+        letters change is defined in `RefileArtistRequest` ("What counts
+        as a change"). `already_filed_in_genre` means the artist already
+        has a membership, or any release, in `to_genre_id`, a genre
+        different from `genre_id`; it is also the answer when a
+        concurrent insert of that membership lands after the check, at
+        the write step.
 
     ArtistRefileNotFoundCode:
       type: string
@@ -5770,7 +5791,8 @@ components:
         rather than the shared `ApiErrorResponse`, following
         `LibraryFilingConflictError`: it carries a named `reason`
         discriminant and, on `artist_code_conflict`, the occupant a
-        client acts on.
+        client acts on and, on `letters_shared_across_genres`, the
+        artist's `memberships`.
       required:
         - message
         - reason
@@ -5786,26 +5808,35 @@ components:
             Present on `artist_code_conflict`: the first holder of the
             target slot, ordered by `artist_name` then id, excluding the
             artist being re-filed. Its `code_artist_number` is the
-            contested target number. Absent on
+            contested target number, and its `code_letters` and
+            `genre_id` are those of the destination bucket. Absent on
             `lettered_compilation_section`, `various_artists_section`,
             `letters_shared_across_genres` and `already_filed_in_genre`,
             which have no occupant to name.
         memberships:
           type: array
+          minItems: 2
           description: >
             Present only on `letters_shared_across_genres`: every genre
-            membership the artist has, so the client can show which shelves
-            a letters change would touch.
+            membership the artist has, including the requested one, so the
+            client can show which shelves a letters change would touch.
           items:
-            type: object
-            required:
-              - genre_id
-              - code_artist_number
-            properties:
-              genre_id:
-                type: integer
-              code_artist_number:
-                type: integer
+            $ref: '#/components/schemas/ArtistGenreMembership'
+
+    ArtistGenreMembership:
+      type: object
+      description: >
+        One genre membership of an artist: the genre and the artist's
+        call number within it. Carried in
+        `ArtistRefileConflictError.memberships`.
+      required:
+        - genre_id
+        - code_artist_number
+      properties:
+        genre_id:
+          type: integer
+        code_artist_number:
+          type: integer
 
     ArtistDeleteRefusal:
       type: object
@@ -5919,8 +5950,9 @@ components:
         genre has that `genre_id`) vs. `code_not_assigned` (the genre
         exists and no artist is filed under that exact code — NOT a
         guarantee that creating an artist under the code is safe; the
-        column has no case-fold constraint and neither writer
-        canonicalizes it the same way).
+        column has no case-fold constraint: the create paths store
+        `code_letters` raw (WXYC/Backend-Service#2199) while refile
+        trims and upper-cases it).
       required:
         - message
         - reason
@@ -6024,12 +6056,14 @@ components:
         /library/artists/{id}`, `POST
         /library/artists/{id}/refile`, and `POST
         /library/deleted/{batchId}/restore`: the operation stood down
-        rather than wait on rows a live writer holds. Retryable, and says
+        rather than wait on rows (or, for the refile, an advisory lock) a
+        live writer holds. Retryable, and says
         nothing about whether the target is deletable, restorable or
         re-fileable —
         deliberately not a 409, which on these endpoints means "refused
         on the merits". Each transaction sets a `lock_timeout` below
-        Postgres's deadlock-detection threshold on purpose, so it is
+        Postgres's deadlock-detection threshold on purpose (and the
+        refile's advisory lock stands down the same way), so it is
         always the librarian's write that stands down rather than the
         side that wins a deadlock arbitration.
 
@@ -6045,9 +6079,11 @@ components:
         job that loses a row may skip it until its next run — but a 503
         from the artist delete is not evidence that a DJ was logging a
         play. `POST /library/artists/{id}/refile` is the same: its
-        contenders are a concurrent re-file in the same
-        (`code_letters`, `genre_id`) bucket, an artist delete, and the
-        catalog jobs.
+        contenders are a concurrent re-file into the same destination
+        (`genre_id`, `code_letters`) bucket (an advisory lock keyed on
+        it), a rename or any other write to the same artist row, a
+        release edit on one of the artist's releases during a genre
+        move, an artist delete, and the catalog jobs.
       required:
         - message
         - reason
@@ -15882,8 +15918,9 @@ paths:
         `code_letters` must be 1-4 characters from A-Z, 0-9, or `/` (the
         `artists.code_letters` column domain); it is trimmed and
         upper-cased before matching — but the column itself carries no
-        case-fold constraint and neither writer canonicalizes it the
-        same way, so a `404 code_not_assigned` here is NOT a guarantee
+        case-fold constraint: the create paths store `code_letters` raw
+        (WXYC/Backend-Service#2199) while refile trims and upper-cases
+        it, so a `404 code_not_assigned` here is NOT a guarantee
         that creating an artist under the code is safe.
 
         Deliberately NOT the same row shape as `GET /library/artists/search`
@@ -16151,8 +16188,10 @@ paths:
         compilation section is a 409 `lettered_compilation_section`, a
         Various Artists bucket is a 409 `various_artists_section`, and
         a live writer holding the shelf is a 503. Outside a lettered
-        compilation section or a Various Artists bucket, resubmitting the artist's current number is
-        a 200 with `changed: false`, and writes nothing.
+        compilation section or a Various Artists bucket, a request that
+        changes none of the letters, the genre and the number (see
+        `RefileArtistRequest`, "What counts as a change") is a 200 with
+        `changed: false`, and writes nothing.
 
 
         A letters change on an artist with another genre membership is a
@@ -16167,7 +16206,10 @@ paths:
         `lettered_compilation_section`, `various_artists_section`,
         `letters_shared_across_genres`, `already_filed_in_genre`, the
         no-op 200, `artist_code_conflict`, and finally the write 200. A
-        503 `lock_unavailable` can precede any of the post-lock outcomes,
+        concurrent insert of the (artist, `to_genre_id`) membership
+        after the `already_filed_in_genre` check answers 409
+        `already_filed_in_genre` at the write step. A 503
+        `lock_unavailable` can precede any of the post-lock outcomes,
         since they are decided after the lock.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
@@ -16186,7 +16228,9 @@ paths:
               $ref: '#/components/schemas/RefileArtistRequest'
       responses:
         '200':
-          description: The re-filed membership, or the unchanged one when the number already matched
+          description: >
+            The re-filed membership, or the unchanged one (`changed: false`)
+            when the letters, genre and number all already matched
           content:
             application/json:
               schema:
@@ -16195,7 +16239,10 @@ paths:
           description: >
             Invalid artist id, non-object body, an unknown key, or an
             invalid `genre_id` / `code_artist_number` / `code_letters` /
-            `to_genre_id`.
+            `to_genre_id`. `code_letters` is invalid when it is not 1 to 4
+            characters from A-Z, a-z, 0-9 and `/` after trimming, and
+            when it is `V/A` (including `v/a`, after trimming and
+            upper-casing), refused before any lock.
           content:
             application/json:
               schema:
@@ -16206,10 +16253,12 @@ paths:
             (no such artist), `artist_not_filed_in_genre` (the artist
             exists but has no membership in `genre_id`) and
             `genre_not_found` (`to_genre_id` names no genre). Clients key on
-            `code`. The messages are unchanged (`Artist not found` and
-            `Artist not filed under genre {n}`); the `Artist not filed under
-            genre` prefix stays stable until every deployed client keys on
-            `code`, since a client that receives no `code` falls back to it.
+            `code`. The messages are `Artist not found`, `Artist not filed
+            under genre {n}` and `Genre not found`; for the two artist
+            cases the `Artist not filed under genre` prefix stays stable
+            until every deployed client keys on `code`, since a client
+            that receives no `code` falls back to it. That fallback
+            applies only to the two artist cases.
           content:
             application/json:
               schema:
@@ -16222,8 +16271,9 @@ paths:
                 $ref: '#/components/schemas/ArtistRefileConflictError'
         '503':
           description: >
-            Stood down rather than wait on rows a live writer holds. See
-            `LockUnavailableRefusal`.
+            Stood down rather than wait on rows or an advisory lock a live
+            writer holds, including a concurrent re-file into the same
+            destination bucket. See `LockUnavailableRefusal`.
           content:
             application/json:
               schema:
