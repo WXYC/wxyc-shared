@@ -3624,7 +3624,6 @@ components:
         card_stale_days:
           type: integer
           minimum: 1
-          maximum: 365
           description: >
             How many days a rotation card may go without a recorded change
             (see `last_changed_at` on `GET /library/rotation/cards`) before a
@@ -3637,9 +3636,10 @@ components:
         flags it as due for replacement. Keyed by the `RotationBin` values:
         OpenAPI 3.0 cannot key an object by a `$ref`'d enum (`propertyNames`
         is 3.1), so the keys are spelled out here and a spec test pins them
-        equal to `RotationBin`'s enum. Bounded to 1..365 on both the read and
-        the write shapes, because oasdiff treats adding a request-side bound
-        after publication as a breaking change.
+        equal to `RotationBin`'s enum. The read shape carries no upper bound,
+        so the write ceiling (see `UpdateRotationWindowDays`) can be raised
+        later without a breaking change; oasdiff treats raising a response
+        maximum as breaking.
       required:
         - H
         - M
@@ -3649,19 +3649,15 @@ components:
         H:
           type: integer
           minimum: 1
-          maximum: 365
         M:
           type: integer
           minimum: 1
-          maximum: 365
         L:
           type: integer
           minimum: 1
-          maximum: 365
         S:
           type: integer
           minimum: 1
-          maximum: 365
 
     UpdateRotationThresholdsRequest:
       type: object
@@ -3669,8 +3665,12 @@ components:
       description: >
         Body of `PATCH /library/rotation/thresholds`. Partial: an omitted key
         leaves that value unchanged, at both levels, so `{"window_days":
-        {"H": 30}}` changes only the Heavy window. Any other key is a 400
-        naming it.
+        {"H": 30}}` changes only the Heavy window, and `{}` or
+        `{"window_days": {}}` changes nothing and returns the current record.
+        `null` is not a way to omit a key: it is a 400, like any value that is
+        not an integer in 1..365. Any other key is a 400 naming it. The 1..365
+        bound is request-side only and declared at publication, because
+        oasdiff treats adding a request-side bound later as breaking.
       properties:
         window_days:
           $ref: '#/components/schemas/UpdateRotationWindowDays'
@@ -15838,6 +15838,7 @@ paths:
     get:
       x-wxyc-service: backend-service
       summary: Get the rotation thresholds
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
       description: >
         The station-wide rotation thresholds (`RotationThresholds`). There is
         always exactly one record; Backend seeds it, so this never 404s.
@@ -15858,15 +15859,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RotationThresholds'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `catalog: read` permission'
 
     patch:
       x-wxyc-service: backend-service
       summary: Change the rotation thresholds
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       description: >
         Partial update of the station-wide thresholds: an omitted key is left
         unchanged, including each bin inside `window_days`. Returns the whole
         record as it stands after the write. Grant: `catalog: write`.
         Delivered by WXYC/Backend-Service#2733.
+
+        Registration order is load-bearing and permanent: Backend serves an
+        undocumented `PATCH /library/rotation/{id}` (the same method at the
+        same depth), so this literal path must stay registered *before* it,
+        as the GET must before `GET /library/rotation/{id}`. Pinned by
+        Backend's `library-rotation-route-order.route.test.ts`.
       security:
         - BearerAuth: []
       requestBody:
@@ -15892,6 +15904,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `catalog: write` permission'
 
   /library/rotation/{rotation_id}/link:
     patch:
