@@ -2964,17 +2964,35 @@ describe('OpenAPI Specification', () => {
       expect(schema('UpdateRotationWindowDays').additionalProperties).toBe(false);
     });
 
-    // Request-side bounds cannot be added after publication (oasdiff calls a
-    // new bound breaking), so every day count is bounded now, on both sides.
+    // oasdiff calls adding a request-side bound later breaking, so the write
+    // shapes are bounded now; it calls raising a response maximum breaking,
+    // so the read shapes carry no ceiling that could pin the write one.
     it.each([
-      ['RotationWindowDays', ['H', 'M', 'L', 'S']],
-      ['UpdateRotationWindowDays', ['H', 'M', 'L', 'S']],
-      ['RotationThresholds', ['card_stale_days']],
-      ['UpdateRotationThresholdsRequest', ['card_stale_days']],
-    ])('%s bounds each day count to whole days in 1..365', (name, keys) => {
+      ['UpdateRotationWindowDays', ['H', 'M', 'L', 'S'], 365],
+      ['UpdateRotationThresholdsRequest', ['card_stale_days'], 365],
+      ['RotationWindowDays', ['H', 'M', 'L', 'S'], undefined],
+      ['RotationThresholds', ['card_stale_days'], undefined],
+    ])('%s takes whole days from 1 with maximum %s', (name, keys, maximum) => {
       for (const key of keys) {
-        expect(schema(name).properties?.[key]).toMatchObject({ type: 'integer', minimum: 1, maximum: 365 });
+        const prop = schema(name).properties?.[key];
+        expect(prop).toMatchObject({ type: 'integer', minimum: 1 });
+        expect(prop?.maximum).toBe(maximum);
       }
+    });
+
+    it.each([
+      ['get', 'catalog: read'],
+      ['patch', 'catalog: write'],
+    ])('declares 401 and the %s grant 403 on /library/rotation/thresholds', (method, grant) => {
+      const responses = operation('/library/rotation/thresholds', method).responses;
+      expect(responses?.['401']).toBeDefined();
+      expect(responses?.['403']?.description).toContain(grant);
+    });
+
+    it('states what an empty PATCH and an explicit null do', () => {
+      const description = flat(schema('UpdateRotationThresholdsRequest').description);
+      expect(description).toMatch(/`\{\}`.*changes nothing/);
+      expect(description).toMatch(/`null` is not a way to omit a key/);
     });
 
     it.each([
@@ -2998,6 +3016,9 @@ describe('OpenAPI Specification', () => {
       const description = flat(operation('/library/rotation/thresholds', 'get').description);
       expect(description).toMatch(/[Rr]egistration order is load-bearing/);
       expect(description).toMatch(/library-rotation-route-order\.route\.test\.ts/);
+      expect(flat(operation('/library/rotation/thresholds', 'patch').description)).toMatch(
+        /[Rr]egistration order is load-bearing.*PATCH \/library\/rotation\/\{id\}/
+      );
       expect(flat(operation('/library/rotation/{id}', 'get').description)).toContain('/library/rotation/thresholds');
     });
   });
