@@ -2792,13 +2792,14 @@ describe('OpenAPI Specification', () => {
       // The instant the change was recorded, not the date a backdated kill
       // names; null is "nothing recorded since tracking began", not "never".
       expect(field?.description).toMatch(/recorded/);
-      expect(field?.description).toMatch(/killed or unkilled/);
+      expect(field?.description).toMatch(/deleted while on it/);
+      expect(field?.description).toMatch(/killed, unkilled, or rescheduled/);
       expect(field?.description).toMatch(/`null`/);
       // RotationCard is also the POST/PATCH card response and the `card`
       // embedded in catalog search results; the field on it would oblige
       // every one of those projections to emit it.
       const card = spec.components.schemas.RotationCard as Schema;
-      expect(Object.keys(card.properties ?? {})).toEqual(['id', 'bin', 'number', 'name']);
+      expect(Object.keys(card.properties ?? {}).sort()).toEqual(['bin', 'id', 'name', 'number']);
     });
 
     it('defines POST /library/rotation/cards accepting bin + optional name, returning RotationCard', () => {
