@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.18.0');
+      expect(spec.info.version).toBe('11.19.0');
     });
 
     it('should have components section', () => {
@@ -10211,11 +10211,21 @@ describe('OpenAPI Specification', () => {
       expect(notFound).toContain('Artist not filed under genre');
     });
 
-    it('closes RefileArtistRequest on genre_id and code_artist_number', () => {
+    it('closes RefileArtistRequest on its four keys, requiring only genre_id and code_artist_number', () => {
       const s = sch('RefileArtistRequest');
       expect(s.additionalProperties).toBe(false);
       expect(requiredKeysOf('RefileArtistRequest').sort()).toEqual(['code_artist_number', 'genre_id']);
-      expect(Object.keys(s.properties).sort()).toEqual(['code_artist_number', 'genre_id']);
+      expect(Object.keys(s.properties).sort()).toEqual([
+        'code_artist_number',
+        'code_letters',
+        'genre_id',
+        'to_genre_id',
+      ]);
+      expect(s.properties.code_letters).toMatchObject({ type: 'string', pattern: '^\\s*[A-Za-z0-9/]{1,4}\\s*$' });
+      expect(s.properties.to_genre_id).toMatchObject({ type: 'integer', minimum: 1, maximum: 2147483647 });
+      expect(flat(s.properties.code_letters.description)).toMatch(/trims and upper-cases/);
+      expect(flat(s.properties.code_letters.description)).toContain('V/A');
+      expect(flat(s.description)).toContain('letters_shared_across_genres');
       expect(s.properties.genre_id).toMatchObject({ type: 'integer', minimum: 1, maximum: 2147483647 });
       expect(s.properties.code_artist_number).toMatchObject({ type: 'integer', minimum: 0, maximum: 2147483647 });
       expect(flat(s.description)).toMatch(/any other key is a 400/i);
@@ -10224,18 +10234,28 @@ describe('OpenAPI Specification', () => {
     it('builds ArtistRefileResult on ArtistCard plus the re-file fields', () => {
       expect(sch('ArtistRefileResult').allOf[0]).toEqual(ref('ArtistCard'));
       expect(requiredKeysOf('ArtistRefileResult')).toEqual(
-        expect.arrayContaining(['changed', 'previous_code_artist_number', 'releases_to_relabel'])
+        expect.arrayContaining([
+          'changed',
+          'previous_code_artist_number',
+          'previous_code_letters',
+          'previous_genre_id',
+          'releases_to_relabel',
+        ])
       );
       expect(propertyKeysOf('ArtistRefileResult').sort()).toEqual(
         [
           ...propertyKeysOf('ArtistCard'),
           'changed',
           'previous_code_artist_number',
+          'previous_code_letters',
+          'previous_genre_id',
           'releases_to_relabel',
         ].sort()
       );
       expect(propertyOf('ArtistRefileResult', 'changed')?.type).toBe('boolean');
       expect(propertyOf('ArtistRefileResult', 'previous_code_artist_number')?.type).toBe('integer');
+      expect(propertyOf('ArtistRefileResult', 'previous_code_letters')?.type).toBe('string');
+      expect(propertyOf('ArtistRefileResult', 'previous_genre_id')?.type).toBe('integer');
       expect(propertyOf('ArtistRefileResult', 'releases_to_relabel')?.type).toBe('integer');
     });
 
@@ -10244,11 +10264,16 @@ describe('OpenAPI Specification', () => {
         'artist_code_conflict',
         'lettered_compilation_section',
         'various_artists_section',
+        'letters_shared_across_genres',
+        'already_filed_in_genre',
       ]);
       const error = sch('ArtistRefileConflictError');
       expect(error.required).toEqual(['message', 'reason']);
       expect(error.properties.reason).toEqual(ref('ArtistRefileConflictReason'));
       expect(error.properties.artist.allOf).toEqual([ref('Artist')]);
+      expect(error.properties.memberships.type).toBe('array');
+      expect(error.properties.memberships.items.required).toEqual(['genre_id', 'code_artist_number']);
+      expect(error.required).not.toContain('memberships');
     });
 
     it('names the Various Artists refusal structurally', () => {
@@ -10260,13 +10285,17 @@ describe('OpenAPI Specification', () => {
       expect(flat(operation(path, 'post').description)).toContain('various_artists_section');
     });
 
-    it('gives the 404 a purpose-built body keyed on a two-value code', () => {
+    it('gives the 404 a purpose-built body keyed on a three-value code', () => {
       const s = sch('ArtistRefileNotFoundError');
       expect(s.required).toEqual(['message', 'code']);
       expect(s.properties.message).toEqual({ type: 'string' });
       expect(s.properties.code).toEqual(ref('ArtistRefileNotFoundCode'));
       expect(sch('ArtistRefileNotFoundCode').type).toBe('string');
-      expect(sch('ArtistRefileNotFoundCode').enum).toEqual(['artist_not_found', 'artist_not_filed_in_genre']);
+      expect(sch('ArtistRefileNotFoundCode').enum).toEqual([
+        'artist_not_found',
+        'artist_not_filed_in_genre',
+        'genre_not_found',
+      ]);
       const d = flat(operation(path, 'post').responses?.['404']?.description);
       expect(d).toMatch(/key on `code`/);
       expect(d).toMatch(/prefix stays stable until every deployed client keys on `code`/);
@@ -10280,8 +10309,11 @@ describe('OpenAPI Specification', () => {
     it('documents the refusal order and the lettered-section exception to the no-op 200', () => {
       const d = flat(operation(path, 'post').description);
       expect(d).toMatch(/Outside a lettered compilation section or a Various Artists bucket/);
-      expect(d).toMatch(/lettered 409, then the Various Artists 409, then the no-op 200, then the occupancy 409/);
-      expect(d).toMatch(/503 can precede any of the post-lock outcomes/);
+      expect(d).toMatch(/Before the shelf lock: the 400s, then a 404 `genre_not_found`/);
+      expect(d).toMatch(
+        /`lettered_compilation_section`, `various_artists_section`, `letters_shared_across_genres`, `already_filed_in_genre`, the no-op 200, `artist_code_conflict`, and finally the write 200/
+      );
+      expect(d).toMatch(/503 `lock_unavailable` can precede any of the post-lock outcomes/);
       expect(flat(sch('ArtistRefileConflictError').description)).toMatch(/Purpose-built/);
       expect(flat(sch('LockUnavailableRefusal').description)).toMatch(/concurrent re-file/);
     });
@@ -10290,6 +10322,8 @@ describe('OpenAPI Specification', () => {
       const patch = flat(operation('/library/artists/{id}', 'patch').description);
       expect(patch).toContain('POST /library/artists/{id}/refile');
       expect(flat(sch('UpdateArtistRequest').description)).toContain('POST /library/artists/{id}/refile');
+      expect(flat(sch('UpdateArtistRequest').description)).not.toMatch(/not writable by any endpoint/);
+      expect(patch).not.toMatch(/not writable by any/);
       expect(flat(sch('ArtistCard').description)).toContain('ArtistRefileResult');
       expect(flat(sch('LockUnavailableRefusal').description)).toContain('POST /library/artists/{id}/refile');
     });
