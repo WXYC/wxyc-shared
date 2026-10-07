@@ -10151,8 +10151,8 @@ describe('OpenAPI Specification', () => {
       expect(responseSchema(path, 'post', '409')).toEqual(ref('ArtistRefileConflictError'));
       expect(responseSchema(path, 'post', '503')).toEqual(ref('LockUnavailableRefusal'));
       const notFound = flat(operation(path, 'post').responses?.['404']?.description);
-      expect(notFound).toContain('Artist not found');
-      expect(notFound).toContain('Artist not filed under genre {n}');
+      expect(notFound).toContain('artist_not_found');
+      expect(notFound).toContain('Artist not filed under genre');
     });
 
     it('closes RefileArtistRequest on genre_id and code_artist_number', () => {
@@ -10195,15 +10195,13 @@ describe('OpenAPI Specification', () => {
       expect(error.properties.artist.allOf).toEqual([ref('Artist')]);
     });
 
-    it('names the Various Artists refusal structurally and orders it after the lettered 409', () => {
-      expect(sch('ArtistRefileConflictReason').enum).toContain('various_artists_section');
+    it('names the Various Artists refusal structurally', () => {
       const r = flat(sch('ArtistRefileConflictReason').description);
       expect(r).toMatch(/never by the artist.s name/i);
       expect(r).toContain('V/A');
       expect(r).toContain('Z-');
-      const d = flat(operation(path, 'post').description);
-      expect(d).toContain('various_artists_section');
-      expect(d).toMatch(/the lettered 409, then the Various Artists 409, then the no-op 200/);
+      expect(r).toContain('case-sensitive');
+      expect(flat(operation(path, 'post').description)).toContain('various_artists_section');
     });
 
     it('gives the 404 a purpose-built body keyed on a two-value code', () => {
@@ -10215,7 +10213,7 @@ describe('OpenAPI Specification', () => {
       expect(sch('ArtistRefileNotFoundCode').enum).toEqual(['artist_not_found', 'artist_not_filed_in_genre']);
       const d = flat(operation(path, 'post').responses?.['404']?.description);
       expect(d).toMatch(/key on `code`/);
-      expect(d).toMatch(/not a contract/);
+      expect(d).toMatch(/prefix stays stable until every deployed client keys on `code`/);
     });
 
     it('pins artist_code_conflict to the string LibraryFilingConflictReason carries', () => {
@@ -10225,7 +10223,7 @@ describe('OpenAPI Specification', () => {
 
     it('documents the refusal order and the lettered-section exception to the no-op 200', () => {
       const d = flat(operation(path, 'post').description);
-      expect(d).toMatch(/Outside a lettered compilation section/);
+      expect(d).toMatch(/Outside a lettered compilation section or a Various Artists bucket/);
       expect(d).toMatch(/lettered 409, then the Various Artists 409, then the no-op 200, then the occupancy 409/);
       expect(d).toMatch(/503 can precede any of the post-lock outcomes/);
       expect(flat(sch('ArtistRefileConflictError').description)).toMatch(/Purpose-built/);

@@ -5679,9 +5679,10 @@ components:
         `various_artists_section` means the membership is a Various
         Artists bucket, identified structurally and never by the artist's
         name: its `code_letters` (trimmed, case-insensitive) is `V/A`, or
-        (trimmed) starts with `Z-`, the legacy spelling. Every
-        compilation in that genre shares the bucket's number, so
-        re-numbering it would move all of them. A lettered
+        (trimmed, case-sensitive) starts with `Z-`, the legacy spelling,
+        matching dj-site's `isVariousArtists`. Every compilation filed
+        in that bucket shares its number, so re-numbering it would move
+        all of them. A lettered
         Rock/Soundtracks section is still `lettered_compilation_section`;
         that check comes first.
 
@@ -5735,7 +5736,8 @@ components:
             target slot, ordered by `artist_name` then id, excluding the
             artist being re-filed. Its `code_artist_number` is the
             contested target number. Absent on
-            `lettered_compilation_section`, which has no occupant to name.
+            `lettered_compilation_section` and `various_artists_section`,
+            which have no occupant to name.
 
     ArtistDeleteRefusal:
       type: object
@@ -16071,14 +16073,14 @@ paths:
         compilation section is a 409 `lettered_compilation_section`, a
         Various Artists bucket is a 409 `various_artists_section`, and
         a live writer holding the shelf is a 503. Outside a lettered
-        compilation section, resubmitting the artist's current number is
+        compilation section or a Various Artists bucket, resubmitting the artist's current number is
         a 200 with `changed: false`, and writes nothing.
 
 
         Order: 400s and 404s are decided first, then, after the shelf
         lock, the lettered 409, then the Various Artists 409, then the
-        no-op 200, then the occupancy 409. A 503 can precede any of the post-lock outcomes, since they
-        are decided after the lock.
+        no-op 200, then the occupancy 409. A 503 can precede any of the
+        post-lock outcomes, since they are decided after the lock.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
         - BearerAuth: []
@@ -16115,8 +16117,9 @@ paths:
             Two distinct cases, told apart by `code`: `artist_not_found`
             (no such artist) and `artist_not_filed_in_genre` (the artist
             exists but has no membership in `genre_id`). Clients key on
-            `code`. The messages (`Artist not found`, `Artist not filed
-            under genre {n}`) are unchanged and are not a contract.
+            `code`. The messages are unchanged; the `Artist not filed under
+            genre` prefix stays stable until every deployed client keys on
+            `code`, since a client that receives no `code` falls back to it.
           content:
             application/json:
               schema:
