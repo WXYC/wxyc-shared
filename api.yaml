@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.19.0
+  version: 11.20.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -15768,13 +15768,16 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: >
-            Rotation entry is already linked to a library release. A row moved
+            A row that is already linked to a library release and a row moved
             to another bin (only the newest row of a moved record's chain
-            links) gets the same 409 with the same message and no reason
-            code, so the two cases cannot be told apart from the response. A
-            client that needs to know reloads the row (or the uncatalogued
-            list) to see whether it is linked or has a newer row. Clients
-            treat this as "someone got there first" — the row was catalogued
+            links) are both a 409 with no reason code; only the `message`
+            differs. An already-linked row gets `Rotation entry is already
+            linked to a library release`; a moved-away row gets `This rotation
+            entry was moved to another bin. Link the entry in its current bin
+            instead.` The message is human-readable text, not a contract
+            field, so a client that must act reloads the row (or the
+            uncatalogued list) to see whether it is linked or has a newer row.
+            Clients treat this as "someone got there first" — the row was catalogued
             or moved on between read and submit.
           content:
             application/json:

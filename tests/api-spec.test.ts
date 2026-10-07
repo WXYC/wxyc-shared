@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.19.0');
+      expect(spec.info.version).toBe('11.20.0');
     });
 
     it('should have components section', () => {
@@ -9397,10 +9397,14 @@ describe('OpenAPI Specification', () => {
       );
       expect(link409).toMatch(/already linked/);
       expect(link409).toMatch(/moved to another bin/);
-      // Backend-Service answers both cases with one message and no reason code, so the
-      // response cannot tell them apart; the text must not imply it can.
-      expect(link409).toMatch(/same 409 with the same message and no reason code/);
-      expect(link409).toMatch(/cannot be told apart from the response/);
+      // Both cases are a 409 with no reason code; only the human-readable message differs.
+      expect(link409).toMatch(/are both a 409 with no reason code; only the `message` differs/);
+      expect(link409).toContain('`Rotation entry is already linked to a library release`');
+      expect(link409).toContain(
+        '`This rotation entry was moved to another bin. Link the entry in its current bin instead.`'
+      );
+      expect(link409).toMatch(/human-readable text, not a contract field/);
+      expect(link409).not.toMatch(/cannot be told apart/);
       expect(link409).not.toMatch(/moved-away case carries/);
       const link = flat(operation('/library/rotation/{rotation_id}/link', 'patch').description);
       expect(link).toMatch(/linking the newest row also links the chain's older unlinked rows to the same release, plays included/i);
