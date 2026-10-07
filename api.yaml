@@ -15632,8 +15632,11 @@ paths:
                           description: >
                             The instant of the most recent recorded change to
                             the card's membership: a rotation row filed onto
-                            it, moved onto or off it, or killed or unkilled
-                            while on it. `null` means no change has been
+                            it, moved onto or off it, or deleted while on it,
+                            or a change to the kill date of a row on it
+                            (killed, unkilled, or rescheduled). Only a kill
+                            date that actually changes counts; rewriting it to
+                            the same value does not. `null` means no change has been
                             recorded since tracking began, not that the card
                             has never changed. It is the time the change was
                             recorded, not the date a backdated or future-dated
