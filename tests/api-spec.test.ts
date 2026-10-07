@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.21.0');
+      expect(spec.info.version).toBe('11.22.0');
     });
 
     it('should have components section', () => {
@@ -2917,6 +2917,88 @@ describe('OpenAPI Specification', () => {
         spec.paths['/library/rotation/{id}'] as Record<string, Record<string, unknown>>
       ).get as { description?: string };
       expect(idGet.description).toMatch(/\/library\/rotation\/cards/);
+    });
+  });
+
+  describe('Rotation thresholds (#531)', () => {
+    type IntegerProp = { type?: string; minimum?: number; maximum?: number; $ref?: string };
+    type ObjectSchema = {
+      properties?: Record<string, IntegerProp>;
+      required?: string[];
+      additionalProperties?: boolean;
+      description?: string;
+    };
+    const schema = (name: string) => spec.components.schemas[name] as ObjectSchema;
+    const bins = () => (spec.components.schemas.RotationBin as { enum: string[] }).enum;
+
+    // OpenAPI 3.0 cannot key an object by a $ref'd enum (`propertyNames` is
+    // 3.1), so the bin keys are spelled out; this is what keeps them from
+    // drifting off RotationBin.
+    it.each(['RotationWindowDays', 'UpdateRotationWindowDays'])('%s is keyed by exactly the RotationBin values', (name) => {
+      expect(Object.keys(schema(name).properties ?? {})).toEqual(bins());
+      expect(flat(schema(name).description)).toContain('RotationBin');
+    });
+
+    it('requires every bin in RotationWindowDays and none in UpdateRotationWindowDays', () => {
+      expect(schema('RotationWindowDays').required).toEqual(bins());
+      expect(schema('UpdateRotationWindowDays').required).toBeUndefined();
+    });
+
+    it('defines RotationThresholds as the bin windows plus one card_stale_days, both required', () => {
+      const thresholds = schema('RotationThresholds');
+      expect(thresholds.required).toEqual(['window_days', 'card_stale_days']);
+      expect(thresholds.properties?.window_days).toEqual(ref('RotationWindowDays'));
+      expect(thresholds.properties?.card_stale_days?.type).toBe('integer');
+      const description = flat(thresholds.description);
+      expect(description).toMatch(/station-wide/);
+      expect(description).toMatch(/not per-user/);
+      expect(description).toMatch(/days/);
+    });
+
+    it('closes the PATCH body and makes every key optional', () => {
+      const request = schema('UpdateRotationThresholdsRequest');
+      expect(request.additionalProperties).toBe(false);
+      expect(request.required).toBeUndefined();
+      expect(request.properties?.window_days).toEqual(ref('UpdateRotationWindowDays'));
+      expect(Object.keys(request.properties ?? {})).toEqual(['window_days', 'card_stale_days']);
+      expect(schema('UpdateRotationWindowDays').additionalProperties).toBe(false);
+    });
+
+    // Request-side bounds cannot be added after publication (oasdiff calls a
+    // new bound breaking), so every day count is bounded now, on both sides.
+    it.each([
+      ['RotationWindowDays', ['H', 'M', 'L', 'S']],
+      ['UpdateRotationWindowDays', ['H', 'M', 'L', 'S']],
+      ['RotationThresholds', ['card_stale_days']],
+      ['UpdateRotationThresholdsRequest', ['card_stale_days']],
+    ])('%s bounds each day count to whole days in 1..365', (name, keys) => {
+      for (const key of keys) {
+        expect(schema(name).properties?.[key]).toMatchObject({ type: 'integer', minimum: 1, maximum: 365 });
+      }
+    });
+
+    it.each([
+      ['get', 'catalog: read'],
+      ['patch', 'catalog: write'],
+    ])('declares %s /library/rotation/thresholds with its grant (%s)', (method, grant) => {
+      expectBackendRoute('/library/rotation/thresholds', method, { grant, issue: 'WXYC/Backend-Service#2733' });
+    });
+
+    it('returns RotationThresholds from both operations and takes the partial request on PATCH', () => {
+      expect(responseSchema('/library/rotation/thresholds', 'get', '200')).toEqual(ref('RotationThresholds'));
+      expect(responseSchema('/library/rotation/thresholds', 'patch', '200')).toEqual(ref('RotationThresholds'));
+      const patch = operation('/library/rotation/thresholds', 'patch');
+      expect(patch.requestBody?.content?.['application/json']?.schema).toEqual(ref('UpdateRotationThresholdsRequest'));
+      expect(flat(patch.description)).toMatch(/omitted key.*unchanged/i);
+      expect(flat(patch.responses?.['400']?.description)).toMatch(/unknown key/i);
+      expect(responseSchema('/library/rotation/thresholds', 'patch', '400')).toEqual(ref('ApiErrorResponse'));
+    });
+
+    it('documents registration order on GET /library/rotation/thresholds, and /library/rotation/{id} names it as a literal sibling', () => {
+      const description = flat(operation('/library/rotation/thresholds', 'get').description);
+      expect(description).toMatch(/[Rr]egistration order is load-bearing/);
+      expect(description).toMatch(/library-rotation-route-order\.route\.test\.ts/);
+      expect(flat(operation('/library/rotation/{id}', 'get').description)).toContain('/library/rotation/thresholds');
     });
   });
 

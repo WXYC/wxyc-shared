@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.21.0
+  version: 11.22.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3607,6 +3607,103 @@ components:
         name:
           type: string
           nullable: true
+
+    RotationThresholds:
+      type: object
+      description: >
+        The station-wide rotation thresholds that music directors set: one
+        record for the whole station, not per-user. Every value is a count of
+        whole days. Read by `GET /library/rotation/thresholds` and changed by
+        `PATCH /library/rotation/thresholds`.
+      required:
+        - window_days
+        - card_stale_days
+      properties:
+        window_days:
+          $ref: '#/components/schemas/RotationWindowDays'
+        card_stale_days:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: >
+            How many days a rotation card may go without a recorded change
+            (see `last_changed_at` on `GET /library/rotation/cards`) before a
+            client flags it as stale. One number across all bins.
+
+    RotationWindowDays:
+      type: object
+      description: >
+        Per bin, how many days a record may sit in rotation before a client
+        flags it as due for replacement. Keyed by the `RotationBin` values:
+        OpenAPI 3.0 cannot key an object by a `$ref`'d enum (`propertyNames`
+        is 3.1), so the keys are spelled out here and a spec test pins them
+        equal to `RotationBin`'s enum. Bounded to 1..365 on both the read and
+        the write shapes, because oasdiff treats adding a request-side bound
+        after publication as a breaking change.
+      required:
+        - H
+        - M
+        - L
+        - S
+      properties:
+        H:
+          type: integer
+          minimum: 1
+          maximum: 365
+        M:
+          type: integer
+          minimum: 1
+          maximum: 365
+        L:
+          type: integer
+          minimum: 1
+          maximum: 365
+        S:
+          type: integer
+          minimum: 1
+          maximum: 365
+
+    UpdateRotationThresholdsRequest:
+      type: object
+      additionalProperties: false
+      description: >
+        Body of `PATCH /library/rotation/thresholds`. Partial: an omitted key
+        leaves that value unchanged, at both levels, so `{"window_days":
+        {"H": 30}}` changes only the Heavy window. Any other key is a 400
+        naming it.
+      properties:
+        window_days:
+          $ref: '#/components/schemas/UpdateRotationWindowDays'
+        card_stale_days:
+          type: integer
+          minimum: 1
+          maximum: 365
+
+    UpdateRotationWindowDays:
+      type: object
+      additionalProperties: false
+      description: >
+        The `window_days` of `UpdateRotationThresholdsRequest`: the
+        `RotationWindowDays` keys, each optional. Keyed by the `RotationBin`
+        values for the same reason as `RotationWindowDays`; a key outside them
+        is a 400.
+      properties:
+        H:
+          type: integer
+          minimum: 1
+          maximum: 365
+        M:
+          type: integer
+          minimum: 1
+          maximum: 365
+        L:
+          type: integer
+          minimum: 1
+          maximum: 365
+        S:
+          type: integer
+          minimum: 1
+          maximum: 365
 
     RotationEntry:
       type: object
@@ -15560,8 +15657,9 @@ paths:
 
         Registration order is load-bearing and permanent: this route must
         stay registered *after* its literal siblings
-        `/library/rotation/uncatalogued` and `/library/rotation/cards`, or
-        the literal segment is captured as an id. Pinned by Backend's
+        `/library/rotation/uncatalogued`, `/library/rotation/cards` and
+        `/library/rotation/thresholds`, or the literal segment is captured as
+        an id. Pinned by Backend's
         `library-rotation-uncatalogued.route.test.ts` and
         `library-rotation-route-order.route.test.ts`, which asserts the
         router's registration order per method.
@@ -15735,6 +15833,65 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RotationConflictError'
+
+  /library/rotation/thresholds:
+    get:
+      x-wxyc-service: backend-service
+      summary: Get the rotation thresholds
+      description: >
+        The station-wide rotation thresholds (`RotationThresholds`). There is
+        always exactly one record; Backend seeds it, so this never 404s.
+        Grant: `catalog: read`. Delivered by WXYC/Backend-Service#2733.
+
+        Registration order is load-bearing and permanent: this literal path
+        is ambiguous with the templated `GET /library/rotation/{id}`, so it
+        must stay registered *before* the `/:id` route, for the same reason
+        `GET /library/rotation/cards` gives. Pinned by Backend's
+        `library-rotation-route-order.route.test.ts`, which asserts the
+        router's registration order per method.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The current thresholds
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotationThresholds'
+
+    patch:
+      x-wxyc-service: backend-service
+      summary: Change the rotation thresholds
+      description: >
+        Partial update of the station-wide thresholds: an omitted key is left
+        unchanged, including each bin inside `window_days`. Returns the whole
+        record as it stands after the write. Grant: `catalog: write`.
+        Delivered by WXYC/Backend-Service#2733.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRotationThresholdsRequest'
+      responses:
+        '200':
+          description: The thresholds after the update
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotationThresholds'
+        '400':
+          description: >
+            A day count that is not an integer in 1..365, or an unknown key at
+            either level, named in the message. Unknown keys are refused
+            rather than dropped, so a misspelled bin never reads as a
+            successful save.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /library/rotation/{rotation_id}/link:
     patch:
