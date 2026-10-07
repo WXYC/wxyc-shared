@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.17.0
+  version: 11.18.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3120,23 +3120,22 @@ components:
               type: integer
             from_rotation_id:
               type: integer
+              minimum: 1
+              maximum: 2147483647
+              nullable: true
               description: >
                 The id of a rotation row with no library link, added on or
                 before the cutover date (or moved from one that was). This
                 request creates the release for that row and links it in the
-                same transaction, so the import is one request rather than
-                `POST /library` then
+                same transaction, plays included, so the import is one request
+                rather than `POST /library` then
                 `PATCH /library/rotation/{rotation_id}/link`, and
                 cannot be replayed to mint more library rows. Omit it for an
-                ordinary add. A row that is linked or not legacy is a 409
+                ordinary add; null means omitted. A row that is linked, not
+                legacy or moved to another bin is a 409
                 `rotation_not_eligible`; a killed row is importable, since
-                killed rows are most of the import queue. Declared ahead of
-                the Backend-Service implementation
-                (WXYC/Backend-Service#2810): the deployed backend silently
-                drops this key and answers 201 without linking the row, so a
-                client must not rely on the link, or drop its
-                `PATCH /library/rotation/{rotation_id}/link` request, until
-                that lands.
+                killed rows are most of the import queue. A moved record's
+                chain is one record: only its newest row is importable.
 
     Label:
       type: object
@@ -3757,17 +3756,16 @@ components:
               type: integer
             moved_from_rotation_id:
               type: integer
+              minimum: 1
+              maximum: 2147483647
+              nullable: true
               description: >
                 The unlinked rotation row this one replaces in a cross-bin
                 move; Backend-Service kills it in the same transaction. The
                 source must be an active typed-text row (`kill_date` null or
                 in the future) added on or before the cutover date, or moved
                 from one; otherwise the request is a 409
-                `rotation_not_eligible`. Declared ahead of the
-                Backend-Service implementation (WXYC/Backend-Service#2810):
-                the deployed backend silently drops this key, so the new row
-                is added and the source row is left active in its old bin. A
-                client must not rely on the kill until that lands.
+                `rotation_not_eligible`. Null means omitted.
 
     AddRotationBody:
       description: >
@@ -3946,13 +3944,12 @@ components:
         after the cutover date for any insert not made through `POST
         /intake/{id}/file`, except a `POST /library` whose `from_rotation_id`
         names an eligible legacy row, which is accepted after the cutover
-        date. Both values are declared ahead of the Backend-Service
-        implementation (WXYC/Backend-Service#2791's review gate and
-        WXYC/Backend-Service#2810). `rotation_not_eligible` fires when
+        date. `rotation_not_eligible` fires when
         `from_rotation_id` names a
-        row that is linked or not legacy — neither added on or before the
-        cutover date nor moved from a row that was. A killed row is
-        importable.
+        row that is linked, not legacy (neither added on or before the
+        cutover date nor moved from a row that was), or moved to another
+        bin: only the newest row of a moved record's chain is importable.
+        A killed row is importable.
 
     LibraryAddConflictError:
       type: object
@@ -3984,9 +3981,8 @@ components:
         merged 2026-09-14), which `POST /library/rotation` and `DELETE
         /library/rotation/cards/{id}` now raise. `review_required` and
         `rotation_not_eligible` are raised only by `POST /library/rotation`,
-        never by the card delete, and are declared ahead of the
-        Backend-Service implementation (WXYC/Backend-Service#2791's review
-        gate and WXYC/Backend-Service#2810). `review_required` fires after
+        never by the card delete (WXYC/Backend-Service#2791's review gate
+        and WXYC/Backend-Service#2810). `review_required` fires after
         the cutover date for any insert not made through `POST
         /intake/{id}/file`, except re-rotating a release already in the
         library and a typed-text add whose `moved_from_rotation_id` names an
@@ -13508,10 +13504,8 @@ paths:
           description: >
             `review_required` after the cutover date (no review basis, and no
             eligible `from_rotation_id`), or `rotation_not_eligible` when
-            `from_rotation_id` names a row that is linked or not legacy; a
-            killed row is importable. Both are declared ahead of the
-            Backend-Service implementation (WXYC/Backend-Service#2791's
-            review gate and WXYC/Backend-Service#2810). See
+            `from_rotation_id` names a row that is linked, not legacy or moved
+            to another bin; a killed row is importable. See
             `LibraryAddConflictReason`.
           content:
             application/json:
@@ -14405,7 +14399,7 @@ paths:
         '401':
           description: No bearer token
         '403':
-          description: 'Caller lacks the `reviews: write` permission'
+          description: 'Caller lacks the `reviews: write` permission, or has no account name to report under, and nothing is written'
     get:
       x-wxyc-service: backend-service
       summary: List a record's FCC notes, or the music directors' waiting list
@@ -14492,7 +14486,7 @@ paths:
         '401':
           description: No bearer token
         '403':
-          description: 'Caller lacks the `reviews: manage` permission'
+          description: 'Caller lacks the `reviews: manage` permission, or has no account name to confirm under, and nothing is written'
         '404':
           description: No such note
           content:
@@ -15312,8 +15306,7 @@ paths:
             already in the library, and not a typed-text add whose
             `moved_from_rotation_id` names an eligible legacy row),
             `rotation_not_eligible` (the `moved_from_rotation_id` row is
-            linked, killed, or not legacy; both are declared ahead of the
-            Backend-Service implementation, WXYC/Backend-Service#2810), or
+            linked, killed, or not legacy; WXYC/Backend-Service#2810), or
             `rotation_card_bin_mismatch`: `card_id` names a card in a bin
             other than `rotation_bin` (WXYC/Backend-Service#2472, delivered
             by WXYC/Backend-Service#2482).
@@ -15346,7 +15339,10 @@ paths:
       x-wxyc-service: backend-service
       summary: List uncatalogued rotation rows (the Awaiting Cataloging queue)
       description: >
-        Every rotation row with `album_id IS NULL` — the worklist behind
+        Every rotation row with `album_id IS NULL`, except a row that was
+        moved to another bin, which is left out for every `status`: a moved
+        record's rows are one chain, queued once by its newest row
+        (WXYC/Backend-Service#3007). The worklist behind
         dj-site's Awaiting Cataloging facet and the Import to Library flow
         (WXYC/dj-site#1161, BS#2109). Unfiltered unless you ask: `status`
         defaults to `all` here, so active and killed rows arrive together
@@ -15610,7 +15606,11 @@ paths:
         with this `rotation_id` and a NULL `album_id` are pointed at the new
         release, FK-keyed only — free-text plays of the same promo are
         deliberately untouched. Linking never clears the row's free-text
-        snapshot or its pre-catalog `format_id`/`label_id`.
+        snapshot or its pre-catalog `format_id`/`label_id`. A moved record's
+        rows are one chain (WXYC/Backend-Service#3007): only the newest row
+        links, a row moved to another bin is a 409, and linking the newest
+        row also links the chain's older unlinked rows to the same release,
+        plays included.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
         - BearerAuth: []
@@ -15647,9 +15647,11 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: >
-            Rotation entry is already linked to a library release. Clients
-            treat this as "someone got there first" — the row was catalogued
-            between read and submit.
+            Rotation entry is already linked to a library release, or was moved
+            to another bin (only the newest row of a moved record's chain
+            links); the moved-away case carries a message and no reason code.
+            Clients treat the already-linked case as "someone got there
+            first" — the row was catalogued between read and submit.
           content:
             application/json:
               schema:
@@ -17456,7 +17458,7 @@ paths:
   # ============================
   #
   # These two operations are the contract's first per-listener-keyed
-  # persistence, declared ahead of their Backend-Service implementation
+  # persistence, written ahead of their Backend-Service implementation
   # (Backend-Service#2665, Backend-Service#2667) so a future re-run of the
   # #372 reachability probe does not mistake them for phantom paths. The key
   # is the anonymous better-auth user id carried in the JWT — never the

@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.17.0');
+      expect(spec.info.version).toBe('11.18.0');
     });
 
     it('should have components section', () => {
@@ -9350,24 +9350,65 @@ describe('OpenAPI Specification', () => {
       }
     );
 
-    it('hedges from_rotation_id and moved_from_rotation_id on WXYC/Backend-Service#2810', () => {
-      for (const [name, field] of [
-        ['AddAlbumRequest', 'from_rotation_id'],
-        ['AddRotationTypedTextRequest', 'moved_from_rotation_id'],
-      ] as const) {
-        const text = propText(name, field);
-        expect(text).toMatch(/Declared ahead of the Backend-Service implementation \(WXYC\/Backend-Service#2810\)/);
-        expect(text).toMatch(/silently drops this key/);
+    it('no longer calls the #2810 fields declared ahead of the implementation', () => {
+      const raw = readFileSync(join(__dirname, '..', 'api.yaml'), 'utf-8');
+      expect(flat(raw).toLowerCase()).not.toContain('declared ahead');
+      expect(flat(raw)).not.toContain('silently drops this key');
+      expect(flat(raw)).not.toContain('deployed backend silently');
+    });
+
+    it.each([
+      ['AddAlbumRequest', 'from_rotation_id'],
+      ['AddRotationTypedTextRequest', 'moved_from_rotation_id'],
+    ] as const)('bounds %s.%s as a nullable int4 id where null means omitted', (name, field) => {
+      const prop = propertyOf(name, field);
+      expect(prop?.type).toBe('integer');
+      expect(prop?.minimum).toBe(1);
+      expect(prop?.maximum).toBe(2147483647);
+      expect(prop?.nullable).toBe(true);
+      expect(propText(name, field)).toMatch(/[Nn]ull means omitted/);
+    });
+
+    it('describes rotation_not_eligible on POST /library as also covering a row moved to another bin', () => {
+      for (const text of [
+        propText('AddAlbumRequest', 'from_rotation_id'),
+        flat(schema('LibraryAddConflictReason').description),
+        conflict409('/library'),
+      ]) {
+        expect(text).toMatch(/moved to another bin/);
       }
+    });
+
+    it('describes the chain rule on the link route, the uncatalogued list and the import', () => {
+      const link409 = flat(operation('/library/rotation/{rotation_id}/link', 'patch').responses?.['409']?.description);
+      expect(link409).not.toBe(
+        'Rotation entry is already linked to a library release. Clients treat this as "someone got there first" — the row was catalogued between read and submit.'
+      );
+      expect(link409).toMatch(/already linked/);
+      expect(link409).toMatch(/moved to another bin/);
+      const link = flat(operation('/library/rotation/{rotation_id}/link', 'patch').description);
+      expect(link).toMatch(/linking the newest row also links the chain's older unlinked rows to the same release, plays included/i);
+      const list = flat(operation('/library/rotation/uncatalogued', 'get').description);
+      expect(list).toMatch(/except a row that was moved to another bin/);
+      expect(list).toMatch(/left out for every `status`/);
+      expect(propText('AddAlbumRequest', 'from_rotation_id')).toMatch(/plays included/);
+    });
+
+    it.each([
+      ['/fcc-notes', 'post'],
+      ['/fcc-notes/{id}/confirm', 'post'],
+    ] as const)('documents the no-account-name 403 on %s with nothing written', (path, method) => {
+      const text = flat(operation(path, method).responses?.['403']?.description);
+      expect(text).toMatch(/has no account name to (report|confirm) under, and nothing is written/);
     });
 
     it('lets a killed row be imported but not moved, wherever the 409 is described', () => {
       const importText = propText('AddAlbumRequest', 'from_rotation_id');
-      expect(importText).toMatch(/linked or not legacy is a 409 `rotation_not_eligible`/);
+      expect(importText).toMatch(/linked, not legacy or moved to another bin is a 409 `rotation_not_eligible`/);
       expect(importText).toMatch(/killed row is importable/);
-      expect(flat(schema('LibraryAddConflictReason').description)).toMatch(/linked or not legacy.*A killed row is importable/);
+      expect(flat(schema('LibraryAddConflictReason').description)).toMatch(/linked, not legacy.*moved to another bin.*A killed row is importable/);
       expect(flat(schema('LibraryAddConflictReason').description)).not.toMatch(/linked, killed/);
-      expect(conflict409('/library')).toMatch(/linked or not legacy; a killed row is importable/);
+      expect(conflict409('/library')).toMatch(/linked, not legacy or moved to another bin; a killed row is importable/);
       expect(conflict409('/library')).not.toMatch(/linked, killed/);
       expect(propText('AddRotationTypedTextRequest', 'moved_from_rotation_id')).toMatch(/active typed-text row \(`kill_date` null or in the future\)/);
       expect(flat(schema('RotationConflictReason').description)).toMatch(/linked, killed, or not legacy/);
@@ -9404,14 +9445,13 @@ describe('OpenAPI Specification', () => {
       expect(filings).toMatch(/delivered by WXYC\/Backend-Service#2482/);
     });
 
-    it('hedges the POST /library 409 values on the unshipped gate and WXYC/Backend-Service#2810', () => {
+    it('no longer hedges the POST /library 409 values on an unshipped gate', () => {
       for (const text of [
         flat(schema('LibraryAddConflictReason').description),
         conflict409('/library'),
       ]) {
-        expect(text).toMatch(/declared ahead of the Backend-Service implementation \(WXYC\/Backend-Service#2791's review gate and WXYC\/Backend-Service#2810\)/);
+        expect(text).not.toMatch(/declared ahead/i);
       }
-      expect(propText('AddAlbumRequest', 'from_rotation_id')).toMatch(/answers 201 without linking the row/);
     });
 
     it('names the link route by its real path parameter, {rotation_id}', () => {
