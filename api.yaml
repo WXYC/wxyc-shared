@@ -5443,7 +5443,7 @@ components:
         The classic-librarian artist-card field set (`artist_id`, not
         `id` — a different shape from `Artist`, the raw `POST
         /library/artists` insert row above). Not returned bare by the
-        artist-card reads: both `GET /library/artists/{id}` and its
+        artist-card endpoints: both `GET /library/artists/{id}` and its
         `PATCH` 200 answer `ArtistCardWithDependentCounts`, and `POST
         /library/artists/{id}/refile` answers `ArtistRefileResult`; each
         embeds this shape via `allOf`.
@@ -5540,7 +5540,7 @@ components:
         on this endpoint — sending one is a 400 naming why, not silently
         dropped. `code_artist_number` is changed with `POST
         /library/artists/{id}/refile`; `genre_id` and `code_letters` have
-        no write path anywhere yet. Do not confuse this `artist_name` with
+        not writable by any endpoint. Do not confuse this `artist_name` with
         `UpdateAlbumRequest`'s absent one: this endpoint renames the
         artist row directly; the album PATCH never accepts `artist_name`
         at all, on any artist.
@@ -5622,6 +5622,7 @@ components:
         genre_id:
           type: integer
           minimum: 1
+          maximum: 2147483647
           description: >
             The genre membership to re-file. Required: an artist id alone
             does not identify a membership.
@@ -5660,7 +5661,9 @@ components:
                 membership. Every one re-labels in the database at once,
                 so this is the count of physical records whose shelf
                 labels now need replacing. Also present when `changed`
-                is `false`.
+                is `false`, where nothing re-labelled and the count is
+                informational; `previous_code_artist_number` then equals
+                `code_artist_number`.
 
     ArtistRefileConflictReason:
       type: string
@@ -5677,7 +5680,11 @@ components:
     ArtistRefileConflictError:
       type: object
       description: >
-        The `POST /library/artists/{id}/refile` 409 body.
+        The `POST /library/artists/{id}/refile` 409 body. Purpose-built
+        rather than the shared `ApiErrorResponse`, following
+        `LibraryFilingConflictError`: it carries a named `reason`
+        discriminant and, on `artist_code_conflict`, the occupant a
+        client acts on.
       required:
         - message
         - reason
@@ -5914,7 +5921,8 @@ components:
         /library/artists/{id}/refile`, and `POST
         /library/deleted/{batchId}/restore`: the operation stood down
         rather than wait on rows a live writer holds. Retryable, and says
-        nothing about whether the target is deletable/restorable —
+        nothing about whether the target is deletable, restorable or
+        re-fileable —
         deliberately not a 409, which on these endpoints means "refused
         on the merits". Each transaction sets a `lock_timeout` below
         Postgres's deadlock-detection threshold on purpose, so it is
@@ -5932,7 +5940,10 @@ components:
         still right — a librarian retries a click in a second, where a
         job that loses a row may skip it until its next run — but a 503
         from the artist delete is not evidence that a DJ was logging a
-        play.
+        play. `POST /library/artists/{id}/refile` is the same: its
+        contenders are a concurrent re-file in the same
+        (`code_letters`, `genre_id`) bucket, an artist delete, and the
+        catalog jobs.
       required:
         - message
         - reason
@@ -15889,7 +15900,8 @@ paths:
         `code_artist_number` are real fields on the `/wxycdb` artist-card
         form but are not writable here — sending one is a 400 naming why.
         Re-number an artist with `POST /library/artists/{id}/refile`;
-        `genre_id` and `code_letters` remain unwritable. See `UpdateArtistRequest` for the exact wire shape and the
+        `genre_id` and `code_letters` are not writable by any
+        endpoint. See `UpdateArtistRequest` for the exact wire shape and the
         rename's cascade behavior.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
@@ -16023,9 +16035,15 @@ paths:
         Refuses rather than 500s: a slot another artist holds is a 409
         `artist_code_conflict` naming the first holder, a lettered
         compilation section is a 409 `lettered_compilation_section`, and
-        a live writer holding the shelf is a 503. Resubmitting the
-        artist's current number is a 200 with `changed: false`, and
-        writes nothing.
+        a live writer holding the shelf is a 503. Outside a lettered
+        compilation section, resubmitting the artist's current number is
+        a 200 with `changed: false`, and writes nothing.
+
+
+        Order: 400s and 404s are decided first, then, after the shelf
+        lock, the lettered 409, then the no-op 200, then the occupancy
+        409. A 503 can precede any of the post-lock outcomes, since they
+        are decided after the lock.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
         - BearerAuth: []

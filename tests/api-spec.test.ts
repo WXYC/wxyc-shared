@@ -10159,7 +10159,8 @@ describe('OpenAPI Specification', () => {
       const s = sch('RefileArtistRequest');
       expect(s.additionalProperties).toBe(false);
       expect(requiredKeysOf('RefileArtistRequest').sort()).toEqual(['code_artist_number', 'genre_id']);
-      expect(s.properties.genre_id).toMatchObject({ type: 'integer', minimum: 1 });
+      expect(Object.keys(s.properties).sort()).toEqual(['code_artist_number', 'genre_id']);
+      expect(s.properties.genre_id).toMatchObject({ type: 'integer', minimum: 1, maximum: 2147483647 });
       expect(s.properties.code_artist_number).toMatchObject({ type: 'integer', minimum: 0, maximum: 2147483647 });
       expect(flat(s.description)).toMatch(/any other key is a 400/i);
     });
@@ -10168,6 +10169,14 @@ describe('OpenAPI Specification', () => {
       expect(sch('ArtistRefileResult').allOf[0]).toEqual(ref('ArtistCard'));
       expect(requiredKeysOf('ArtistRefileResult')).toEqual(
         expect.arrayContaining(['changed', 'previous_code_artist_number', 'releases_to_relabel'])
+      );
+      expect(propertyKeysOf('ArtistRefileResult').sort()).toEqual(
+        [
+          ...propertyKeysOf('ArtistCard'),
+          'changed',
+          'previous_code_artist_number',
+          'releases_to_relabel',
+        ].sort()
       );
       expect(propertyOf('ArtistRefileResult', 'changed')?.type).toBe('boolean');
       expect(propertyOf('ArtistRefileResult', 'previous_code_artist_number')?.type).toBe('integer');
@@ -10187,11 +10196,20 @@ describe('OpenAPI Specification', () => {
       expect(sch('ArtistRefileConflictReason').enum).toContain('artist_code_conflict');
     });
 
+    it('documents the refusal order and the lettered-section exception to the no-op 200', () => {
+      const d = flat(operation(path, 'post').description);
+      expect(d).toMatch(/Outside a lettered compilation section/);
+      expect(d).toMatch(/lettered 409, then the no-op 200, then the occupancy 409/);
+      expect(d).toMatch(/503 can precede any of the post-lock outcomes/);
+      expect(flat(sch('ArtistRefileConflictError').description)).toMatch(/purpose-built/);
+      expect(flat(sch('LockUnavailableRefusal').description)).toMatch(/concurrent re-file/);
+    });
+
     it('retires the claims that code_artist_number has no write path or ArtistCard is only embedded', () => {
       const patch = flat(operation('/library/artists/{id}', 'patch').description);
       expect(patch).toContain('POST /library/artists/{id}/refile');
       expect(flat(sch('UpdateArtistRequest').description)).toContain('POST /library/artists/{id}/refile');
-      expect(flat(sch('ArtistCard').description)).not.toMatch(/Not returned directly/);
+      expect(flat(sch('ArtistCard').description)).toContain('ArtistRefileResult');
       expect(flat(sch('LockUnavailableRefusal').description)).toContain('POST /library/artists/{id}/refile');
     });
   });
