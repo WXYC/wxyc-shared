@@ -16117,7 +16117,8 @@ paths:
             Two distinct cases, told apart by `code`: `artist_not_found`
             (no such artist) and `artist_not_filed_in_genre` (the artist
             exists but has no membership in `genre_id`). Clients key on
-            `code`. The messages are unchanged; the `Artist not filed under
+            `code`. The messages are unchanged (`Artist not found` and
+            `Artist not filed under genre {n}`); the `Artist not filed under
             genre` prefix stays stable until every deployed client keys on
             `code`, since a client that receives no `code` falls back to it.
           content:
