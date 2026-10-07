@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.15.0
+  version: 11.16.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -5442,9 +5442,10 @@ components:
       description: >
         The classic-librarian artist-card field set (`artist_id`, not
         `id` — a different shape from `Artist`, the raw `POST
-        /library/artists` insert row above). Not returned directly by
-        either artist-card endpoint: both `GET /library/artists/{id}` and
-        its `PATCH` 200 answer `ArtistCardWithDependentCounts`, which
+        /library/artists` insert row above). Not returned bare by the
+        artist-card reads: both `GET /library/artists/{id}` and its
+        `PATCH` 200 answer `ArtistCardWithDependentCounts`, and `POST
+        /library/artists/{id}/refile` answers `ArtistRefileResult`; each
         embeds this shape via `allOf`.
       required:
         - artist_id
@@ -5535,9 +5536,11 @@ components:
         (WXYC/Backend-Service#2156, `artist_name` restored by BS#2563).
         Two writable fields, either or both; a body with neither is a
         400. `genre_id`, `code_letters`, and `code_artist_number` are
-        real fields on the `/wxycdb` artist-card form but have no write
-        path on this endpoint — sending one is a 400 naming why, not
-        silently dropped. Do not confuse this `artist_name` with
+        real fields on the `/wxycdb` artist-card form but are not writable
+        on this endpoint — sending one is a 400 naming why, not silently
+        dropped. `code_artist_number` is changed with `POST
+        /library/artists/{id}/refile`; `genre_id` and `code_letters` have
+        no write path anywhere yet. Do not confuse this `artist_name` with
         `UpdateAlbumRequest`'s absent one: this endpoint renames the
         artist row directly; the album PATCH never accepts `artist_name`
         at all, on any artist.
@@ -5601,6 +5604,97 @@ components:
               type: string
             code_letters:
               type: string
+
+    RefileArtistRequest:
+      type: object
+      additionalProperties: false
+      description: >
+        Body of `POST /library/artists/{id}/refile` (WXYC/Backend-Service#2643).
+        Changes one artist's call number within one genre membership.
+        Any other key is a 400 naming it. In particular `code_letters`
+        and a destination genre are refused: call letters are
+        artist-global and moving an artist between genres is not
+        supported yet.
+      required:
+        - genre_id
+        - code_artist_number
+      properties:
+        genre_id:
+          type: integer
+          minimum: 1
+          description: >
+            The genre membership to re-file. Required: an artist id alone
+            does not identify a membership.
+        code_artist_number:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+          description: The new artist call number within that genre.
+
+    ArtistRefileResult:
+      description: >
+        The 200 of `POST /library/artists/{id}/refile`: the re-filed
+        membership as an `ArtistCard`, plus what changed. The full shelf
+        code (for example `Hiphop IS 31`) is composed client-side from
+        the card's `genre_id`, `code_letters` and `code_artist_number`.
+      allOf:
+        - $ref: '#/components/schemas/ArtistCard'
+        - type: object
+          required:
+            - changed
+            - previous_code_artist_number
+            - releases_to_relabel
+          properties:
+            changed:
+              type: boolean
+              description: >
+                `false` when the requested number already was the
+                artist's number in that genre; nothing was written.
+            previous_code_artist_number:
+              type: integer
+              description: The artist number before this request.
+            releases_to_relabel:
+              type: integer
+              description: >
+                How many releases are filed under this (artist, genre)
+                membership. Every one re-labels in the database at once,
+                so this is the count of physical records whose shelf
+                labels now need replacing. Also present when `changed`
+                is `false`.
+
+    ArtistRefileConflictReason:
+      type: string
+      enum: [artist_code_conflict, lettered_compilation_section]
+      description: >
+        Discriminator for the `POST /library/artists/{id}/refile` 409.
+        `artist_code_conflict` is the exact string
+        `LibraryFilingConflictReason` and the `POST /library/artists`
+        controller carry for the same class of refusal, so a client's
+        existing conflict handling recognizes it.
+        `lettered_compilation_section` means the membership is a
+        lettered compilation section, whose artist number is fixed at 0.
+
+    ArtistRefileConflictError:
+      type: object
+      description: >
+        The `POST /library/artists/{id}/refile` 409 body.
+      required:
+        - message
+        - reason
+      properties:
+        message:
+          type: string
+        reason:
+          $ref: '#/components/schemas/ArtistRefileConflictReason'
+        artist:
+          allOf:
+            - $ref: '#/components/schemas/Artist'
+          description: >
+            Present on `artist_code_conflict`: the first holder of the
+            target slot, ordered by `artist_name` then id, excluding the
+            artist being re-filed. Its `code_artist_number` is the
+            contested target number. Absent on
+            `lettered_compilation_section`, which has no occupant to name.
 
     ArtistDeleteRefusal:
       type: object
@@ -5816,7 +5910,8 @@ components:
       type: object
       description: >
         503 shared by `DELETE /library/{id}`, `DELETE
-        /library/artists/{id}`, and `POST
+        /library/artists/{id}`, `POST
+        /library/artists/{id}/refile`, and `POST
         /library/deleted/{batchId}/restore`: the operation stood down
         rather than wait on rows a live writer holds. Retryable, and says
         nothing about whether the target is deletable/restorable —
@@ -15792,8 +15887,9 @@ paths:
         Two writable fields, `artist_name` and `alphabetical_name`; send
         either or both. `genre_id`, `code_letters`, and
         `code_artist_number` are real fields on the `/wxycdb` artist-card
-        form but have no write path here — sending one is a 400 naming
-        why. See `UpdateArtistRequest` for the exact wire shape and the
+        form but are not writable here — sending one is a 400 naming why.
+        Re-number an artist with `POST /library/artists/{id}/refile`;
+        `genre_id` and `code_letters` remain unwritable. See `UpdateArtistRequest` for the exact wire shape and the
         rename's cascade behavior.
       # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
@@ -15828,8 +15924,8 @@ paths:
         '400':
           description: >
             Invalid artist id, missing/non-object body, a `genre_id` /
-            `code_letters` / `code_artist_number` field with no write
-            path on this endpoint, no updatable fields provided, or an
+            `code_letters` / `code_artist_number` field, which this
+            endpoint does not write, no updatable fields provided, or an
             `artist_name` / `alphabetical_name` that is non-string,
             empty, or over 128 characters.
           content:
@@ -15903,6 +15999,79 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ArtistDeleteRefusal'
+        '503':
+          description: >
+            Stood down rather than wait on rows a live writer holds. See
+            `LockUnavailableRefusal`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockUnavailableRefusal'
+
+  /library/artists/{id}/refile:
+    post:
+      x-wxyc-service: backend-service
+      summary: Re-file an artist's call number within one genre (WXYC/Backend-Service#2643)
+      description: >
+        Changes `code_artist_number` for the artist's membership in
+        `genre_id`: a one-row update, so every release under that shelf
+        re-labels in the database at once (`releases_to_relabel` counts
+        the physical records that now need new labels). Call letters and
+        genre cannot be changed here.
+
+
+        Refuses rather than 500s: a slot another artist holds is a 409
+        `artist_code_conflict` naming the first holder, a lettered
+        compilation section is a 409 `lettered_compilation_section`, and
+        a live writer holding the shelf is a 503. Resubmitting the
+        artist's current number is a 200 with `changed: false`, and
+        writes nothing.
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefileArtistRequest'
+      responses:
+        '200':
+          description: The re-filed membership, or the unchanged one when the number already matched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistRefileResult'
+        '400':
+          description: >
+            Invalid artist id, non-object body, an unknown key (including
+            `code_letters`), or an invalid `genre_id` /
+            `code_artist_number`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: >
+            Two distinct messages: `Artist not found` (no such artist) and
+            `Artist not filed under genre {n}` (the artist exists but has
+            no membership in `genre_id`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: Refused on the merits — see `ArtistRefileConflictError`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtistRefileConflictError'
         '503':
           description: >
             Stood down rather than wait on rows a live writer holds. See
