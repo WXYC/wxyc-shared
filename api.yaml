@@ -5539,7 +5539,7 @@ components:
         real fields on the `/wxycdb` artist-card form but are not writable
         on this endpoint — sending one is a 400 naming why, not silently
         dropped. `code_artist_number` is changed with `POST
-        /library/artists/{id}/refile`; `genre_id` and `code_letters` have
+        /library/artists/{id}/refile`; `genre_id` and `code_letters` are
         not writable by any endpoint. Do not confuse this `artist_name` with
         `UpdateAlbumRequest`'s absent one: this endpoint renames the
         artist row directly; the album PATCH never accepts `artist_name`
