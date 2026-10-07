@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.16.0');
+      expect(spec.info.version).toBe('11.17.0');
     });
 
     it('should have components section', () => {
@@ -10147,7 +10147,7 @@ describe('OpenAPI Specification', () => {
     it('answers each outcome with its schema', () => {
       expect(responseSchema(path, 'post', '200')).toEqual(ref('ArtistRefileResult'));
       expect(responseSchema(path, 'post', '400')).toEqual(ref('ApiErrorResponse'));
-      expect(responseSchema(path, 'post', '404')).toEqual(ref('ApiErrorResponse'));
+      expect(responseSchema(path, 'post', '404')).toEqual(ref('ArtistRefileNotFoundError'));
       expect(responseSchema(path, 'post', '409')).toEqual(ref('ArtistRefileConflictError'));
       expect(responseSchema(path, 'post', '503')).toEqual(ref('LockUnavailableRefusal'));
       const notFound = flat(operation(path, 'post').responses?.['404']?.description);
@@ -10184,11 +10184,38 @@ describe('OpenAPI Specification', () => {
     });
 
     it('declares the conflict reason discriminant and the optional occupant', () => {
-      expect(sch('ArtistRefileConflictReason').enum).toEqual(['artist_code_conflict', 'lettered_compilation_section']);
+      expect(sch('ArtistRefileConflictReason').enum).toEqual([
+        'artist_code_conflict',
+        'lettered_compilation_section',
+        'various_artists_section',
+      ]);
       const error = sch('ArtistRefileConflictError');
       expect(error.required).toEqual(['message', 'reason']);
       expect(error.properties.reason).toEqual(ref('ArtistRefileConflictReason'));
       expect(error.properties.artist.allOf).toEqual([ref('Artist')]);
+    });
+
+    it('names the Various Artists refusal structurally and orders it after the lettered 409', () => {
+      expect(sch('ArtistRefileConflictReason').enum).toContain('various_artists_section');
+      const r = flat(sch('ArtistRefileConflictReason').description);
+      expect(r).toMatch(/never by the artist.s name/i);
+      expect(r).toContain('V/A');
+      expect(r).toContain('Z-');
+      const d = flat(operation(path, 'post').description);
+      expect(d).toContain('various_artists_section');
+      expect(d).toMatch(/the lettered 409, then the Various Artists 409, then the no-op 200/);
+    });
+
+    it('gives the 404 a purpose-built body keyed on a two-value code', () => {
+      const s = sch('ArtistRefileNotFoundError');
+      expect(s.required).toEqual(['message', 'code']);
+      expect(s.properties.message).toEqual({ type: 'string' });
+      expect(s.properties.code).toEqual(ref('ArtistRefileNotFoundCode'));
+      expect(sch('ArtistRefileNotFoundCode').type).toBe('string');
+      expect(sch('ArtistRefileNotFoundCode').enum).toEqual(['artist_not_found', 'artist_not_filed_in_genre']);
+      const d = flat(operation(path, 'post').responses?.['404']?.description);
+      expect(d).toMatch(/key on `code`/);
+      expect(d).toMatch(/not a contract/);
     });
 
     it('pins artist_code_conflict to the string LibraryFilingConflictReason carries', () => {
@@ -10199,7 +10226,7 @@ describe('OpenAPI Specification', () => {
     it('documents the refusal order and the lettered-section exception to the no-op 200', () => {
       const d = flat(operation(path, 'post').description);
       expect(d).toMatch(/Outside a lettered compilation section/);
-      expect(d).toMatch(/lettered 409, then the no-op 200, then the occupancy 409/);
+      expect(d).toMatch(/lettered 409, then the Various Artists 409, then the no-op 200, then the occupancy 409/);
       expect(d).toMatch(/503 can precede any of the post-lock outcomes/);
       expect(flat(sch('ArtistRefileConflictError').description)).toMatch(/Purpose-built/);
       expect(flat(sch('LockUnavailableRefusal').description)).toMatch(/concurrent re-file/);
