@@ -3132,7 +3132,7 @@ components:
                 `PATCH /library/rotation/{rotation_id}/link`, and
                 cannot be replayed to mint more library rows. Omit it for an
                 ordinary add; null means omitted. A row that is linked, not
-                legacy or moved to another bin is a 409
+                legacy, missing (no such row) or moved to another bin is a 409
                 `rotation_not_eligible`; a killed row is importable, since
                 killed rows are most of the import queue. A moved record's
                 chain is one record: only its newest row is importable.
@@ -3947,9 +3947,9 @@ components:
         date. `rotation_not_eligible` fires when
         `from_rotation_id` names a
         row that is linked, not legacy (neither added on or before the
-        cutover date nor moved from a row that was), or moved to another
-        bin: only the newest row of a moved record's chain is importable.
-        A killed row is importable.
+        cutover date nor moved from a row that was), missing (no such row),
+        or moved to another bin: only the newest row of a moved record's
+        chain is importable. A killed row is importable.
 
     LibraryAddConflictError:
       type: object
@@ -13504,8 +13504,8 @@ paths:
           description: >
             `review_required` after the cutover date (no review basis, and no
             eligible `from_rotation_id`), or `rotation_not_eligible` when
-            `from_rotation_id` names a row that is linked, not legacy or moved
-            to another bin; a killed row is importable. See
+            `from_rotation_id` names a row that is linked, not legacy, missing
+            or moved to another bin; a killed row is importable. See
             `LibraryAddConflictReason`.
           content:
             application/json:
@@ -15647,11 +15647,14 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '409':
           description: >
-            Rotation entry is already linked to a library release, or was moved
+            Rotation entry is already linked to a library release. A row moved
             to another bin (only the newest row of a moved record's chain
-            links); the moved-away case carries a message and no reason code.
-            Clients treat the already-linked case as "someone got there
-            first" — the row was catalogued between read and submit.
+            links) gets the same 409 with the same message and no reason
+            code, so the two cases cannot be told apart from the response. A
+            client that needs to know reloads the row (or the uncatalogued
+            list) to see whether it is linked or has a newer row. Clients
+            treat this as "someone got there first" — the row was catalogued
+            or moved on between read and submit.
           content:
             application/json:
               schema:
@@ -17458,7 +17461,7 @@ paths:
   # ============================
   #
   # These two operations are the contract's first per-listener-keyed
-  # persistence, written ahead of their Backend-Service implementation
+  # persistence, declared ahead of their Backend-Service implementation
   # (Backend-Service#2665, Backend-Service#2667) so a future re-run of the
   # #372 reachability probe does not mistake them for phantom paths. The key
   # is the anonymous better-auth user id carried in the JWT — never the

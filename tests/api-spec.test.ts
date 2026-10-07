@@ -9350,11 +9350,21 @@ describe('OpenAPI Specification', () => {
       }
     );
 
-    it('no longer calls the #2810 fields declared ahead of the implementation', () => {
-      const raw = readFileSync(join(__dirname, '..', 'api.yaml'), 'utf-8');
-      expect(flat(raw).toLowerCase()).not.toContain('declared ahead');
-      expect(flat(raw)).not.toContain('silently drops this key');
-      expect(flat(raw)).not.toContain('deployed backend silently');
+    // Scoped to the places #609 corrected: other operations (the listener request-replies
+    // section) still, truthfully, describe themselves as declared ahead of an emitter.
+    it('no longer calls the #2810 fields or their 409 reasons declared ahead of the implementation', () => {
+      for (const text of [
+        propText('AddAlbumRequest', 'from_rotation_id'),
+        propText('AddRotationTypedTextRequest', 'moved_from_rotation_id'),
+        flat(schema('LibraryAddConflictReason').description),
+        flat(schema('RotationConflictReason').description),
+        conflict409('/library'),
+        conflict409('/library/rotation'),
+      ]) {
+        expect(text.toLowerCase()).not.toContain('declared ahead');
+        expect(text).not.toContain('silently drops this key');
+        expect(text).not.toContain('deployed backend silently');
+      }
     });
 
     it.each([
@@ -9369,13 +9379,14 @@ describe('OpenAPI Specification', () => {
       expect(propText(name, field)).toMatch(/[Nn]ull means omitted/);
     });
 
-    it('describes rotation_not_eligible on POST /library as also covering a row moved to another bin', () => {
+    it('describes rotation_not_eligible on POST /library as also covering a missing row and a row moved to another bin', () => {
       for (const text of [
         propText('AddAlbumRequest', 'from_rotation_id'),
         flat(schema('LibraryAddConflictReason').description),
         conflict409('/library'),
       ]) {
         expect(text).toMatch(/moved to another bin/);
+        expect(text).toMatch(/missing/);
       }
     });
 
@@ -9386,6 +9397,11 @@ describe('OpenAPI Specification', () => {
       );
       expect(link409).toMatch(/already linked/);
       expect(link409).toMatch(/moved to another bin/);
+      // Backend-Service answers both cases with one message and no reason code, so the
+      // response cannot tell them apart; the text must not imply it can.
+      expect(link409).toMatch(/same 409 with the same message and no reason code/);
+      expect(link409).toMatch(/cannot be told apart from the response/);
+      expect(link409).not.toMatch(/moved-away case carries/);
       const link = flat(operation('/library/rotation/{rotation_id}/link', 'patch').description);
       expect(link).toMatch(/linking the newest row also links the chain's older unlinked rows to the same release, plays included/i);
       const list = flat(operation('/library/rotation/uncatalogued', 'get').description);
@@ -9404,11 +9420,11 @@ describe('OpenAPI Specification', () => {
 
     it('lets a killed row be imported but not moved, wherever the 409 is described', () => {
       const importText = propText('AddAlbumRequest', 'from_rotation_id');
-      expect(importText).toMatch(/linked, not legacy or moved to another bin is a 409 `rotation_not_eligible`/);
+      expect(importText).toMatch(/linked, not legacy, missing \(no such row\) or moved to another bin is a 409 `rotation_not_eligible`/);
       expect(importText).toMatch(/killed row is importable/);
-      expect(flat(schema('LibraryAddConflictReason').description)).toMatch(/linked, not legacy.*moved to another bin.*A killed row is importable/);
+      expect(flat(schema('LibraryAddConflictReason').description)).toMatch(/linked, not legacy.*missing.*moved to another bin.*A killed row is importable/);
       expect(flat(schema('LibraryAddConflictReason').description)).not.toMatch(/linked, killed/);
-      expect(conflict409('/library')).toMatch(/linked, not legacy or moved to another bin; a killed row is importable/);
+      expect(conflict409('/library')).toMatch(/linked, not legacy, missing or moved to another bin; a killed row is importable/);
       expect(conflict409('/library')).not.toMatch(/linked, killed/);
       expect(propText('AddRotationTypedTextRequest', 'moved_from_rotation_id')).toMatch(/active typed-text row \(`kill_date` null or in the future\)/);
       expect(flat(schema('RotationConflictReason').description)).toMatch(/linked, killed, or not legacy/);
