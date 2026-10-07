@@ -3667,8 +3667,9 @@ components:
         leaves that value unchanged, at both levels, so `{"window_days":
         {"H": 30}}` changes only the Heavy window, and `{}` or
         `{"window_days": {}}` changes nothing and returns the current record.
-        `null` is not a way to omit a key: it is a 400, like any value that is
-        not an integer in 1..365. Any other key is a 400 naming it. The 1..365
+        `null` is not a way to omit a key: an explicit `null`, at either
+        level, is a 400, as is a day count that is not an integer in 1..365.
+        Any other key is a 400 naming it. The 1..365
         bound is request-side only and declared at publication, because
         oasdiff treats adding a request-side bound later as breaking.
       properties:
@@ -15838,7 +15839,6 @@ paths:
     get:
       x-wxyc-service: backend-service
       summary: Get the rotation thresholds
-      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
       description: >
         The station-wide rotation thresholds (`RotationThresholds`). There is
         always exactly one record; Backend seeds it, so this never 404s.
@@ -15850,6 +15850,7 @@ paths:
         `GET /library/rotation/cards` gives. Pinned by Backend's
         `library-rotation-route-order.route.test.ts`, which asserts the
         router's registration order per method.
+      # routes enforce requirePermissions({ catalog: ['read'] }) (library.route.ts)
       security:
         - BearerAuth: []
       responses:
@@ -15867,7 +15868,6 @@ paths:
     patch:
       x-wxyc-service: backend-service
       summary: Change the rotation thresholds
-      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       description: >
         Partial update of the station-wide thresholds: an omitted key is left
         unchanged, including each bin inside `window_days`. Returns the whole
@@ -15879,6 +15879,7 @@ paths:
         same depth), so this literal path must stay registered *before* it,
         as the GET must before `GET /library/rotation/{id}`. Pinned by
         Backend's `library-rotation-route-order.route.test.ts`.
+      # routes enforce requirePermissions({ catalog: ['write'] }) (library.route.ts)
       security:
         - BearerAuth: []
       requestBody:
@@ -15896,8 +15897,9 @@ paths:
                 $ref: '#/components/schemas/RotationThresholds'
         '400':
           description: >
-            A day count that is not an integer in 1..365, or an unknown key at
-            either level, named in the message. Unknown keys are refused
+            A day count that is not an integer in 1..365, an explicit `null`
+            at either level, or an unknown key at either level, named in the
+            message. Unknown keys are refused
             rather than dropped, so a misspelled bin never reads as a
             successful save.
           content:
