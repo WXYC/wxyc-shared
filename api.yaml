@@ -15621,9 +15621,26 @@ paths:
                     - type: object
                       required:
                         - active_count
+                        - last_changed_at
                       properties:
                         active_count:
                           type: integer
+                        last_changed_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                          description: >
+                            The instant of the most recent recorded change to
+                            the card's membership: a rotation row filed onto
+                            it, moved onto or off it, or killed or unkilled
+                            while on it. `null` means no change has been
+                            recorded since tracking began, not that the card
+                            has never changed. It is the time the change was
+                            recorded, not the date a backdated or future-dated
+                            kill names. Deliberately on this list only, not on
+                            `RotationCard`, which is also the card POST/PATCH
+                            response and the `card` embedded in catalog search
+                            results.
 
     post:
       x-wxyc-service: backend-service

@@ -2773,6 +2773,34 @@ describe('OpenAPI Specification', () => {
       expect(countBranch?.properties?.active_count?.type).toBe('integer');
     });
 
+    it('carries a required, nullable last_changed_at on the cards list only, never on RotationCard', () => {
+      const get = (
+        spec.paths['/library/rotation/cards'] as Record<string, Record<string, unknown>>
+      ).get as {
+        responses: { '200': { content: { 'application/json': { schema: Record<string, unknown> } } } };
+      };
+      const itemSchema = (get.responses['200'].content['application/json'].schema.items ??
+        {}) as { allOf?: Array<Record<string, unknown>> };
+      const listBranch = (itemSchema.allOf ?? []).find(
+        (b) => (b.properties as Record<string, unknown> | undefined)?.active_count
+      ) as { properties?: Record<string, SchemaProp & { description?: string }>; required?: string[] } | undefined;
+      const field = listBranch?.properties?.last_changed_at;
+      expect(field?.type).toBe('string');
+      expect(field?.format).toBe('date-time');
+      expect(field?.nullable).toBe(true);
+      expect(listBranch?.required).toEqual(['active_count', 'last_changed_at']);
+      // The instant the change was recorded, not the date a backdated kill
+      // names; null is "nothing recorded since tracking began", not "never".
+      expect(field?.description).toMatch(/recorded/);
+      expect(field?.description).toMatch(/killed or unkilled/);
+      expect(field?.description).toMatch(/`null`/);
+      // RotationCard is also the POST/PATCH card response and the `card`
+      // embedded in catalog search results; the field on it would oblige
+      // every one of those projections to emit it.
+      const card = spec.components.schemas.RotationCard as Schema;
+      expect(Object.keys(card.properties ?? {})).toEqual(['id', 'bin', 'number', 'name']);
+    });
+
     it('defines POST /library/rotation/cards accepting bin + optional name, returning RotationCard', () => {
       const post = (
         spec.paths['/library/rotation/cards'] as Record<string, Record<string, unknown>>
