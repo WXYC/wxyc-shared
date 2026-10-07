@@ -10201,7 +10201,7 @@ describe('OpenAPI Specification', () => {
       expect(d).toMatch(/Outside a lettered compilation section/);
       expect(d).toMatch(/lettered 409, then the no-op 200, then the occupancy 409/);
       expect(d).toMatch(/503 can precede any of the post-lock outcomes/);
-      expect(flat(sch('ArtistRefileConflictError').description)).toMatch(/purpose-built/);
+      expect(flat(sch('ArtistRefileConflictError').description)).toMatch(/Purpose-built/);
       expect(flat(sch('LockUnavailableRefusal').description)).toMatch(/concurrent re-file/);
     });
 
