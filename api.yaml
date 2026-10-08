@@ -4164,8 +4164,10 @@ components:
         they hold a legal name, and never for client telemetry (analytics
         properties, error breadcrumbs, logs). `passes` and `draft_authors` are
         present only for callers holding `reviews: manage`; `draft_authors`
-        is `reviews.author` free text and carries the weaker guarantee of
-        `IntakeDeleteResponse.deleted_review_authors`; see its description.
+        is `reviews.author` free text: a real name or account name for a DJ's
+        own review, but whatever the music director typed for an on-behalf
+        review. It carries the same station-only caveat as the three
+        DJ-name fields; see `IntakeDeleteResponse.deleted_review_authors`.
       required:
         - id
         - artist_name
@@ -4913,7 +4915,7 @@ components:
           type: string
           maxLength: 128
           nullable: true
-          description: The printed review's `Review.author` (a real name or account name, snapshotted when written), with the same station-only caveat; not for any public or anonymous surface, because it holds a legal name; never for client telemetry.
+          description: The printed review's `Review.author`, snapshotted when written (a real name or account name for a DJ's own review, the music director's typed text for an on-behalf or handwritten one), with the same station-only caveat; not for any public or anonymous surface, because it holds a legal name; never for client telemetry.
         submitted_at:
           type: string
           format: date-time
@@ -5022,10 +5024,13 @@ components:
           nullable: true
           maxLength: 128
           description: >
-            Snapshot of the music director who confirmed the note, taken when
-            it was confirmed, with the same real-name-or-account-name value
-            and station-only caveat as `reported_by`; `null` while
-            `reported`. There is no account-id field for the confirmer.
+            Snapshot of the confirming music director's real name as shown
+            inside the station, taken when the note was confirmed, falling
+            back to their account name (on-air handle, else username) when no
+            real name is on file; `null` while `reported`. Shown inside the
+            station only; not for any public or anonymous surface, because it
+            holds a legal name; never for client telemetry. There is no
+            account-id field for the confirmer.
         confirmed_at:
           type: string
           format: date-time
@@ -5163,14 +5168,16 @@ components:
         null, because the author never saw the consent question, so an
         on-behalf create that sends any `publish_*` as `true`, or a non-null
         `credit`, answers 400. `author` is required on an on-behalf create,
-        because the service cannot snapshot a display name for someone who is
-        not the caller: a missing or blank `author` answers 400, and so does
+        because the service cannot snapshot a name for someone who is not the
+        caller: a missing or blank `author` answers 400, and so does
         an `author_user_id` that names no account. An on-behalf create may name
         an intake item in any state, including `filed` and `finalized`.
         Without these fields, the review is the
         caller's own and `typed`: the service sets `author` to a snapshot of
-        the account's display name at creation, and sets the account fields
-        from the caller, so a client never sends them. `author` is never the
+        the caller's real name at creation, falling back to their account
+        name (on-air handle, else username) when no real name is on file,
+        and sets the account fields from the caller, so a client never sends
+        them. An on-behalf review keeps the text that was typed. `author` is never the
         published credit; the `credit` choice decides that.
 
     ReviewPatch:

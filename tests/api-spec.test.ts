@@ -242,17 +242,36 @@ describe('OpenAPI Specification', () => {
         expect(text).toContain('current at read time');
         expect(text).toContain(notPublic);
       }
-      for (const text of [
-        flat(schemas.Review.properties.author.description),
-        flat(schemas.IntakeSlip.properties.author.description),
-        flat(schemas.IntakeDeleteResponse.properties.deleted_review_authors.description),
-        flat(item.draft_authors.description),
-        flat(schemas.ReviewRevision.properties.edited_by.description),
-        flat(schemas.FccNote.properties.reported_by.description),
-      ]) {
-        expect(text).toMatch(/real name|legal name/);
-        expect(text).toMatch(/[Ss]tation/);
+      // Every author-style field must say why it is station-only. The phrase
+      // is the new rule's, so the pre-#624 wording fails it on each field.
+      const holdsLegalName = /because (it holds|they hold) a legal name/;
+      for (const [name, text] of Object.entries({
+        'Review.author': flat(schemas.Review.properties.author.description),
+        'IntakeSlip.author': flat(schemas.IntakeSlip.properties.author.description),
+        'IntakeDeleteResponse.deleted_review_authors': flat(schemas.IntakeDeleteResponse.properties.deleted_review_authors.description),
+        'IntakeItem.draft_authors': flat(item.draft_authors.description),
+        'ReviewRevision.edited_by': flat(schemas.ReviewRevision.properties.edited_by.description),
+        'FccNote.reported_by': flat(schemas.FccNote.properties.reported_by.description),
+        'FccNote.confirmed_by': flat(schemas.FccNote.properties.confirmed_by.description),
+      })) {
+        expect(text, name).toMatch(holdsLegalName);
+        expect(text, name).toMatch(/not for any public or anonymous surface/);
+        expect(text, name).toMatch(/[Ss]tation/);
       }
+      // Each of these carries the telemetry ban in its own words rather than
+      // by reference to Review.author.
+      for (const [name, text] of Object.entries({
+        'IntakeSlip.author': flat(schemas.IntakeSlip.properties.author.description),
+        'IntakeDeleteResponse.deleted_review_authors': flat(schemas.IntakeDeleteResponse.properties.deleted_review_authors.description),
+        'IntakeItem.draft_authors': flat(item.draft_authors.description),
+        'FccNote.reported_by': flat(schemas.FccNote.properties.reported_by.description),
+        'FccNote.confirmed_by': flat(schemas.FccNote.properties.confirmed_by.description),
+      })) {
+        expect(text, name).toMatch(/never for (client )?telemetry|never for display outside the station or for client telemetry/);
+      }
+      // A slip for an on-behalf review carries the music director's typed text.
+      expect(flat(schemas.IntakeSlip.properties.author.description)).toContain("the music director's typed text for an on-behalf or handwritten one");
+      expect(flat(schemas.FccNote.properties.confirmed_by.description)).toContain(`confirming music director's ${realName}`);
       expect(flat(schemas.Review.properties.author.description)).toContain(`snapshot of their ${realName}`);
       expect(flat(schemas.Review.properties.author.description)).toContain(notPublic);
       expect(flat(schemas.Review.properties.author.description)).toContain('may be a real name');
@@ -4041,7 +4060,7 @@ describe('OpenAPI Specification', () => {
       expect(del.properties?.deleted_review_authors?.description).toMatch(/real name/);
     });
 
-    it('scopes the no-real-name claim to IntakeItem\'s own DJ-name fields and gives draft_authors the delete response\'s weaker guarantee', () => {
+    it('states the real-name rule on IntakeItem\'s DJ-name fields and gives draft_authors the same station-only caveat, noting its free text', () => {
       const item = spec.components.schemas.IntakeItem as { description?: string };
       expect(flat(item.description)).toContain("hold the person's real name as shown inside the station, falling back to their account name (on-air handle, else username) when no real name is on file, current at read time");
       expect(item.description).not.toMatch(/no real name appears in it/);
@@ -4050,12 +4069,14 @@ describe('OpenAPI Specification', () => {
       // IntakeDeleteResponse; it must not reappear.
       expect(item.description).not.toMatch(/no real names appear anywhere in this contract/);
       // `draft_authors` (#571) is `reviews.author` free text, the same
-      // snapshots the delete response returns, so the schema summary must
-      // not let a reader take the whole object as public-safe.
+      // snapshots the delete response returns: a real name or account name
+      // for a DJ's own review, the music director's typed text for an
+      // on-behalf one. The schema summary must carry the station-only
+      // caveat and say so, and no longer calls it a weaker guarantee.
       const text = flat(item.description);
       expect(text).toContain('`passes` and `draft_authors` are present only for callers holding `reviews: manage`');
-      expect(text).toContain('`draft_authors` is `reviews.author` free text and carries the weaker guarantee of `IntakeDeleteResponse.deleted_review_authors`');
-      expect(text).not.toContain('is a different schema with its own, weaker guarantee');
+      expect(text).toContain("`draft_authors` is `reviews.author` free text: a real name or account name for a DJ's own review, but whatever the music director typed for an on-behalf review. It carries the same station-only caveat as the three DJ-name fields; see `IntakeDeleteResponse.deleted_review_authors`.");
+      expect(text).not.toContain('weaker guarantee');
     });
 
     it('words IntakeItemState so requested is held for a named DJ and checked_out is held by its holder', () => {
@@ -9743,7 +9764,9 @@ describe('OpenAPI Specification', () => {
 
     it('keeps the author snapshot and the credit choice apart on a DJ\'s own review', () => {
       const text = flat(schema('NewReviewRequest').description);
-      expect(text).toMatch(/`author` to a snapshot of the account's display name at creation/);
+      expect(text).toContain("`author` to a snapshot of the caller's real name at creation, falling back to their account name (on-air handle, else username) when no real name is on file");
+      expect(text).toContain('An on-behalf review keeps the text that was typed.');
+      expect(text).not.toContain("account's display name");
       expect(text).toMatch(/`author` is never the published credit; the `credit` choice decides that/);
       expect(text).not.toMatch(/credited to their display name/);
       expect(text).toMatch(/sets the account fields from the caller, so a client never sends them/);
@@ -9776,7 +9799,7 @@ describe('OpenAPI Specification', () => {
 
     it('declares the on-behalf create rules: any stage, author required, unknown account 400', () => {
       const request = flat(schema('NewReviewRequest').description);
-      expect(request).toMatch(/`author` is required on an on-behalf create[^.]*cannot snapshot a display name for someone who is not the caller/);
+      expect(request).toMatch(/`author` is required on an on-behalf create[^.]*cannot snapshot a name for someone who is not the caller/);
       expect(request).toMatch(/a missing or blank `author` answers 400, and so does an `author_user_id` that names no account/);
       expect(request).not.toContain('answers 409 `locked`');
       expect(request).toContain('An on-behalf create may name an intake item in any state, including `filed` and `finalized`.');
@@ -10172,7 +10195,7 @@ describe('OpenAPI Specification', () => {
       );
       expect(flat(p.reported_by_user_id.description)).toBe('`null` once that account has been deleted.');
       expect(flat(p.confirmed_by.description)).toBe(
-        'Snapshot of the music director who confirmed the note, taken when it was confirmed, with the same real-name-or-account-name value and station-only caveat as `reported_by`; `null` while `reported`. There is no account-id field for the confirmer.',
+        "Snapshot of the confirming music director's real name as shown inside the station, taken when the note was confirmed, falling back to their account name (on-air handle, else username) when no real name is on file; `null` while `reported`. Shown inside the station only; not for any public or anonymous surface, because it holds a legal name; never for client telemetry. There is no account-id field for the confirmer.",
       );
       expect(flat(p.album_id.description)).toBe('The library release the note is about.');
       expect(flat(p.intake_item_id.description)).toContain('The intake item the note is about. At least one of the two is set.');
