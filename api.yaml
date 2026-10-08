@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.23.0
+  version: 11.23.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4157,8 +4157,12 @@ components:
         One physical copy the station holds, logged by a music director and
         waiting for a review (WXYC/Backend-Service#2791). Its three DJ-name
         fields (`requested_dj_name`, `checked_out_by_name`,
-        `passes[].dj_name`) are `auth_user.name`, the public-safe display
-        value; no real name appears in it. `passes` and `draft_authors` are
+        `passes[].dj_name`) hold the person's real name as shown inside the
+        station, falling back to their account name (on-air handle, else
+        username) when no real name is on file, current at read time. They
+        are station-only: not for any public or anonymous surface, because
+        they hold a legal name, and never for client telemetry (analytics
+        properties, error breadcrumbs, logs). `passes` and `draft_authors` are
         present only for callers holding `reviews: manage`; `draft_authors`
         is `reviews.author` free text and carries the weaker guarantee of
         `IntakeDeleteResponse.deleted_review_authors`; see its description.
@@ -4249,6 +4253,13 @@ components:
         requested_dj_name:
           type: string
           nullable: true
+          description: >
+            The requested DJ's real name as shown inside the station, falling back to
+            their account name (on-air handle, else username) when no real
+            name is on file, current at read time. Station-only: not for any
+            public or anonymous surface, because it holds a legal name; never
+            for client telemetry (analytics properties, error breadcrumbs,
+            logs).
         requested_at:
           type: string
           format: date-time
@@ -4271,6 +4282,13 @@ components:
         checked_out_by_name:
           type: string
           nullable: true
+          description: >
+            The holder's real name as shown inside the station, falling back to
+            their account name (on-air handle, else username) when no real
+            name is on file, current at read time. Station-only: not for any
+            public or anonymous surface, because it holds a legal name; never
+            for client telemetry (analytics properties, error breadcrumbs,
+            logs).
         checked_out_at:
           type: string
           format: date-time
@@ -4313,6 +4331,13 @@ components:
             properties:
               dj_name:
                 type: string
+                description: >
+                  The passing DJ's real name as shown inside the station,
+                  falling back to their account name (on-air handle, else
+                  username) when no real name is on file, current at read
+                  time. Station-only: not for any public or anonymous
+                  surface, because it holds a legal name; never for client
+                  telemetry (analytics properties, error breadcrumbs, logs).
               passed_at:
                 type: string
                 format: date-time
@@ -4355,7 +4380,8 @@ components:
             content, so a music director can see whose unfinished work a
             delete would remove. These are `reviews.author` snapshots and
             carry the caveat on `IntakeDeleteResponse.deleted_review_authors`:
-            station-only, never for client telemetry.
+            station-only, never for client telemetry, and not for any public
+            or anonymous surface, because they hold a legal name.
 
     IntakeAcceptReviewRequest:
       type: object
@@ -4577,12 +4603,14 @@ components:
           description: >
             `reviews.author` snapshots (WXYC/Backend-Service#2805), not
             `auth_user.name`. For an account-holding DJ's own review this is
-            the same public-safe display value; for a handwritten or
+            the same real name (falling back to the account name when none is
+            on file), a snapshot taken when written; for a handwritten or
             on-behalf review an MD typed by hand, it is free text and may be
-            a real name. Unlike `IntakeItem`'s `*_name` fields, this is not
+            a real name. Like `IntakeItem`'s `*_name` fields, it is not
             guaranteed PII-free — it exists for the MD's own in-station
-            confirmation of what was removed, never for display outside the
-            station or for client telemetry (analytics properties, error
+            confirmation of what was removed, not for any public or anonymous
+            surface, because it holds a legal name, never for display outside
+            the station or for client telemetry (analytics properties, error
             breadcrumbs, logs). Includes the authors of unsubmitted drafts
             that went with the item, the same names `IntakeItem.draft_authors`
             showed before the delete.
@@ -4650,12 +4678,15 @@ components:
           nullable: true
           description: >
             Null only on a row that predates the in-app model (the column
-            has never been NOT NULL). For an account holder's own review, a snapshot of their display
-            name, the public-safe value. For a handwritten or on-behalf review
-            it is what the music director typed: free text that may be a real
-            name, so it is not guaranteed PII-free. Shown only inside the
-            station; never the published credit (`credit` decides that) and
-            never for client telemetry (analytics properties, error
+            has never been NOT NULL). For an account holder's own review, a
+            snapshot of their real name as shown inside the station, taken
+            when written, falling back to their account name (on-air handle,
+            else username) when no real name is on file. For a handwritten or
+            on-behalf review it is what the music director typed: free text
+            that may be a real name, so it is not guaranteed PII-free. Shown
+            only inside the station; not for any public or anonymous surface,
+            because it holds a legal name; never the published credit
+            (`credit` decides that) and never for client telemetry (analytics properties, error
             breadcrumbs, logs).
         author_user_id:
           type: string
@@ -4797,13 +4828,15 @@ components:
           maxLength: 128
           nullable: true
           description: >
-            Display-name snapshot taken at the time. Revision 1 names the
+            Snapshot of the editor's real name (falling back to their account
+            name when no real name is on file), taken at the time. Revision 1 names the
             review's author: it is a copy of `Review.author`, whoever pressed
             submit, so for a review a music director recorded on someone's
             behalf it is the name the music director typed. A later revision
             names whoever made that edit; for a music director's edit of
             someone else's review, the music director. Station-only, with the
-            caveat on `Review.author`.
+            caveat on `Review.author`; not for any public or anonymous surface,
+            because it holds a legal name.
         edited_by_user_id:
           type: string
           nullable: true
@@ -4880,7 +4913,7 @@ components:
           type: string
           maxLength: 128
           nullable: true
-          description: The printed review's `Review.author`, with the same station-only caveat; never for client telemetry.
+          description: The printed review's `Review.author` (a real name or account name, snapshotted when written), with the same station-only caveat; not for any public or anonymous surface, because it holds a legal name; never for client telemetry.
         submitted_at:
           type: string
           format: date-time
@@ -4971,8 +5004,11 @@ components:
           type: string
           maxLength: 128
           description: >
-            Display-name snapshot of the reporter, the public-safe account
-            display name. Shown inside the station only; never for client
+            Snapshot of the reporter's real name as shown inside the station,
+            taken when the note was written, falling back to their account
+            name (on-air handle, else username) when no real name is on file.
+            Shown inside the station only; not for any public or anonymous
+            surface, because it holds a legal name; never for client
             telemetry.
         reported_by_user_id:
           type: string
@@ -4986,8 +5022,9 @@ components:
           nullable: true
           maxLength: 128
           description: >
-            Display-name snapshot of the music director who confirmed the
-            note, taken at the time, like `reported_by`; `null` while
+            Snapshot of the music director who confirmed the note, taken when
+            it was confirmed, with the same real-name-or-account-name value
+            and station-only caveat as `reported_by`; `null` while
             `reported`. There is no account-id field for the confirmer.
         confirmed_at:
           type: string

@@ -222,7 +222,43 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.23.0');
+      expect(spec.info.version).toBe('11.23.1');
+    });
+
+    // WXYC/wxyc-shared#624: internal screens show the person's real name.
+    it('states the real-name decision on every review and intake name field', () => {
+      const schemas = spec.components.schemas as Record<string, any>;
+      const notPublic = 'not for any public or anonymous surface, because it holds a legal name';
+      const realName = "real name as shown inside the station";
+      const fallback = 'account name (on-air handle, else username)';
+      const item = schemas.IntakeItem.properties;
+      for (const text of [
+        flat(item.requested_dj_name.description),
+        flat(item.checked_out_by_name.description),
+        flat(item.passes.items.properties.dj_name.description),
+      ]) {
+        expect(text).toContain(realName);
+        expect(text).toContain(fallback);
+        expect(text).toContain('current at read time');
+        expect(text).toContain(notPublic);
+      }
+      for (const text of [
+        flat(schemas.Review.properties.author.description),
+        flat(schemas.IntakeSlip.properties.author.description),
+        flat(schemas.IntakeDeleteResponse.properties.deleted_review_authors.description),
+        flat(item.draft_authors.description),
+        flat(schemas.ReviewRevision.properties.edited_by.description),
+        flat(schemas.FccNote.properties.reported_by.description),
+      ]) {
+        expect(text).toMatch(/real name|legal name/);
+        expect(text).toMatch(/[Ss]tation/);
+      }
+      expect(flat(schemas.Review.properties.author.description)).toContain(`snapshot of their ${realName}`);
+      expect(flat(schemas.Review.properties.author.description)).toContain(notPublic);
+      expect(flat(schemas.Review.properties.author.description)).toContain('may be a real name');
+      expect(flat(schemas.IntakeDeleteResponse.properties.deleted_review_authors.description)).toContain(notPublic);
+      expect(flat(item.draft_authors.description)).toContain('not for any public or anonymous surface, because they hold a legal name');
+      expect(specText).not.toMatch(/public-safe (display|account|value)/);
     });
 
     it('should have components section', () => {
@@ -4007,7 +4043,8 @@ describe('OpenAPI Specification', () => {
 
     it('scopes the no-real-name claim to IntakeItem\'s own DJ-name fields and gives draft_authors the delete response\'s weaker guarantee', () => {
       const item = spec.components.schemas.IntakeItem as { description?: string };
-      expect(item.description).toMatch(/no real name appears in it/);
+      expect(flat(item.description)).toContain("hold the person's real name as shown inside the station, falling back to their account name (on-air handle, else username) when no real name is on file, current at read time");
+      expect(item.description).not.toMatch(/no real name appears in it/);
       // The schema-wide claim from before #537's respec ("no real names
       // appear anywhere in this contract") over-claimed across
       // IntakeDeleteResponse; it must not reappear.
@@ -10052,7 +10089,7 @@ describe('OpenAPI Specification', () => {
     it('pins the revision sentences and the not-versioned description', () => {
       const p = revision().properties!;
       expect(flat(p.revision?.description)).toBe('1-based. Revision 1 is written when the review is submitted; each later edit of the submitted review writes the next. A review submitted before edit history began has none until its first edit, which writes revision 1 (its text before that edit, under its author, dated when it was submitted, or at its last write when that is unknown) and then revision 2 for the edit.');
-      expect(flat(p.edited_by?.description)).toContain("Display-name snapshot taken at the time. Revision 1 names the review's author: it is a copy of `Review.author`, whoever pressed submit, so for a review a music director recorded on someone's behalf it is the name the music director typed. A later revision names whoever made that edit; for a music director's edit of someone else's review, the music director. Station-only, with the caveat on `Review.author`.");
+      expect(flat(p.edited_by?.description)).toContain("Snapshot of the editor's real name (falling back to their account name when no real name is on file), taken at the time. Revision 1 names the review's author: it is a copy of `Review.author`, whoever pressed submit, so for a review a music director recorded on someone's behalf it is the name the music director typed. A later revision names whoever made that edit; for a music director's edit of someone else's review, the music director. Station-only, with the caveat on `Review.author`; not for any public or anonymous surface, because it holds a legal name.");
       expect(flat(p.edited_by_user_id?.description)).toBe("Revision 1 carries the review's `author_user_id` (null for an author with no linked account); a later revision carries the editor's account. `null` once that account has been deleted.");
       expect(flat(revision().description)).toContain('Publishing consent (`publish_*`, `credit`) is not versioned. Drafts are not versioned: a review has no revisions until it is submitted. Deleting a review deletes its revisions.');
     });
@@ -10131,11 +10168,11 @@ describe('OpenAPI Specification', () => {
         expect(p[k].nullable).toBeUndefined();
       }
       expect(flat(p.reported_by.description)).toBe(
-        'Display-name snapshot of the reporter, the public-safe account display name. Shown inside the station only; never for client telemetry.',
+        "Snapshot of the reporter's real name as shown inside the station, taken when the note was written, falling back to their account name (on-air handle, else username) when no real name is on file. Shown inside the station only; not for any public or anonymous surface, because it holds a legal name; never for client telemetry.",
       );
       expect(flat(p.reported_by_user_id.description)).toBe('`null` once that account has been deleted.');
       expect(flat(p.confirmed_by.description)).toBe(
-        'Display-name snapshot of the music director who confirmed the note, taken at the time, like `reported_by`; `null` while `reported`. There is no account-id field for the confirmer.',
+        'Snapshot of the music director who confirmed the note, taken when it was confirmed, with the same real-name-or-account-name value and station-only caveat as `reported_by`; `null` while `reported`. There is no account-id field for the confirmer.',
       );
       expect(flat(p.album_id.description)).toBe('The library release the note is about.');
       expect(flat(p.intake_item_id.description)).toContain('The intake item the note is about. At least one of the two is set.');
