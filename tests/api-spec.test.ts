@@ -253,6 +253,7 @@ describe('OpenAPI Specification', () => {
         'ReviewRevision.edited_by': flat(schemas.ReviewRevision.properties.edited_by.description),
         'FccNote.reported_by': flat(schemas.FccNote.properties.reported_by.description),
         'FccNote.confirmed_by': flat(schemas.FccNote.properties.confirmed_by.description),
+        'Reviewer.name': flat(schemas.Reviewer.properties.name.description),
       })) {
         expect(text, name).toMatch(holdsLegalName);
         expect(text, name).toMatch(/not for any public or anonymous surface/);
@@ -266,6 +267,7 @@ describe('OpenAPI Specification', () => {
         'IntakeItem.draft_authors': flat(item.draft_authors.description),
         'FccNote.reported_by': flat(schemas.FccNote.properties.reported_by.description),
         'FccNote.confirmed_by': flat(schemas.FccNote.properties.confirmed_by.description),
+        'Reviewer.name': flat(schemas.Reviewer.properties.name.description),
       })) {
         expect(text, name).toMatch(/never for (client )?telemetry|never for display outside the station or for client telemetry/);
       }
@@ -273,6 +275,14 @@ describe('OpenAPI Specification', () => {
       expect(flat(schemas.IntakeSlip.properties.author.description)).toContain("the music director's typed text for an on-behalf or handwritten one");
       expect(flat(schemas.FccNote.properties.confirmed_by.description)).toContain(`confirming music director's ${realName}`);
       expect(flat(schemas.Review.properties.author.description)).toContain(`snapshot of their ${realName}`);
+      // Reviewer.name: the real name, the account-name fallback (which may be
+      // the on-air name), and never the dj_name field.
+      const reviewerName = flat(schemas.Reviewer.properties.name.description);
+      expect(reviewerName).toContain(`The person's ${realName}`);
+      expect(reviewerName).toContain(`falling back to their ${fallback} when no real name is on file`);
+      expect(reviewerName).toContain('the fallback can be the on-air name');
+      expect(reviewerName).toContain('never the `dj_name` field');
+      expect(reviewerName).not.toContain('Never the on-air name');
       expect(flat(schemas.Review.properties.author.description)).toContain(notPublic);
       expect(flat(schemas.Review.properties.author.description)).toContain('may be a real name');
       expect(flat(schemas.IntakeDeleteResponse.properties.deleted_review_authors.description)).toContain(notPublic);
@@ -9348,9 +9358,13 @@ describe('OpenAPI Specification', () => {
         const o = operation('/reviews/reviewers', 'get');
         expect(o['x-wxyc-service']).toBe('backend-service');
         expect(o.summary).toBe('The accounts that can write reviews');
+        expectBackendRoute('/reviews/reviewers', 'get', { grant: 'Grant: `reviews: manage`', issue: 'WXYC/Backend-Service#3058' });
+        expect((o as { security?: unknown }).security).toEqual([{ BearerAuth: [] }]);
         const text = flat(o.description);
         expect(text).toContain('Grant: `reviews: manage`');
-        expect(text).toContain('Every account whose membership role grants `reviews: write`, the same test `POST /intake/{id}/request` applies to `dj_id`');
+        expect(text).toContain('The accounts whose membership role grants `reviews: write`, other than banned accounts, so an account on this list can be asked to review.');
+        expect(text).not.toContain('the same test');
+        expect(text).toContain('Delivered by WXYC/Backend-Service#3058');
         expect(text).toContain('Sorted by `name`, case-insensitively.');
         expect(text).toContain('For use inside the station only: `name` is a real name. Never show it on a public surface, and never send it to analytics, error reports or logs.');
       });
@@ -9361,9 +9375,15 @@ describe('OpenAPI Specification', () => {
           properties: { reviewers: unknown };
         };
         expect(body.required).toEqual(['reviewers']);
+        expect(Object.keys(body.properties)).toEqual(['reviewers']);
         expect(body.properties.reviewers).toEqual({ type: 'array', items: ref('Reviewer') });
         const responses = operation('/reviews/reviewers', 'get').responses ?? {};
         expect(Object.keys(responses)).toEqual(expect.arrayContaining(['401', '403']));
+      });
+
+      it('gives Reviewer the station-only note', () => {
+        const text = flat((spec.components.schemas.Reviewer as { description?: string }).description);
+        expect(text).toContain('For use inside the station only: `name` is a real name.');
       });
 
       it('pins Reviewer to two required, non-nullable strings', () => {
