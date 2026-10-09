@@ -9307,7 +9307,7 @@ describe('OpenAPI Specification', () => {
       expect(onCover).toContain('`false` in every other response: a single review, the write responses, and the unfiltered, `mine` and `intake_item_id` lists.');
       expect(onCover).toContain('It differs from `in_use`, which is true when the review is in use for any record: a review reached through `cited_album_id` is in use for the release it belongs to, and is on the cover here only once it has been chosen or printed for a copy of this release.');
       expect(onCover).toContain('A print from `POST /library/{id}/print` on a release with exactly one filed or finalized intake item is that item\'s print, so it is never a second cover.');
-      expect(onCover).toContain('A print with no intake item written before that item was filed is no longer on the cover once the item exists. That is delivered by WXYC/Backend-Service#3075.');
+      expect(onCover).toContain('A print with no intake item is left off the cover for as long as the release has exactly one filed or finalized intake item, and is back on it when the release has none or two or more. That is delivered by WXYC/Backend-Service#3075.');
       expect(onCover).not.toContain('until it ships');
       expect(flat(review.properties?.printed_revision_id?.description as string)).toBe('The revision of this review that was most recently printed; `null` if it has never been printed. When it is not the current revision, the printed slip is out of date. Its `id` is one of the entries of `GET /reviews/{id}/revisions`.');
       expect(flat(review.properties?.printed_at?.description as string)).toBe('When that print happened.');
