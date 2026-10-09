@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.24.2');
+      expect(spec.info.version).toBe('11.24.3');
     });
 
     // WXYC/wxyc-shared#624: internal screens show the person's real name.
@@ -9300,14 +9300,15 @@ describe('OpenAPI Specification', () => {
       expect(review.properties?.on_cover).toMatchObject({ type: 'boolean' });
       expect(review.properties?.printed_revision_id).toMatchObject({ type: 'integer', nullable: true });
       expect(review.properties?.printed_at).toMatchObject({ type: 'string', format: 'date-time', nullable: true });
-      expect(flat(review.properties?.in_use?.description as string)).toBe('Computed. `true` when this review is the accepted review of an intake item, or is the review in the latest print-log entry of a copy or of a library release (`POST /library/{id}/print`). An author cannot delete a review that is in use (`ReviewConflictReason` `in_use`), but may still edit it.');
+      expect(flat(review.properties?.in_use?.description as string)).toBe('Computed. `true` when this review is the accepted review of an intake item, or is the review in the latest print-log entry of a copy or of a library release (`POST /library/{id}/print`); a print with no intake item counts only while its release does not have exactly one filed or finalized intake item. An author cannot delete a review that is in use (`ReviewConflictReason` `in_use`), but may still edit it.');
       const onCover = flat(review.properties?.on_cover?.description as string);
       expect(onCover).toContain('Computed, and meaningful only in a list filtered by `album_id` (`GET /reviews?album_id=`): `true` when this review is on the cover of a copy of that release.');
-      expect(onCover).toContain('That is, it is the accepted review of an intake item filed or finalized as that release, or the review in the latest print-log entry of such an item, or the review in the release\'s latest print-log entry that has no intake item. These are the reviews that list puts first.');
+      expect(onCover).toContain('That is, it is the accepted review of an intake item filed or finalized as that release, or the review in the latest print-log entry of such an item, or the review in the release\'s latest print-log entry that has no intake item while the release does not have exactly one filed or finalized intake item. These are the reviews that list puts first.');
       expect(onCover).toContain('`false` in every other response: a single review, the write responses, and the unfiltered, `mine` and `intake_item_id` lists.');
       expect(onCover).toContain('It differs from `in_use`, which is true when the review is in use for any record: a review reached through `cited_album_id` is in use for the release it belongs to, and is on the cover here only once it has been chosen or printed for a copy of this release.');
       expect(onCover).toContain('A print from `POST /library/{id}/print` on a release with exactly one filed or finalized intake item is that item\'s print, so it is never a second cover.');
-      expect(onCover).toContain('That is delivered by WXYC/Backend-Service#3075; until it ships, such a print is the release\'s latest print-log entry that has no intake item.');
+      expect(onCover).toContain('A print with no intake item written before that item was filed is no longer on the cover once the item exists. That is delivered by WXYC/Backend-Service#3075.');
+      expect(onCover).not.toContain('until it ships');
       expect(flat(review.properties?.printed_revision_id?.description as string)).toBe('The revision of this review that was most recently printed; `null` if it has never been printed. When it is not the current revision, the printed slip is out of date. Its `id` is one of the entries of `GET /reviews/{id}/revisions`.');
       expect(flat(review.properties?.printed_at?.description as string)).toBe('When that print happened.');
       expect(review.properties).not.toHaveProperty('locked');
@@ -9440,7 +9441,7 @@ describe('OpenAPI Specification', () => {
       const text = flat(operation('/reviews', 'get').description);
       expect(text).toContain("A release's list (`album_id`) holds the reviews whose `album_id` is that release (filing an intake item stamps its reviews with the release it was filed as, and they stay there once the item is `finalized`), plus, when an intake item filed or finalized as that release cites another release through `cited_album_id`, the cited release's reviews.");
       expect(text).not.toContain("An album's list includes reviews reached through an intake item's `cited_album_id`.");
-      expect(text).toContain("Any list filtered by `album_id` puts the reviews on the cover of that release first (`Review.on_cover`): a review accepted for an intake item filed or finalized as that release, the review in the latest print-log entry of such an item, or the review in the release's latest print-log entry that has no intake item. A slip belongs to one copy, and two items can be filed as one release, so there can be more than one. Among themselves, and for every other visible review after them, including those reached through `cited_album_id`, the order is the one below.");
+      expect(text).toContain("Any list filtered by `album_id` puts the reviews on the cover of that release first (`Review.on_cover`): a review accepted for an intake item filed or finalized as that release, the review in the latest print-log entry of such an item, or the review in the release's latest print-log entry that has no intake item while the release does not have exactly one filed or finalized intake item. A slip belongs to one copy, and two items can be filed as one release, so there can be more than one. Among themselves, and for every other visible review after them, including those reached through `cited_album_id`, the order is the one below.");
       expect(text).toContain('the review in the latest print-log entry of such an item');
       expect(text).toContain('The `intake_item_id` list is what the music director reads before accepting a review.');
       expect(text).not.toContain('before filing');
@@ -9951,7 +9952,7 @@ describe('OpenAPI Specification', () => {
         /`subject_not_held`: a DJ's `POST \/reviews` names an `intake_item_id` the caller does not currently hold \(effective state `checked_out` or `reviewed`, with `checked_out_by` the caller\)/
       );
       expect(reasons).toMatch(/an on-behalf create \(`reviews: manage`\) is exempt from the hold rule/);
-      expect(reasons).toContain("`in_use`: an author deleting their own review while it is in use, meaning it is the accepted review of an intake item or the review in the latest print-log entry of a copy or of a library release. The author may still edit it. A caller with `reviews: manage` is never refused with `in_use`.");
+      expect(reasons).toContain("`in_use`: an author deleting their own review while it is in use, meaning it is the accepted review of an intake item or the review in the latest print-log entry of a copy or of a library release (a print with no intake item counts only while its release does not have exactly one filed or finalized intake item). The author may still edit it. A caller with `reviews: manage` is never refused with `in_use`.");
       expect(reasons).toContain("`accepted_review`: a caller with `reviews: manage` deleting the accepted review of a `filed` or `finalized` intake item, whether or not the item carries a citation. Accept another review for the item first (`POST /intake/{id}/accept-review`). Deleting the accepted review of an item that is not yet filed is allowed: the item returns to `checked_out` if someone holds it, otherwise to `pool`.");
       // Decision 40: a citation does not exempt a filed record's cover review.
       expect(reasons).not.toContain('no citation');
@@ -10437,8 +10438,9 @@ describe('OpenAPI Specification', () => {
       );
       expect(d).toContain('Delivered by WXYC/Backend-Service#2865 (the print with no intake item).');
       expect(d).toContain(
-        'The one-item rule is delivered by WXYC/Backend-Service#3075; until it ships, the route appends every entry with no intake item and leaves intake items untouched.',
+        'The one-item rule is delivered by WXYC/Backend-Service#3075.',
       );
+      expect(d).not.toContain('until it ships');
     });
 
     it('returns an IntakeSlip carrying confirmed FCC notes, with 400, 401, 403, 404 and no 409', () => {
