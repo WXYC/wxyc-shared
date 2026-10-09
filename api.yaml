@@ -4643,7 +4643,14 @@ components:
           description: The `auth_user.id`, the value to send as `dj_id` or `author_user_id`.
         name:
           type: string
-          description: The account's real name, falling back to the account name when it has none. Never the on-air name.
+          description: >
+            The person's real name as shown inside the station, falling back
+            to their account name (on-air handle, else username) when no real
+            name is on file, so the fallback can be the on-air name. It is
+            never the `dj_name` field. Shown only inside the station; not for
+            any public or anonymous surface, because it holds a legal name;
+            never for client telemetry (analytics properties, error
+            breadcrumbs, logs).
 
     Review:
       type: object
@@ -14927,9 +14934,10 @@ paths:
       summary: The accounts that can write reviews
       description: >
         Grant: `reviews: manage` (music directors and station managers).
-        Every account whose membership role grants `reviews: write`, the same
-        test `POST /intake/{id}/request` applies to `dj_id`, so an account on
-        this list can be asked to review. Sorted by `name`, case-insensitively.
+        Delivered by WXYC/Backend-Service#3058. The accounts whose membership
+        role grants `reviews: write`, other than banned accounts, so an
+        account on this list can be asked to review. Sorted by `name`,
+        case-insensitively.
         For use inside the station only: `name` is a real name. Never show it
         on a public surface, and never send it to analytics, error reports or
         logs.
