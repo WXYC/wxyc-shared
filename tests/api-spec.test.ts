@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.24.1');
+      expect(spec.info.version).toBe('11.24.2');
     });
 
     // WXYC/wxyc-shared#624: internal screens show the person's real name.
@@ -9349,6 +9349,13 @@ describe('OpenAPI Specification', () => {
       expect(pathItem.parameters).toContainEqual({ $ref: '#/components/parameters/ReviewId' });
     });
 
+    describe('POST /intake/{id}/request service accounts (#631)', () => {
+      it('says a service account named as dj_id gets the same 400', () => {
+        const text = flat(operation('/intake/{id}/request', 'post').description);
+        expect(text).toContain('A service account, such as the auto-DJ account, is the same 400 as an account without `reviews: write`. Delivered by WXYC/Backend-Service#3076.');
+      });
+    });
+
     describe('GET /reviews/reviewers (#626)', () => {
       const reviewer = () =>
         spec.components.schemas.Reviewer as unknown as {
@@ -9366,6 +9373,7 @@ describe('OpenAPI Specification', () => {
         expect(text).toContain('Grant: `reviews: manage`');
         expect(text).toContain('The accounts whose membership role grants `reviews: write`, other than banned accounts, so an account on this list can be asked to review.');
         expect(text).not.toContain('the same test');
+        expect(text).toContain('Service accounts, such as the auto-DJ account, are left out. Delivered by WXYC/Backend-Service#3076.');
         expect(text).toContain('Delivered by WXYC/Backend-Service#3058');
         expect(text).toContain('Sorted by `name`, case-insensitively.');
         expect(text).toContain('For use inside the station only: `name` is a real name. Never show it on a public surface, and never send it to analytics, error reports or logs.');

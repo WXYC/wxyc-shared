@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.24.1
+  version: 11.24.2
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -14166,8 +14166,10 @@ paths:
         A music director asks a named DJ (`dj_id`) to review the item, moving it
         to `requested`. Grant: `reviews: manage`. The source state is effective
         state `pool`. `dj_id` must name an account holding `reviews: write`, or
-        the request is a 400. Delivered by
-        WXYC/Backend-Service#2798.
+        the request is a 400. A service account, such as the auto-DJ account,
+        is the same 400 as an account without `reviews: write`. Delivered by
+        WXYC/Backend-Service#3076.
+        Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
       requestBody:
@@ -14941,8 +14943,9 @@ paths:
         Grant: `reviews: manage` (music directors and station managers).
         Delivered by WXYC/Backend-Service#3058. The accounts whose membership
         role grants `reviews: write`, other than banned accounts, so an
-        account on this list can be asked to review. Sorted by `name`,
-        case-insensitively.
+        account on this list can be asked to review. Service accounts, such as
+        the auto-DJ account, are left out. Delivered by
+        WXYC/Backend-Service#3076. Sorted by `name`, case-insensitively.
         For use inside the station only: `name` is a real name. Never show it
         on a public surface, and never send it to analytics, error reports or
         logs.
