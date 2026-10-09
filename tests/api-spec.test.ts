@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.24.0');
+      expect(spec.info.version).toBe('11.24.1');
     });
 
     // WXYC/wxyc-shared#624: internal screens show the person's real name.
@@ -9306,6 +9306,7 @@ describe('OpenAPI Specification', () => {
       expect(onCover).toContain('That is, it is the accepted review of an intake item filed or finalized as that release, or the review in the latest print-log entry of such an item, or the review in the release\'s latest print-log entry that has no intake item. These are the reviews that list puts first.');
       expect(onCover).toContain('`false` in every other response: a single review, the write responses, and the unfiltered, `mine` and `intake_item_id` lists.');
       expect(onCover).toContain('It differs from `in_use`, which is true when the review is in use for any record: a review reached through `cited_album_id` is in use for the release it belongs to, and is on the cover here only once it has been chosen or printed for a copy of this release.');
+      expect(onCover).toContain('A print from the album page on a release with one logged copy is that copy\'s print, so it is never a second cover.');
       expect(flat(review.properties?.printed_revision_id?.description as string)).toBe('The revision of this review that was most recently printed; `null` if it has never been printed. When it is not the current revision, the printed slip is out of date. Its `id` is one of the entries of `GET /reviews/{id}/revisions`.');
       expect(flat(review.properties?.printed_at?.description as string)).toBe('When that print happened.');
       expect(review.properties).not.toHaveProperty('locked');
@@ -10417,6 +10418,12 @@ describe('OpenAPI Specification', () => {
     it('states what it prints and where it logs', () => {
       expect(flat(operation(path, 'post').description)).toContain(
         'Prints one review of a library release, whether or not the release came through intake. The review must be `typed`, `submitted`, and one that `GET /reviews?album_id=` returns for this release, a review reached through `cited_album_id` included. It prints the review as it reads now (its current revision) with the release\'s confirmed FCC notes, and appends an entry to the print log with no intake item. To print an intake item\'s accepted review, use `POST /intake/{id}/print`.',
+      );
+    });
+
+    it('says a print is for the release\'s single logged copy', () => {
+      expect(flat(operation(path, 'post').description)).toContain(
+        'When the release has exactly one filed or finalized intake item, the print is for that copy: the printed review becomes the item\'s accepted review (only the pointer moves, as `POST /intake/{id}/accept-review` does on a filed item), and the print-log entry carries the item. With no such item, or with more than one, the entry has no intake item as above. The review must still be one that `acceptReview`\'s rule allows for that item; otherwise the response is the existing 400.',
       );
     });
 
