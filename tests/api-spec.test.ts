@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.23.1');
+      expect(spec.info.version).toBe('11.24.0');
     });
 
     // WXYC/wxyc-shared#624: internal screens show the person's real name.
@@ -9335,6 +9335,51 @@ describe('OpenAPI Specification', () => {
       });
       const pathItem = (spec.paths as Record<string, { parameters?: unknown[] }>)['/reviews/{id}']!;
       expect(pathItem.parameters).toContainEqual({ $ref: '#/components/parameters/ReviewId' });
+    });
+
+    describe('GET /reviews/reviewers (#626)', () => {
+      const reviewer = () =>
+        spec.components.schemas.Reviewer as unknown as {
+          required: string[];
+          properties: Record<string, { type: string; nullable?: boolean }>;
+        };
+
+      it('declares the route with its grant sentence and the station-only note', () => {
+        const o = operation('/reviews/reviewers', 'get');
+        expect(o['x-wxyc-service']).toBe('backend-service');
+        expect(o.summary).toBe('The accounts that can write reviews');
+        const text = flat(o.description);
+        expect(text).toContain('Grant: `reviews: manage`');
+        expect(text).toContain('Every account whose membership role grants `reviews: write`, the same test `POST /intake/{id}/request` applies to `dj_id`');
+        expect(text).toContain('Sorted by `name`, case-insensitively.');
+        expect(text).toContain('For use inside the station only: `name` is a real name. Never show it on a public surface, and never send it to analytics, error reports or logs.');
+      });
+
+      it('returns a required reviewers array of Reviewer, with 401 and 403', () => {
+        const body = responseSchema('/reviews/reviewers', 'get', '200') as {
+          required: string[];
+          properties: { reviewers: unknown };
+        };
+        expect(body.required).toEqual(['reviewers']);
+        expect(body.properties.reviewers).toEqual({ type: 'array', items: ref('Reviewer') });
+        const responses = operation('/reviews/reviewers', 'get').responses ?? {};
+        expect(Object.keys(responses)).toEqual(expect.arrayContaining(['401', '403']));
+      });
+
+      it('pins Reviewer to two required, non-nullable strings', () => {
+        expect([...reviewer().required].sort()).toEqual(['id', 'name']);
+        for (const key of ['id', 'name']) {
+          expect(reviewer().properties[key]!.type).toBe('string');
+          expect(reviewer().properties[key]!.nullable).toBeUndefined();
+        }
+      });
+
+      it('gives Reviewer no on-air-name property', () => {
+        expect(Object.keys(reviewer().properties)).toEqual(['id', 'name']);
+        for (const key of Object.keys(reviewer().properties)) {
+          expect(key).not.toMatch(/dj_?name|handle/i);
+        }
+      });
     });
 
     it('states the draft-visibility rule on the read paths', () => {

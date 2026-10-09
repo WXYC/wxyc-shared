@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.23.1
+  version: 11.24.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4630,6 +4630,20 @@ components:
       type: string
       enum: [dj_name, real_name, none]
       description: How the author asked to be credited if the review is ever published.
+
+    Reviewer:
+      type: object
+      description: >
+        An account that can write reviews. For use inside the station only:
+        `name` is a real name.
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          description: The `auth_user.id`, the value to send as `dj_id` or `author_user_id`.
+        name:
+          type: string
+          description: The account's real name, falling back to the account name when it has none. Never the on-air name.
 
     Review:
       type: object
@@ -14906,6 +14920,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewConflictError'
+
+  /reviews/reviewers:
+    get:
+      x-wxyc-service: backend-service
+      summary: The accounts that can write reviews
+      description: >
+        Grant: `reviews: manage` (music directors and station managers).
+        Every account whose membership role grants `reviews: write`, the same
+        test `POST /intake/{id}/request` applies to `dj_id`, so an account on
+        this list can be asked to review. Sorted by `name`, case-insensitively.
+        For use inside the station only: `name` is a real name. Never show it
+        on a public surface, and never send it to analytics, error reports or
+        logs.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The reviewers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reviewers]
+                properties:
+                  reviewers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Reviewer'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'Caller lacks the `reviews: manage` permission'
 
   /reviews/{id}:
     parameters:
