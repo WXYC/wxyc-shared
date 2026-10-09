@@ -4787,9 +4787,12 @@ components:
             from `in_use`, which is true when the review is in use for any
             record: a review reached through `cited_album_id` is in use for
             the release it belongs to, and is on the cover here only once it
-            has been chosen or printed for a copy of this release. A print from the album page on a release
-            with one logged copy is that copy's print, so it is never a second
-            cover.
+            has been chosen or printed for a copy of this release. A print
+            from `POST /library/{id}/print` on a release with exactly one
+            filed or finalized intake item is that item's print, so it is
+            never a second cover. That is delivered by
+            WXYC/Backend-Service#3075; until it ships, such a print is the
+            release's latest print-log entry that has no intake item.
         printed_revision_id:
           type: integer
           nullable: true
@@ -17437,16 +17440,20 @@ paths:
         `typed`, `submitted`, and one that `GET /reviews?album_id=` returns
         for this release, a review reached through `cited_album_id` included.
         It prints the review as it reads now (its current revision) with the
-        release's confirmed FCC notes, and appends an entry to the print log
-        with no intake item. To print an intake item's accepted review, use
-        `POST /intake/{id}/print`. When the release has exactly one filed or
-        finalized intake item, the print is for that copy: the printed review
-        becomes the item's accepted review (only the pointer moves, as
-        `POST /intake/{id}/accept-review` does on a filed item), and the
-        print-log entry carries the item. With no such item, or with more than
-        one, the entry has no intake item as above. The review must still be
-        one that `acceptReview`'s rule allows for that item; otherwise the
-        response is the existing 400. Delivered by WXYC/Backend-Service#2865.
+        release's confirmed FCC notes and appends an entry to the print log.
+        That entry has no intake item, except as described below. To print an
+        intake item's accepted review, use `POST /intake/{id}/print`. When the
+        release has exactly one filed or finalized intake item, the print is
+        for that item: the printed review becomes the item's accepted review
+        (only the pointer moves, as `POST /intake/{id}/accept-review` does on
+        a filed item), and the entry carries the item. The review must then
+        belong to the item by the rule in the description of
+        `POST /intake/{id}/accept-review`; otherwise the response is the
+        existing 400. With no such item, or with more than one, the entry has
+        no intake item. Delivered by WXYC/Backend-Service#2865 (the print
+        with no intake item). The one-item rule is delivered by
+        WXYC/Backend-Service#3075; until it ships, the route appends every
+        entry with no intake item and leaves intake items untouched.
       security:
         - BearerAuth: []
       parameters:
