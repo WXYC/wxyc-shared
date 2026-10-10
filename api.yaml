@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.24.3
+  version: 11.24.4
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -15026,9 +15026,10 @@ paths:
         can set. When a `reviews: manage` caller who is not the author edits a
         review that has an `author_user_id`, the author is told by email (the
         email carries no review text), and the review's history shows the edit
-        under the music director's name. An edit that changes `fcc` on a
-        review that has been printed notifies the music directors, so they can
-        reprint. A draft the caller may not see is a 404. An edit of a
+        under the music director's name. An edit that changes `fcc` notifies
+        the other music directors, so they can reprint, when the review is
+        still the printed slip of at least one copy and the new line differs
+        from the one that slip carries. A draft the caller may not see is a 404. An edit of a
         submitted review writes a new revision under the editor's name. An
         edit of a draft writes none, and neither does a request that changes
         only `publish_*` or `credit`, or changes nothing.
