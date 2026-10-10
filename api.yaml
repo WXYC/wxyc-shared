@@ -13867,8 +13867,8 @@ paths:
       description: >
         The intake pool and every other state, ordered by `logged_at`
         descending, then `id` descending, except that when `state` is `filed`
-        or `finalized` the list is ordered by `filed_at` descending, then `id`
-        descending. The classic call-number queue reads `state=filed` with no
+        or `finalized` the list is ordered by `filed_at` descending (nulls
+        last), then `id` descending. The classic call-number queue reads `state=filed` with no
         `limit`, so its rows now arrive most recently filed first instead of
         most recently logged first; it still gets every filed record. `limit`
         and `active` are optional and combine with the other filters by AND.
