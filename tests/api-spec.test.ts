@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.24.5');
+      expect(spec.info.version).toBe('11.25.0');
     });
 
     // WXYC/wxyc-shared#624: internal screens show the person's real name.
@@ -4591,6 +4591,25 @@ describe('OpenAPI Specification', () => {
       expect(flat(list.description)).toContain('Delivered by WXYC/Backend-Service#2796 (`awaiting_acceptance`, `draft_authors` and the acceptance fields: WXYC/Backend-Service#2860).');
       expect(flat(list.description)).toContain('Each item carries `passes` and `draft_authors` for callers holding `reviews: manage`; the music director notice band in WXYC/dj-site#1764 reads `passes` from this list.');
       expect(flat(list.responses?.['400']?.description)).toContain('`awaiting_acceptance` is not `true` or `false`');
+    });
+
+    it('declares limit, active and the filing-time order on GET /intake (WXYC/wxyc-shared#642)', () => {
+      const list = operation('/intake', 'get') as Omit<Operation, 'parameters'> & {
+        parameters?: Array<{ name: string; in?: string; required?: boolean; schema?: { type?: string; minimum?: number; maximum?: number }; description?: string }>;
+      };
+      const limit = list.parameters?.find((x) => x.name === 'limit');
+      expect(limit).toMatchObject({ in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 100 } });
+      const active = list.parameters?.find((x) => x.name === 'active');
+      expect(active).toMatchObject({ in: 'query', required: false, schema: { type: 'boolean' } });
+      const activeText = flat(active?.description);
+      expect(activeText).toContain('`false` means the same as leaving it out.');
+      expect(activeText).toContain('Combined with `state=filed` or `state=finalized` it returns an empty list');
+      const text = flat(list.description);
+      expect(text).toContain('when `state` is `filed` or `finalized` the list is ordered by `filed_at` descending, then `id` descending.');
+      expect(text).toContain('The classic call-number queue reads `state=filed` with no `limit`, so its rows now arrive most recently filed first instead of most recently logged first; it still gets every filed record.');
+      const bad = flat(list.responses?.['400']?.description);
+      expect(bad).toContain('`limit` is not an integer from 1 to 100');
+      expect(bad).toContain('`active` is not `true` or `false`');
     });
 
     it('lets /release hand back a reviewed item', () => {

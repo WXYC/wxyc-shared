@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.24.5
+  version: 11.25.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -13866,7 +13866,13 @@ paths:
       summary: List intake items
       description: >
         The intake pool and every other state, ordered by `logged_at`
-        descending, then `id` descending. Grant: `reviews: read`. `state`
+        descending, then `id` descending, except that when `state` is `filed`
+        or `finalized` the list is ordered by `filed_at` descending, then `id`
+        descending. The classic call-number queue reads `state=filed` with no
+        `limit`, so its rows now arrive most recently filed first instead of
+        most recently logged first; it still gets every filed record. `limit`
+        and `active` are optional and combine with the other filters by AND.
+        Grant: `reviews: read`. `state`
         filters on `effective_state`, so a stale `requested` item (see `IntakeItemState`) is returned for
         `state=pool`, not `state=requested`. Each item carries `passes` and
         `draft_authors` for callers holding `reviews: manage`; the music
@@ -13892,6 +13898,28 @@ paths:
             zero, `accepted_review_id` null, and a state before `filed`.
             `false` means the same as leaving it out. It combines with `state`
             by AND. Delivered by WXYC/Backend-Service#2860.
+        - name: active
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: >
+            `true` returns only items whose `effective_state` is not `filed`
+            or `finalized`: the lanes before filing (`pool`, `requested`,
+            `checked_out`, `reviewed`). `false` means the same as leaving it
+            out. Combined with `state=filed` or `state=finalized` it returns an
+            empty list. Served by WXYC/Backend-Service#3092.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+          description: >
+            Returns at most this many items, after ordering. Absent means no
+            limit. With no `state` the `logged_at` ordering still applies.
+            Served by WXYC/Backend-Service#3092.
       responses:
         '200':
           description: The matching items
@@ -13902,7 +13930,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/IntakeItem'
         '400':
-          description: '`state` is not an `IntakeItemState` value, or `awaiting_acceptance` is not `true` or `false`'
+          description: '`state` is not an `IntakeItemState` value, `awaiting_acceptance` is not `true` or `false`, `active` is not `true` or `false`, or `limit` is not an integer from 1 to 100'
           content:
             application/json:
               schema:
