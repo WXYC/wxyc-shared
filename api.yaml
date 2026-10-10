@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.24.4
+  version: 11.24.5
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4634,7 +4634,7 @@ components:
     Reviewer:
       type: object
       description: >
-        An account that can write reviews. For use inside the station only:
+        An account that can be asked to review. For use inside the station only:
         `name` is a real name.
       required: [id, name]
       properties:
@@ -14174,8 +14174,8 @@ paths:
         state `pool`. `dj_id` must name an account holding `reviews: write`, or
         the request is a 400. A service account, such as the auto-DJ account,
         is the same 400 as an account without `reviews: write`. Delivered by
-        WXYC/Backend-Service#3076.
-        Delivered by WXYC/Backend-Service#2798.
+        WXYC/Backend-Service#2798 (the request) and WXYC/Backend-Service#3076
+        (service accounts).
       security:
         - BearerAuth: []
       requestBody:
@@ -14945,7 +14945,7 @@ paths:
   /reviews/reviewers:
     get:
       x-wxyc-service: backend-service
-      summary: The accounts that can write reviews
+      summary: The accounts that can be asked to review
       description: >
         Grant: `reviews: manage` (music directors and station managers).
         Delivered by WXYC/Backend-Service#3058. The accounts whose membership

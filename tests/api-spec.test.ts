@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.24.4');
+      expect(spec.info.version).toBe('11.24.5');
     });
 
     // WXYC/wxyc-shared#624: internal screens show the person's real name.
@@ -9353,7 +9353,8 @@ describe('OpenAPI Specification', () => {
     describe('POST /intake/{id}/request service accounts (#631)', () => {
       it('says a service account named as dj_id gets the same 400', () => {
         const text = flat(operation('/intake/{id}/request', 'post').description);
-        expect(text).toContain('A service account, such as the auto-DJ account, is the same 400 as an account without `reviews: write`. Delivered by WXYC/Backend-Service#3076.');
+        expect(text).toContain('A service account, such as the auto-DJ account, is the same 400 as an account without `reviews: write`. Delivered by WXYC/Backend-Service#2798 (the request) and WXYC/Backend-Service#3076 (service accounts).');
+        expect(text).not.toContain('Delivered by WXYC/Backend-Service#3076. Delivered by');
       });
     });
 
@@ -9367,7 +9368,8 @@ describe('OpenAPI Specification', () => {
       it('declares the route with its grant sentence and the station-only note', () => {
         const o = operation('/reviews/reviewers', 'get');
         expect(o['x-wxyc-service']).toBe('backend-service');
-        expect(o.summary).toBe('The accounts that can write reviews');
+        expect(o.summary).toBe('The accounts that can be asked to review');
+        expect(o.summary).not.toContain('can write reviews');
         expectBackendRoute('/reviews/reviewers', 'get', { grant: 'Grant: `reviews: manage`', issue: 'WXYC/Backend-Service#3058' });
         expect((o as { security?: unknown }).security).toEqual([{ BearerAuth: [] }]);
         const text = flat(o.description);
@@ -9378,6 +9380,12 @@ describe('OpenAPI Specification', () => {
         expect(text).toContain('Delivered by WXYC/Backend-Service#3058');
         expect(text).toContain('Sorted by `name`, case-insensitively.');
         expect(text).toContain('For use inside the station only: `name` is a real name. Never show it on a public surface, and never send it to analytics, error reports or logs.');
+      });
+
+      it('describes a Reviewer as an account that can be asked to review', () => {
+        const d = flat((spec.components.schemas.Reviewer as unknown as { description: string }).description);
+        expect(d).toContain('An account that can be asked to review. For use inside the station only: `name` is a real name.');
+        expect(d).not.toContain('can write reviews');
       });
 
       it('returns a required reviewers array of Reviewer, with 401 and 403', () => {
