@@ -4602,10 +4602,14 @@ describe('OpenAPI Specification', () => {
       const active = list.parameters?.find((x) => x.name === 'active');
       expect(active).toMatchObject({ in: 'query', required: false, schema: { type: 'boolean' } });
       const activeText = flat(active?.description);
+      expect(activeText).toContain('`true` returns only items whose `effective_state` is not `filed` or `finalized`');
       expect(activeText).toContain('`false` means the same as leaving it out.');
       expect(activeText).toContain('Combined with `state=filed` or `state=finalized` it returns an empty list');
       const text = flat(list.description);
-      expect(text).toContain('when `state` is `filed` or `finalized` the list is ordered by `filed_at` descending, then `id` descending.');
+      expect(text).toContain('when `state` is `filed` or `finalized` the list is ordered by `filed_at` descending (nulls last), then `id` descending.');
+      const limitText = flat(limit?.description);
+      expect(limitText).toContain('Returns at most this many items, after ordering.');
+      expect(limitText).toContain('Absent means no limit.');
       expect(text).toContain('The classic call-number queue reads `state=filed` with no `limit`, so its rows now arrive most recently filed first instead of most recently logged first; it still gets every filed record.');
       const bad = flat(list.responses?.['400']?.description);
       expect(bad).toContain('`limit` is not an integer from 1 to 100');
