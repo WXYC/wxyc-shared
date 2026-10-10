@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.24.3');
+      expect(spec.info.version).toBe('11.24.4');
     });
 
     // WXYC/wxyc-shared#624: internal screens show the person's real name.
@@ -10024,7 +10024,8 @@ describe('OpenAPI Specification', () => {
       const patch = text('/reviews/{id}', 'patch');
       expect(patch).toContain('Who may do this: the author at any time, draft or submitted, printed or not; `reviews: manage` for any review. The author is the account in `author_user_id`, including the linked account of an on-behalf review.');
       expect(patch).toContain('Only the author may change `publish_website`, `publish_apps`, `publish_instagram` or `credit`. A request from anyone else that carries any of those keys, a `reviews: manage` caller included, is a 403. A review with no `author_user_id` therefore has no consent anyone can set.');
-      expect(patch).toContain("When a `reviews: manage` caller who is not the author edits a review that has an `author_user_id`, the author is told by email (the email carries no review text), and the review's history shows the edit under the music director's name. An edit that changes `fcc` on a review that has been printed notifies the music directors, so they can reprint.");
+      expect(patch).toContain("When a `reviews: manage` caller who is not the author edits a review that has an `author_user_id`, the author is told by email (the email carries no review text), and the review's history shows the edit under the music director's name. An edit that changes `fcc` notifies the other music directors, so they can reprint, when the review is still the printed slip of at least one copy and the new line differs from the one that slip carries.");
+      expect(patch).not.toContain('on a review that has been printed notifies');
       expect(flat(operation('/reviews/{id}', 'patch').responses?.['403']?.description)).toBe(
         'Caller lacks `reviews: write`, may not edit this review, or sent `publish_*` or `credit` for a review they are not the author of'
       );
