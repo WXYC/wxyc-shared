@@ -9376,6 +9376,7 @@ describe('OpenAPI Specification', () => {
         expect(text).toContain('Grant: `reviews: manage`');
         expect(text).toContain('The accounts whose membership role grants `reviews: write`, other than banned accounts, so an account on this list can be asked to review.');
         expect(text).not.toContain('the same test');
+        expect(text).not.toContain('can write reviews');
         expect(text).toContain('Service accounts, such as the auto-DJ account, are left out. Delivered by WXYC/Backend-Service#3076.');
         expect(text).toContain('Delivered by WXYC/Backend-Service#3058');
         expect(text).toContain('Sorted by `name`, case-insensitively.');
