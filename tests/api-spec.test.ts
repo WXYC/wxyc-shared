@@ -222,7 +222,20 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.25.0');
+      expect(spec.info.version).toBe('11.25.1');
+    });
+
+    // WXYC/wxyc-shared#644: the place unreviewed records wait is "the review
+    // shelf"; `pool` survives only as a backticked state value.
+    it('keeps the old words for the review shelf out of the /intake prose', () => {
+      for (const [path, item] of Object.entries(spec.paths)) {
+        if (!path.startsWith('/intake')) continue;
+        for (const [method, op] of Object.entries(item as Record<string, Operation>)) {
+          const prose = `${op.summary ?? ''}\n${op.description ?? ''}`.replace(/`[^`]*`/g, '');
+          expect(prose, `${method} ${path}`).not.toMatch(/\bpool(ed)?\b/i);
+          expect(prose, `${method} ${path}`).not.toMatch(/\bpile\b/i);
+        }
+      }
     });
 
     // WXYC/wxyc-shared#624: internal screens show the person's real name.
