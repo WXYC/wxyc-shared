@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.24.5
+  version: 11.24.6
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -13865,7 +13865,7 @@ paths:
       x-wxyc-service: backend-service
       summary: List intake items
       description: >
-        The intake pool and every other state, ordered by `logged_at`
+        Items on the review shelf and every other state, ordered by `logged_at`
         descending, then `id` descending. Grant: `reviews: read`. `state`
         filters on `effective_state`, so a stale `requested` item (see `IntakeItemState`) is returned for
         `state=pool`, not `state=requested`. Each item carries `passes` and
@@ -13913,7 +13913,7 @@ paths:
           description: 'Caller lacks the `reviews: read` permission'
     post:
       x-wxyc-service: backend-service
-      summary: Log an item into the intake pool
+      summary: Log an item onto the review shelf
       description: >
         A music director logs a physical copy the station holds and wants
         reviewed. Grant: `reviews: manage`. Delivered by
@@ -14071,7 +14071,7 @@ paths:
       x-wxyc-service: backend-service
       summary: Check an intake item out
       description: >
-        A DJ takes the item from the pool to review it. Grant: `reviews: write`.
+        A DJ takes the item from the review shelf to review it. Grant: `reviews: write`.
         Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
@@ -14231,7 +14231,7 @@ paths:
       x-wxyc-service: backend-service
       summary: Withdraw a review request
       description: >
-        Returns an effective `requested` item to the pool. A `requested` row
+        Returns an effective `requested` item to the review shelf. A `requested` row
         past its 7-day lapse is effectively `pool` and answers 409
         `state_changed`. Grant: `reviews: manage`. Delivered by WXYC/Backend-Service#2798.
       security:
@@ -14392,7 +14392,7 @@ paths:
       x-wxyc-service: backend-service
       summary: Pass on a review request
       description: >
-        The requested DJ declines, returning the item to the pool and recording
+        The requested DJ declines, returning the item to the review shelf and recording
         a pass. Grant: `reviews: write`, and only the requested DJ. Precedence:
         a caller without the `reviews` grant the route requires gets a 403 in
         any state; otherwise an item not in effective state `requested` answers
