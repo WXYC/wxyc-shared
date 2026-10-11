@@ -228,13 +228,13 @@ describe('OpenAPI Specification', () => {
     // WXYC/wxyc-shared#644: the place unreviewed records wait is "the review
     // shelf"; `pool` survives only as a backticked state value.
     it('keeps the old words for the review shelf out of the /intake prose', () => {
-      for (const [path, item] of Object.entries(spec.paths)) {
-        if (!path.startsWith('/intake')) continue;
-        for (const [method, op] of Object.entries(item as Record<string, Operation>)) {
-          const prose = `${op.summary ?? ''}\n${op.description ?? ''}`.replace(/`[^`]*`/g, '');
-          expect(prose, `${method} ${path}`).not.toMatch(/\bpool(ed)?\b/i);
-          expect(prose, `${method} ${path}`).not.toMatch(/\bpile\b/i);
-        }
+      const intakeOperations = operations().filter(([, path]) => path.startsWith('/intake'));
+      // A renamed or removed /intake path must not turn this guard into a no-op.
+      expect(intakeOperations.length).toBeGreaterThan(0);
+      for (const [method, path, op] of intakeOperations) {
+        const prose = `${op.summary ?? ''}\n${op.description ?? ''}`.replace(/`[^`]*`/g, '');
+        expect(prose, `${method} ${path}`).not.toMatch(/\bpool(ed)?\b/i);
+        expect(prose, `${method} ${path}`).not.toMatch(/\bpile\b/i);
       }
     });
 
