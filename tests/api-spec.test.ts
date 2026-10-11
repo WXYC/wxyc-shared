@@ -4203,14 +4203,27 @@ describe('OpenAPI Specification', () => {
         expect(text).toContain('It stays true after filing; screens show the format as Digital until the record is filed.');
       });
 
-      it('declares NewIntakeItemRequest.digital as optional, defaulting to false, with format_id no longer required', () => {
-        expect(request().properties?.digital).toMatchObject({ type: 'boolean', default: false });
+      // The #297 trap: a schema-level `default` makes openapi-typescript emit
+      // `digital: boolean` (required) on the request a client constructs, so a
+      // body that omits it, which the contract calls valid, stops compiling.
+      // The default lives in prose, as it does for include_tracks. The emitted
+      // `digital?:` is pinned in codegen-output-paths.test.ts.
+      it('declares NewIntakeItemRequest.digital as an optional boolean with no schema-level default, and format_id no longer required', () => {
+        expect(request().properties?.digital?.type).toBe('boolean');
+        expect(request().properties?.digital).not.toHaveProperty('default');
         expect(request().required).not.toContain('digital');
         expect(request().required).not.toContain('format_id');
         expect(request().required).toEqual(expect.arrayContaining(['artist_name', 'album_title']));
         const text = flat(request().properties?.format_id?.description);
         expect(text).toContain('Required unless `digital` is true.');
         expect(text).toContain('Must be omitted when `digital` is true, because the server then stores the CD-R format itself.');
+      });
+
+      it('describes NewIntakeItemRequest.digital: files not a disc, no format_id, and false when omitted', () => {
+        const text = flat(request().properties?.digital?.description);
+        expect(text).toContain('True when the album reached the station as files, not a disc.');
+        expect(text).toContain('`format_id` must then be omitted.');
+        expect(text).toContain('Defaults to false when omitted.');
       });
 
       it('declares the POST /intake 400 and 409 refusals as ApiErrorResponse', () => {
@@ -4231,10 +4244,62 @@ describe('OpenAPI Specification', () => {
         },
       );
 
-      it('adds the digital exception to the checked_out_by description', () => {
-        expect(flat(item().properties?.checked_out_by?.description)).toContain(
-          'A digital album is the exception: its holder is cleared when its review is chosen (`POST /intake/{id}/accept-review`), because nothing was lent out.',
-        );
+      it('adds the digital exception to the checked_out_by description, right after the holder-keeps-it sentences', () => {
+        const text = flat(item().properties?.checked_out_by?.description);
+        const exception = 'A digital album is the exception: when its review is chosen (`POST /intake/{id}/accept-review`) both `checked_out_by` and `checked_out_at` are cleared, because nothing was lent out.';
+        expect(text).toContain(exception);
+        // It must read as an exception to "keeps its holder", not to the
+        // deleted-account sentence that follows.
+        const keeps = text.indexOf('A `reviewed` item keeps its holder until the holder or a music director returns it (`POST /intake/{id}/release`) or the item is filed, which clears it.');
+        const deleted = text.indexOf('`null` while `checked_out_at` is set');
+        expect(keeps).toBeGreaterThan(-1);
+        expect(text.indexOf(exception)).toBeGreaterThan(keeps);
+        expect(deleted).toBeGreaterThan(text.indexOf(exception));
+      });
+
+      // The three descriptions that called every intake item a physical copy
+      // the station holds, which a digital album is not.
+      it('words IntakeItem, POST /intake and checked_out_by so they are true of a disc and of an album that arrived as files', () => {
+        const schemaText = flat((spec.components.schemas.IntakeItem as { description?: string }).description);
+        expect(schemaText).toContain('One record a music director logged and that is waiting for a review (WXYC/Backend-Service#2791): either a disc the station holds, or an album that arrived as files (`digital`), which a music director burns onto CD-R once its review is chosen.');
+        const post = flat(operation('/intake', 'post').description);
+        expect(post).toContain('A music director logs a record the station wants reviewed: either a disc the station holds, or an album that arrived as files (`digital`), which a music director burns onto CD-R once its review is chosen.');
+        const holder = flat(item().properties?.checked_out_by?.description);
+        expect(holder).toContain('Who holds the record, set on checkout: the DJ who has the disc, or for a digital album the DJ who claimed it to review.');
+        for (const text of [schemaText, post, holder]) {
+          expect(text).not.toContain('physical copy');
+        }
+      });
+
+      // WXYC/wxyc-shared#647: the patch takes the create request's fields
+      // except `digital`, and refuses a `format_id` on a digital album.
+      it('says IntakeItemPatch takes any NewIntakeItemRequest field except digital, which cannot change once logged', () => {
+        const patch = spec.components.schemas.IntakeItemPatch as { description?: string; properties?: Record<string, unknown> };
+        expect(patch.properties).not.toHaveProperty('digital');
+        const text = flat(patch.description);
+        expect(text).toContain('Any subset of the `NewIntakeItemRequest` fields except `digital`, plus setting or clearing the citation.');
+        expect(text).toContain('`digital` can\'t be changed once an item is logged: an item logged as the wrong kind is deleted and logged again.');
+      });
+
+      it('says PATCH /intake/{id} refuses a format_id on a digital album with a 400, because its format is CD-R until it is filed', () => {
+        const patch = flat((spec.components.schemas.IntakeItemPatch as { description?: string }).description);
+        expect(patch).toContain('A `format_id` is refused with a 400 on an item whose `digital` is true, because a digital album\'s format is CD-R until it is filed.');
+        const o = operation('/intake/{id}', 'patch');
+        expect(responseSchema('/intake/{id}', 'patch', '400')).toEqual(ref('ApiErrorResponse'));
+        expect(flat(o.responses?.['400']?.description)).toContain('a `format_id` sent for an item whose `digital` is true');
+      });
+
+      // Each behaviour names the open ticket that delivers it, the way the
+      // release operation names #2860 beside #2798, so a reader does not take
+      // a digital behaviour for one that is already deployed.
+      it.each([
+        ['/intake', 'post', 'Delivered by WXYC/Backend-Service#2796 (digital albums: WXYC/Backend-Service#3100).'],
+        ['/intake/{id}', 'patch', 'Delivered by WXYC/Backend-Service#2796 (citation rules: WXYC/Backend-Service#2797; refusing a `format_id` on a digital album: WXYC/Backend-Service#3100).'],
+        ['/intake/{id}/checkout', 'post', 'Delivered by WXYC/Backend-Service#2798 (the music-director email for a digital album: WXYC/Backend-Service#3102).'],
+        ['/intake/{id}/accept', 'post', 'Delivered by WXYC/Backend-Service#2798 (the music-director email for a digital album: WXYC/Backend-Service#3102).'],
+        ['/intake/{id}/accept-review', 'post', 'Delivered by WXYC/Backend-Service#2860 (clearing a digital album\'s holder: WXYC/Backend-Service#3101).'],
+      ])('names the ticket that delivers the digital behaviour at %s %s', (path, method, sentence) => {
+        expect(flat(operation(path, method).description)).toContain(sentence);
       });
     });
 
