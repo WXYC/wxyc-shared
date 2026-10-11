@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.25.1');
+      expect(spec.info.version).toBe('11.26.0');
     });
 
     // WXYC/wxyc-shared#644: the place unreviewed records wait is "the review
@@ -3985,7 +3985,7 @@ describe('OpenAPI Specification', () => {
       expect(acceptedDesc).toContain('It is a review of the item, of the release the item was filed as, or of the release the item cites.');
       expect(acceptedDesc).toContain('`null` until one is accepted, and again if the accepted review is deleted or the citation it was chosen through is changed or cleared.');
       // Decision 39: overdue follows the checkout, not the state.
-      expect(flat(item.properties?.overdue?.description)).toBe('True while the record\'s checkout is more than 14 days old (`checked_out_at`), in `checked_out` or `reviewed`; a reviewed record that has been returned has no checkout and is never overdue.');
+      expect(flat(item.properties?.overdue?.description)).toBe('True while the record\'s checkout is more than 14 days old (`checked_out_at`), in `checked_out` or `reviewed`; a reviewed record that has been returned has no checkout and is never overdue. A digital album\'s holder is cleared when its review is chosen, so its flag can only be set while it is still being reviewed.');
       // Decision 36: accepting a review clears a pending request.
       expect(flat(item.properties?.requested_dj_id?.description)).toContain('later transitions may leave it set (a checkout clears the request\'s fields, and accepting a review withdraws a pending request)');
       // Decision 38: a deleted holder on a `reviewed` item is returnable.
@@ -4186,6 +4186,56 @@ describe('OpenAPI Specification', () => {
     it('declares the patch and delete 409 as IntakeConflictError', () => {
       expect(responseSchema('/intake/{id}', 'patch', '409')).toEqual(ref('IntakeConflictError'));
       expect(responseSchema('/intake/{id}', 'delete', '409')).toEqual(ref('IntakeConflictError'));
+    });
+
+    describe('digital intake items (WXYC/wxyc-shared#647)', () => {
+      type Prop = { type?: string; nullable?: boolean; default?: unknown; description?: string };
+      const item = () => spec.components.schemas.IntakeItem as { required?: string[]; properties?: Record<string, Prop> };
+      const request = () => spec.components.schemas.NewIntakeItemRequest as { required?: string[]; properties?: Record<string, Prop> };
+
+      it('declares IntakeItem.digital as a required, non-nullable boolean that stays true after filing', () => {
+        expect(item().properties?.digital?.type).toBe('boolean');
+        expect(item().properties?.digital?.nullable).toBeUndefined();
+        expect(item().required).toContain('digital');
+        const text = flat(item().properties?.digital?.description);
+        expect(text).toContain('True when the album reached the station as files, not a disc.');
+        expect(text).toContain('`format_id` is the CD-R format from the moment it is logged.');
+        expect(text).toContain('It stays true after filing; screens show the format as Digital until the record is filed.');
+      });
+
+      it('declares NewIntakeItemRequest.digital as optional, defaulting to false, with format_id no longer required', () => {
+        expect(request().properties?.digital).toMatchObject({ type: 'boolean', default: false });
+        expect(request().required).not.toContain('digital');
+        expect(request().required).not.toContain('format_id');
+        expect(request().required).toEqual(expect.arrayContaining(['artist_name', 'album_title']));
+        const text = flat(request().properties?.format_id?.description);
+        expect(text).toContain('Required unless `digital` is true.');
+        expect(text).toContain('Must be omitted when `digital` is true, because the server then stores the CD-R format itself.');
+      });
+
+      it('declares the POST /intake 400 and 409 refusals as ApiErrorResponse', () => {
+        expect(responseSchema('/intake', 'post', '400')).toEqual(ref('ApiErrorResponse'));
+        expect(responseSchema('/intake', 'post', '409')).toEqual(ref('ApiErrorResponse'));
+        const o = operation('/intake', 'post');
+        const bad = flat(o.responses?.['400']?.description);
+        expect(bad).toContain('`digital` is true and `format_id` is also sent');
+        expect(bad).toContain('`digital` is false or absent and `format_id` is missing');
+        expect(flat(o.responses?.['409']?.description)).toContain('`digital` is true and the server has no format named `cdr` to store');
+      });
+
+      it.each(['/intake/{id}/checkout', '/intake/{id}/accept'])(
+        'says taking a digital album at %s claims it and emails the music directors',
+        (path) => {
+          const text = flat(operation(path, 'post').description);
+          expect(text).toContain('For a digital album, taking it is how a DJ claims it to review, and the server then emails the music directors so they can send the files.');
+        },
+      );
+
+      it('adds the digital exception to the checked_out_by description', () => {
+        expect(flat(item().properties?.checked_out_by?.description)).toContain(
+          'A digital album is the exception: its holder is cleared when its review is chosen (`POST /intake/{id}/accept-review`), because nothing was lent out.',
+        );
+      });
     });
 
     it('filters the list on effective_state and says passes reaches reviews: manage callers', () => {
@@ -4550,7 +4600,9 @@ describe('OpenAPI Specification', () => {
         // keeps the state, and that the holder fields stay as they are.
         expect(text).toContain('From effective state `pool`, `requested` or `checked_out` the item becomes `reviewed`.');
         expect(text).toContain('the accepted review is swapped and the state stays');
-        expect(text).toContain('`checked_out_by` and `checked_out_at` are left as they are, so an item accepted while a DJ still has it checked out is `reviewed` and still names its holder. A pending request is withdrawn: `requested_dj_id` and `requested_at` are cleared, since the record no longer needs a review from that DJ, and no notice is sent.');
+        expect(text).toContain('`checked_out_by` and `checked_out_at` are left as they are, so an item accepted while a DJ still has it checked out is `reviewed` and still names its holder, except for a digital album: both are cleared, because nothing was lent out.');
+        expect(text).toContain('A pending request is withdrawn: `requested_dj_id` and `requested_at` are cleared, since the record no longer needs a review from that DJ, and no notice is sent.');
+        expect(text).toContain('A reviewed digital album therefore has no holder, its `overdue` is false, and `POST /intake/{id}/release` refuses it with the existing 409 `state_changed`.');
         expect(text).not.toContain('The holder fields');
         expect(text).toContain("This is not `POST /intake/{id}/accept`, which is the requested DJ accepting a music director's request.");
         expect(flat(o.responses?.['400']?.description)).toContain('a `review_id` that names no review, a draft, a review of another record, or a handwritten review reached through the citation');
