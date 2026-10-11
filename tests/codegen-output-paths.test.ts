@@ -247,6 +247,26 @@ describe("generated request types stay constructible (#297)", () => {
   });
 });
 
+// Same trap, same guard, for `NewIntakeItemRequest.digital` (#647). A music
+// director logging a disc sends `{ artist_name, album_title, format_id }` with
+// no `digital`; the contract calls that body valid (omitted means false). With
+// a schema-level `default: false` the generator emits `digital: boolean` and
+// that body fails tsc with TS2741 in the DJ site's logging form. The default
+// lives in prose; the spec-level guard is in api-spec.test.ts.
+describe("generated intake request type stays constructible (#647, #297)", () => {
+  const requestBlock = () => schemaBlock("NewIntakeItemRequest");
+
+  it("emits digital as optional", () => {
+    expect(requestBlock()).toMatch(/\bdigital\?:/);
+  });
+
+  it("keeps artist_name required", () => {
+    // Guards the assertion above against passing for the wrong reason, e.g. a
+    // regex that matches because the whole block vanished.
+    expect(requestBlock()).toMatch(/\n\s+artist_name: /);
+  });
+});
+
 // Same trap, same guard, for the #303 response-side marker. `include_tracks`
 // was bitten by `default: false` forcing a non-optional emit despite being
 // absent from `required`; `tracks_contract_version` carries the identical

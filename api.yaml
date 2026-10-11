@@ -4154,8 +4154,10 @@ components:
     IntakeItem:
       type: object
       description: >
-        One physical copy the station holds, logged by a music director and
-        waiting for a review (WXYC/Backend-Service#2791). Its three DJ-name
+        One record a music director logged and that is waiting for a review
+        (WXYC/Backend-Service#2791): either a disc the station holds, or an
+        album that arrived as files (`digital`), which a music director burns
+        onto CD-R once its review is chosen. Its three DJ-name
         fields (`requested_dj_name`, `checked_out_by_name`,
         `passes[].dj_name`) hold the person's real name as shown inside the
         station, falling back to their account name (on-air handle, else
@@ -4281,20 +4283,21 @@ components:
           type: string
           nullable: true
           description: >
-            Who holds the physical copy, set on checkout. It stays set when a
-            review is accepted, so a `reviewed` item can still name the DJ who
-            has the copy: deleting the accepted review of an item not yet
-            filed returns it to `checked_out` with the same holder, or to
+            Who holds the record, set on checkout: the DJ who has the disc, or
+            for a digital album the DJ who claimed it to review. It stays set
+            when a review is accepted, so a `reviewed` item can still name the
+            DJ who has the copy: deleting the accepted review of an item not
+            yet filed returns it to `checked_out` with the same holder, or to
             `pool` when there is none. A `reviewed` item keeps its holder until
             the holder or a music director returns it
             (`POST /intake/{id}/release`) or the item is filed, which clears
-            it. Read it together with `state`, not as proof of a live
-            checkout. `null` while `checked_out_at` is set, in `checked_out`
-            or `reviewed`, means the holder's account has since been deleted,
-            shown to MDs as "holder removed"; an MD may release the item.
-            A digital album is the exception: its holder is cleared when its
-            review is chosen (`POST /intake/{id}/accept-review`), because
-            nothing was lent out.
+            it. A digital album is the exception: when its review is chosen
+            (`POST /intake/{id}/accept-review`) both `checked_out_by` and
+            `checked_out_at` are cleared, because nothing was lent out. Read it
+            together with `state`, not as proof of a live checkout. `null`
+            while `checked_out_at` is set, in `checked_out` or `reviewed`,
+            means the holder's account has since been deleted, shown to MDs as
+            "holder removed"; an MD may release the item.
         checked_out_by_name:
           type: string
           nullable: true
@@ -4448,10 +4451,9 @@ components:
             is true, because the server then stores the CD-R format itself.
         digital:
           type: boolean
-          default: false
           description: >
             True when the album reached the station as files, not a disc.
-            `format_id` must then be omitted.
+            `format_id` must then be omitted. Defaults to false when omitted.
         discogs_release_id:
           type: integer
           nullable: true
@@ -4459,8 +4461,12 @@ components:
     IntakeItemPatch:
       type: object
       description: >
-        Any subset of the `NewIntakeItemRequest` fields, plus setting or
-        clearing the citation. `cited_album_id` and `cited_submission_id` are
+        Any subset of the `NewIntakeItemRequest` fields except `digital`, plus
+        setting or clearing the citation. `digital` can't be changed once an
+        item is logged: an item logged as the wrong kind is deleted and logged
+        again. A `format_id` is refused with a 400 on an item whose `digital`
+        is true, because a digital album's format is CD-R until it is filed.
+        `cited_album_id` and `cited_submission_id` are
         mutually exclusive as non-null values (WXYC/Backend-Service#2797's
         table CHECK enforces this in storage): a patch may not carry both as
         non-null at once, but may set one while explicitly clearing the
@@ -13965,9 +13971,11 @@ paths:
       x-wxyc-service: backend-service
       summary: Log an item onto the review shelf
       description: >
-        A music director logs a physical copy the station holds and wants
-        reviewed. Grant: `reviews: manage`. Delivered by
-        WXYC/Backend-Service#2796.
+        A music director logs a record the station wants reviewed: either a
+        disc the station holds, or an album that arrived as files (`digital`),
+        which a music director burns onto CD-R once its review is chosen.
+        Grant: `reviews: manage`. Delivered by WXYC/Backend-Service#2796
+        (digital albums: WXYC/Backend-Service#3100).
       security:
         - BearerAuth: []
       requestBody:
@@ -14041,9 +14049,11 @@ paths:
       summary: Edit an intake item before it is filed
       description: >
         Grant: `reviews: manage`. See `IntakeItemPatch` for the citation
-        switch. Refused with `already_filed` once the item is filed.
-        Delivered by WXYC/Backend-Service#2796 (citation rules:
-        WXYC/Backend-Service#2797).
+        switch, and for why `digital` is not a patch field and a `format_id`
+        is refused on a digital album. Refused with `already_filed` once the
+        item is filed. Delivered by WXYC/Backend-Service#2796 (citation rules:
+        WXYC/Backend-Service#2797; refusing a `format_id` on a digital album:
+        WXYC/Backend-Service#3100).
       security:
         - BearerAuth: []
       requestBody:
@@ -14060,7 +14070,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
         '400':
-          description: Validation failure, a malformed id, or both citations set non-null
+          description: Validation failure, a malformed id, both citations set non-null, or a `format_id` sent for an item whose `digital` is true
           content:
             application/json:
               schema:
@@ -14133,7 +14143,8 @@ paths:
         A DJ takes the item from the review shelf to review it. Grant: `reviews: write`.
         For a digital album, taking it is how a DJ claims it to review, and
         the server then emails the music directors so they can send the files.
-        Delivered by WXYC/Backend-Service#2798.
+        Delivered by WXYC/Backend-Service#2798 (the music-director email for a
+        digital album: WXYC/Backend-Service#3102).
       security:
         - BearerAuth: []
       responses:
@@ -14342,7 +14353,8 @@ paths:
         403. For a digital album, taking it is how a DJ claims it to review,
         and the server then emails the music directors so they can send the
         files. To accept a review, see `POST /intake/{id}/accept-review`.
-        Delivered by WXYC/Backend-Service#2798.
+        Delivered by WXYC/Backend-Service#2798 (the music-director email for a
+        digital album: WXYC/Backend-Service#3102).
       security:
         - BearerAuth: []
       responses:
@@ -14416,7 +14428,8 @@ paths:
         no notice is sent. This is not
         `POST /intake/{id}/accept`, which is the requested DJ accepting a
         music director's request. No 409: `state_changed` is not used here.
-        Delivered by WXYC/Backend-Service#2860.
+        Delivered by WXYC/Backend-Service#2860 (clearing a digital album's
+        holder: WXYC/Backend-Service#3101).
       security:
         - BearerAuth: []
       requestBody:
