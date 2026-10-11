@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.25.1
+  version: 11.26.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4175,6 +4175,7 @@ components:
         - record_label
         - label_id
         - format_id
+        - digital
         - discogs_release_id
         - state
         - effective_state
@@ -4215,6 +4216,14 @@ components:
           nullable: true
         format_id:
           type: integer
+        digital:
+          type: boolean
+          description: >
+            True when the album reached the station as files, not a disc. A
+            music director burns it onto CD-R once a review is chosen for it,
+            so `format_id` is the CD-R format from the moment it is logged. It
+            stays true after filing; screens show the format as Digital until
+            the record is filed.
         discogs_release_id:
           type: integer
           nullable: true
@@ -4236,7 +4245,9 @@ components:
             True while the record's checkout is more than 14 days old
             (`checked_out_at`), in `checked_out` or `reviewed`; a reviewed
             record that has been returned has no checkout and is never
-            overdue.
+            overdue. A digital album's holder is cleared when its review is
+            chosen, so its flag can only be set while it is still being
+            reviewed.
         logged_at:
           type: string
           format: date-time
@@ -4281,6 +4292,9 @@ components:
             checkout. `null` while `checked_out_at` is set, in `checked_out`
             or `reviewed`, means the holder's account has since been deleted,
             shown to MDs as "holder removed"; an MD may release the item.
+            A digital album is the exception: its holder is cleared when its
+            review is chosen (`POST /intake/{id}/accept-review`), because
+            nothing was lent out.
         checked_out_by_name:
           type: string
           nullable: true
@@ -4413,7 +4427,6 @@ components:
       required:
         - artist_name
         - album_title
-        - format_id
       properties:
         artist_name:
           type: string
@@ -4430,6 +4443,15 @@ components:
           nullable: true
         format_id:
           type: integer
+          description: >
+            Required unless `digital` is true. Must be omitted when `digital`
+            is true, because the server then stores the CD-R format itself.
+        digital:
+          type: boolean
+          default: false
+          description: >
+            True when the album reached the station as files, not a disc.
+            `format_id` must then be omitted.
         discogs_release_id:
           type: integer
           nullable: true
@@ -13962,7 +13984,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/IntakeItem'
         '400':
-          description: Validation failure
+          description: >-
+            Validation failure, including `digital` is true and `format_id`
+            is also sent, and `digital` is false or absent and `format_id`
+            is missing
           content:
             application/json:
               schema:
@@ -13971,6 +13996,12 @@ paths:
           description: No bearer token
         '403':
           description: 'Caller lacks the `reviews: manage` permission'
+        '409':
+          description: '`digital` is true and the server has no format named `cdr` to store'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /intake/{id}:
     parameters:
@@ -14100,6 +14131,8 @@ paths:
       summary: Check an intake item out
       description: >
         A DJ takes the item from the review shelf to review it. Grant: `reviews: write`.
+        For a digital album, taking it is how a DJ claims it to review, and
+        the server then emails the music directors so they can send the files.
         Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
@@ -14306,7 +14339,9 @@ paths:
         without the `reviews` grant the route requires gets a 403 in any state;
         otherwise an item not in effective state `requested` answers 409
         `state_changed`; otherwise a caller who is not the requested DJ gets a
-        403. To accept a review, see `POST /intake/{id}/accept-review`.
+        403. For a digital album, taking it is how a DJ claims it to review,
+        and the server then emails the music directors so they can send the
+        files. To accept a review, see `POST /intake/{id}/accept-review`.
         Delivered by WXYC/Backend-Service#2798.
       security:
         - BearerAuth: []
@@ -14371,7 +14406,11 @@ paths:
         the state stays; this is how a review is replaced, and the music
         director would normally reprint. `checked_out_by` and `checked_out_at`
         are left as they are, so an item accepted while a DJ still has it
-        checked out is `reviewed` and still names its holder. A pending
+        checked out is `reviewed` and still names its holder, except for a
+        digital album: both are cleared, because nothing was lent out. A
+        reviewed digital album therefore has no holder, its `overdue` is
+        false, and `POST /intake/{id}/release` refuses it with the existing
+        409 `state_changed`. A pending
         request is withdrawn: `requested_dj_id` and `requested_at` are
         cleared, since the record no longer needs a review from that DJ, and
         no notice is sent. This is not
