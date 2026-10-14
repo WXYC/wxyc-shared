@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.26.0');
+      expect(spec.info.version).toBe('11.26.1');
     });
 
     // WXYC/wxyc-shared#644: the place unreviewed records wait is "the review
@@ -8985,6 +8985,19 @@ describe('OpenAPI Specification', () => {
         expect(responseSchema('/library/{id}', 'patch', '400').$ref).toBe(
           '#/components/schemas/ApiErrorResponse'
         );
+      });
+
+      // The handler throws WxycError('Artist is not catalogued in the
+      // selected genre', 400, { code: 'artist_not_in_genre' }) when the
+      // effective (artist_id, genre_id) pair has no crossreference. Clients
+      // branch on the code rather than matching the English message, so the
+      // contract has to name it next to the one refusal on this 400 that
+      // carries one.
+      it('names the artist_not_in_genre code its 400 carries', () => {
+        const responses = operation('/library/{id}', 'patch').responses as Record<string, { description?: string }>;
+        const description = flat(responses['400']?.description);
+        expect(description).toContain('`artist_not_in_genre`');
+        expect(description).toContain('Artist is not catalogued in the selected genre');
       });
     });
 

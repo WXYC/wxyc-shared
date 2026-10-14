@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.26.0
+  version: 11.26.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -17075,6 +17075,12 @@ paths:
             Invalid field value, or no updatable field present in the body.
             Every field-validation path in the handler raises this, and the
             sibling `DELETE /library/{id}` already declares its own 400.
+            One refusal carries a code: `artist_not_in_genre` — the
+            effective `(artist_id, genre_id)` pair (each falling back to the
+            stored value when omitted) has no genre crossreference, so the
+            release cannot be filed there. Its message, "Artist is not
+            catalogued in the selected genre", is unchanged; branch on the
+            code.
           content:
             application/json:
               schema:
