@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.26.1
+  version: 11.26.2
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -7731,7 +7731,15 @@ components:
       description: |
         One archived DJ album review, sourced from the WXYC album-review
         Google Form (collected since March 2021) and synced nightly by
-        Backend-Service's album-reviews ETL.
+        Backend-Service's album-reviews ETL until the form closes, when
+        the sync ends.
+
+        Once the form has closed, Backend-Service copies a submission that
+        is linked to a library release into the in-app `Review` model,
+        once. Three submissions are not copied: one with no review text,
+        one that an intake item cites (a music director copied it onto
+        that item), and one whose reviewer name is longer than 128
+        characters. Unlinked submissions stay archive-only.
 
         Distinct from the in-app `Review` model (`/reviews`: many per
         release, each attached to an intake item or a library release):
@@ -14693,7 +14701,12 @@ paths:
         Station-internal: the list is not filtered by `social_consent`, and
         rows with no review body are excluded. Each review carries the
         reviewer's name as typed into the form (`reviewer`), for use inside
-        the station.
+        the station. A submission that the post-cutover import has copied
+        into `reviews` is left out while that imported review exists (it is
+        then an ordinary review on its release, read through `/reviews`).
+        If the imported review, or its release, is deleted, the submission
+        is listed again: after a release delete, which clears its
+        `album_id`, by `artist` only. Nothing is lost.
       security:
         - BearerAuth: []
       parameters:
