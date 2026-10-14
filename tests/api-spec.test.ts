@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.26.1');
+      expect(spec.info.version).toBe('11.26.2');
     });
 
     // WXYC/wxyc-shared#644: the place unreviewed records wait is "the review
@@ -9697,6 +9697,18 @@ describe('OpenAPI Specification', () => {
       expect(keys.filter((key) => /reviewer/i.test(key))).toEqual([]);
       expect(propertyOf('WxycReviewItem', 'reviewer')).toBeUndefined();
       expect(propertyOf('AlbumMetadataResponse', 'wxycReviews')?.description).toMatch(/Reviewer identity is never included/);
+    });
+
+    it('describes the post-cutover import into reviews on the route and the schema', () => {
+      const route = flat(operation('/album-reviews', 'get').description);
+      expect(route).toMatch(/left out while that imported review exists/);
+      expect(route).toMatch(/after a release delete, which clears its `album_id`, by `artist` only\. Nothing is lost\.$/);
+      expect(route).not.toMatch(/remaining copy/);
+      const text = flat(schema('AlbumReview').description);
+      expect(text).toMatch(/Once the form has closed, Backend-Service copies a submission that is linked to a library release into the in-app `Review` model, once/);
+      expect(text).toMatch(/no review text.*cites.*longer than 128 characters.*Unlinked submissions stay archive-only/);
+      expect(text).toMatch(/until the form closes, when the sync ends/);
+      expect(text).not.toMatch(/imported_from_submission_id/);
     });
 
     it('drops the print lock from the AlbumReview description', () => {
