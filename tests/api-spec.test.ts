@@ -9701,12 +9701,13 @@ describe('OpenAPI Specification', () => {
 
     it('describes the post-cutover import into reviews on the route and the schema', () => {
       const route = flat(operation('/album-reviews', 'get').description);
-      expect(route).toMatch(/left out while that imported review exists/);
+      expect(route).toContain('A submission that the post-cutover import has copied into `reviews` is left out while that imported review exists (it is then an ordinary review on its release, read through `/reviews`).');
+      expect(route).toContain('If the imported review, or its release, is deleted, the submission is listed again:');
       expect(route).toMatch(/after a release delete, which clears its `album_id`, by `artist` only\. Nothing is lost\.$/);
       expect(route).not.toMatch(/remaining copy/);
       const text = flat(schema('AlbumReview').description);
       expect(text).toMatch(/Once the form has closed, Backend-Service copies a submission that is linked to a library release into the in-app `Review` model, once/);
-      expect(text).toMatch(/no review text.*cites.*longer than 128 characters.*Unlinked submissions stay archive-only/);
+      expect(text).toContain('Three kinds of submission are not copied: one with no review text, one that an intake item cites (a music director copied it onto that item), and one whose reviewer name is longer than 128 characters. Unlinked submissions stay archive-only.');
       expect(text).toMatch(/until the form closes, when the sync ends/);
       expect(text).not.toMatch(/imported_from_submission_id/);
     });
