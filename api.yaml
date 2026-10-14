@@ -7736,7 +7736,7 @@ components:
 
         Once the form has closed, Backend-Service copies a submission that
         is linked to a library release into the in-app `Review` model,
-        once. Three submissions are not copied: one with no review text,
+        once. Three kinds of submission are not copied: one with no review text,
         one that an intake item cites (a music director copied it onto
         that item), and one whose reviewer name is longer than 128
         characters. Unlinked submissions stay archive-only.
