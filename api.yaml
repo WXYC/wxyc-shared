@@ -4657,7 +4657,7 @@ components:
     ReviewCredit:
       type: string
       enum: [dj_name, real_name, none]
-      description: How the author asked to be credited if the review is ever published.
+      description: How the author asked to be credited if the review is ever published, except that on a review created by the one-time Backend-Service job that copies form-archive submissions, `none` is the station's decision and not an author's request.
 
     Reviewer:
       type: object
@@ -4729,14 +4729,15 @@ components:
           nullable: true
           description: >
             Null on a row that predates the in-app model (the column has
-            never been NOT NULL), and on a review the post-cutover import
-            created whose form reviewer answer was blank. For a review the
-            post-cutover import created from a form submission, it is the
-            form's reviewer answer as typed, trimmed, which may carry a date
-            or other text. For an account holder's own review, a
-            snapshot of their real name as shown inside the station, taken
-            when written, falling back to their account name (on-air handle,
-            else username) when no real name is on file. For a handwritten or
+            never been NOT NULL), and on a review created by the one-time
+            Backend-Service job that copies form-archive submissions (see
+            `AlbumReview`) when the form's reviewer answer was blank. For a
+            review that job created, it is the form's reviewer answer as
+            typed, trimmed, which may carry a date or other text. For an
+            account holder's own review, a snapshot of their real name as
+            shown inside the station, taken when written, falling back to
+            their account name (on-air handle, else username) when no real
+            name is on file. For a handwritten or
             on-behalf review it is what the music director typed: free text
             that may be a real name, so it is not guaranteed PII-free. Shown
             only inside the station; not for any public or anonymous surface,
@@ -4785,7 +4786,7 @@ components:
           allOf:
             - $ref: '#/components/schemas/ReviewCredit'
           nullable: true
-          description: '`null` means no choice has been made yet (an on-behalf review starts this way); `none` means the author chose no name. The post-cutover import sets `none` on every review it creates, as a station decision and not as any author''s choice, and such a review has no author account, so no account can change its `credit`.'
+          description: '`null` means no choice has been made yet (an on-behalf review starts this way); `none` means the author chose no name. The one-time Backend-Service job that copies form-archive submissions sets `none` on every review it creates, as a station decision and not as any author''s choice. Such a review has no author account, so no account can change its `credit` or `publish_*`, which keep the values the job set.'
         add_date:
           type: string
           format: date
