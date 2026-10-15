@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.26.3
+  version: 11.26.4
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4728,8 +4728,12 @@ components:
           maxLength: 128
           nullable: true
           description: >
-            Null only on a row that predates the in-app model (the column
-            has never been NOT NULL). For an account holder's own review, a
+            Null on a row that predates the in-app model (the column has
+            never been NOT NULL), and on a review the post-cutover import
+            created whose form reviewer answer was blank. For a review the
+            post-cutover import created from a form submission, it is the
+            form's reviewer answer as typed, trimmed, which may carry a date
+            or other text. For an account holder's own review, a
             snapshot of their real name as shown inside the station, taken
             when written, falling back to their account name (on-air handle,
             else username) when no real name is on file. For a handwritten or
@@ -4781,7 +4785,7 @@ components:
           allOf:
             - $ref: '#/components/schemas/ReviewCredit'
           nullable: true
-          description: '`null` means no choice has been made yet (an on-behalf review starts this way); `none` means the author chose no name.'
+          description: '`null` means no choice has been made yet (an on-behalf review starts this way); `none` means the author chose no name. The post-cutover import sets `none` on every review it creates, as a station decision and not as any author''s choice, and such a review has no author account, so no account can change its `credit`.'
         add_date:
           type: string
           format: date
