@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.26.2
+  version: 11.26.3
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -7734,12 +7734,11 @@ components:
         Backend-Service's album-reviews ETL until the form closes, when
         the sync ends.
 
-        Once the form has closed, Backend-Service copies a submission that
-        is linked to a library release into the in-app `Review` model,
-        once. Three kinds of submission are not copied: one with no review text,
-        one that an intake item cites (a music director copied it onto
-        that item), and one whose reviewer name is longer than 128
-        characters. Unlinked submissions stay archive-only.
+        Once the form has closed, a one-time Backend-Service job copies
+        submissions that are linked to a library release into the in-app
+        Review model; unlinked submissions stay archive-only. Which linked
+        submissions it skips is set out in Backend-Service ADR 0011
+        (https://github.com/WXYC/Backend-Service/blob/main/docs/adr/0011-album-review-submissions-separate-archive.md).
 
         Distinct from the in-app `Review` model (`/reviews`: many per
         release, each attached to an intake item or a library release):
@@ -14701,12 +14700,11 @@ paths:
         Station-internal: the list is not filtered by `social_consent`, and
         rows with no review body are excluded. Each review carries the
         reviewer's name as typed into the form (`reviewer`), for use inside
-        the station. A submission that the post-cutover import has copied
-        into `reviews` is left out while that imported review exists (it is
-        then an ordinary review on its release, read through `/reviews`).
-        If the imported review, or its release, is deleted, the submission
-        is listed again: after a release delete, which clears its
-        `album_id`, by `artist` only. Nothing is lost.
+        the station. A submission whose review is among the in-app reviews
+        (/reviews) is left out while that review exists, and is listed again
+        if that review is deleted; Backend-Service ADR 0011
+        (https://github.com/WXYC/Backend-Service/blob/main/docs/adr/0011-album-review-submissions-separate-archive.md)
+        sets out exactly when. Nothing is lost.
       security:
         - BearerAuth: []
       parameters:

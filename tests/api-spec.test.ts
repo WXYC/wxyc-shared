@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.26.2');
+      expect(spec.info.version).toBe('11.26.3');
     });
 
     // WXYC/wxyc-shared#644: the place unreviewed records wait is "the review
@@ -9701,13 +9701,10 @@ describe('OpenAPI Specification', () => {
 
     it('describes the post-cutover import into reviews on the route and the schema', () => {
       const route = flat(operation('/album-reviews', 'get').description);
-      expect(route).toContain('A submission that the post-cutover import has copied into `reviews` is left out while that imported review exists (it is then an ordinary review on its release, read through `/reviews`).');
-      expect(route).toContain('If the imported review, or its release, is deleted, the submission is listed again:');
-      expect(route).toMatch(/after a release delete, which clears its `album_id`, by `artist` only\. Nothing is lost\.$/);
+      expect(route).toContain('A submission whose review is among the in-app reviews (/reviews) is left out while that review exists, and is listed again if that review is deleted; Backend-Service ADR 0011 (https://github.com/WXYC/Backend-Service/blob/main/docs/adr/0011-album-review-submissions-separate-archive.md) sets out exactly when. Nothing is lost.');
       expect(route).not.toMatch(/remaining copy/);
       const text = flat(schema('AlbumReview').description);
-      expect(text).toMatch(/Once the form has closed, Backend-Service copies a submission that is linked to a library release into the in-app `Review` model, once/);
-      expect(text).toContain('Three kinds of submission are not copied: one with no review text, one that an intake item cites (a music director copied it onto that item), and one whose reviewer name is longer than 128 characters. Unlinked submissions stay archive-only.');
+      expect(text).toContain('Once the form has closed, a one-time Backend-Service job copies submissions that are linked to a library release into the in-app Review model; unlinked submissions stay archive-only. Which linked submissions it skips is set out in Backend-Service ADR 0011 (https://github.com/WXYC/Backend-Service/blob/main/docs/adr/0011-album-review-submissions-separate-archive.md).');
       expect(text).toMatch(/until the form closes, when the sync ends/);
       expect(text).not.toMatch(/imported_from_submission_id/);
     });
