@@ -9488,12 +9488,19 @@ describe('OpenAPI Specification', () => {
       expect(flat(review.properties?.review?.description as string)).toMatch(/May be `null` for a draft with no text yet, for a handwritten review/);
       expect(flat(review.properties?.review?.description as string)).toMatch(/A `typed` review cannot be submitted while this is `null`/);
       expect(String(review.properties?.author?.description)).toMatch(/may be a real\s+name/);
-      // The import's rows (#656): author and credit are described for a review no account wrote.
+      // The import's rows (#656): author and credit are described for a review no account wrote. The job is named as AlbumReview names it, once, and each sentence is pinned whole.
       const authorDesc = flat(review.properties?.author?.description as string);
-      expect(authorDesc).toContain('Null on a row that predates the in-app model (the column has never been NOT NULL), and on a review the post-cutover import created whose form reviewer answer was blank.');
-      expect(authorDesc).toContain("For a review the post-cutover import created from a form submission, it is the form's reviewer answer as typed, trimmed, which may carry a date or other text.");
+      expect(authorDesc).toContain("Null on a row that predates the in-app model (the column has never been NOT NULL), and on a review created by the one-time Backend-Service job that copies form-archive submissions (see `AlbumReview`) when the form's reviewer answer was blank.");
+      expect(authorDesc).toContain("For a review that job created, it is the form's reviewer answer as typed, trimmed, which may carry a date or other text.");
       expect(authorDesc).not.toContain('Null only on a row');
-      expect(flat(review.properties?.credit?.description as string)).toContain('The post-cutover import sets `none` on every review it creates, as a station decision and not as any author\'s choice, and such a review has no author account, so no account can change its `credit`.');
+      const creditDesc = flat(review.properties?.credit?.description as string);
+      expect(creditDesc).toContain("The one-time Backend-Service job that copies form-archive submissions sets `none` on every review it creates, as a station decision and not as any author's choice.");
+      expect(creditDesc).toContain('Such a review has no author account, so no account can change its `credit` or `publish_*`, which keep the values the job set.');
+      expect(flat(schema('ReviewCredit').description)).toBe("How the author asked to be credited if the review is ever published, except that on a review created by the one-time Backend-Service job that copies form-archive submissions, `none` is the station's decision and not an author's request.");
+      // "cutover" is a term api.yaml defines nowhere for this job; the new sentences must not bring it back.
+      for (const text of [authorDesc, creditDesc, flat(schema('ReviewCredit').description)]) {
+        expect(text).not.toContain('cutover');
+      }
       expect(String(review.properties?.author?.description)).toMatch(/not guaranteed PII-free/);
       expect(String(review.properties?.author?.description)).toMatch(/client\s+telemetry/);
       expect(review.properties?.author?.maxLength).toBe(128);
