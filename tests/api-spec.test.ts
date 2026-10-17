@@ -245,17 +245,6 @@ describe('OpenAPI Specification', () => {
       }
     });
 
-    // WXYC/wxyc-shared#685: a `pool` item with a review waiting is off the
-    // review shelf, and checking it out answers 409 `state_changed`.
-    it('says a pool item with a submitted review is off the review shelf and cannot be checked out', () => {
-      const schemas = spec.components.schemas as Record<string, any>;
-      expect(schemas.IntakeItemState.description).toMatch(
-        /`pool` item with a submitted review is not on the review shelf/,
-      );
-      const checkout = (spec.paths as any)['/intake/{id}/checkout'].post;
-      expect(checkout.description).toMatch(/submitted review[^.]*409 `state_changed`/);
-    });
-
     // WXYC/wxyc-shared#624: internal screens show the person's real name.
     it('states the real-name decision on every review and intake name field', () => {
       const schemas = spec.components.schemas as Record<string, any>;
@@ -4134,6 +4123,18 @@ describe('OpenAPI Specification', () => {
       expect(text).not.toMatch(/held by a DJ as `requested` or `checked_out`/);
     });
 
+    // WXYC/wxyc-shared#685: an item in effective state `pool` with a review
+    // waiting is off the review shelf, and checking it out answers 409
+    // `state_changed`. Backend-Service#3387 delivers the refusal, and both
+    // places name it so a reader does not take it for deployed behaviour (the
+    // checkout clause is pinned in the "names the ticket that delivers" table).
+    it('says an item in effective state pool with a submitted review is off the review shelf and checkout refuses it', () => {
+      const state = flat((spec.components.schemas.IntakeItemState as { description?: string }).description);
+      expect(state).toContain('An item in effective state `pool` with a submitted review is not on the review shelf: it waits for a music director to choose or delete that review (`submitted_review_count` above 0 with `accepted_review_id` null), and clients that draw the review shelf leave it out. `POST /intake/{id}/checkout` refuses such an item. Delivered by WXYC/Backend-Service#3387.');
+      const checkout = flat(operation('/intake/{id}/checkout', 'post').description);
+      expect(checkout).toContain('An item with a submitted review waiting for a music director (`submitted_review_count` above 0, `accepted_review_id` null) is not on the review shelf and answers 409 `state_changed`, as an item someone else took first does.');
+    });
+
     it('names all four name fields in the single IntakeItem sentence', () => {
       const item = spec.components.schemas.IntakeItem as { description?: string };
       const text = flat((item.description ?? ''));
@@ -4357,7 +4358,7 @@ describe('OpenAPI Specification', () => {
       it.each([
         ['/intake', 'post', 'Delivered by WXYC/Backend-Service#2796 (digital albums: WXYC/Backend-Service#3100).'],
         ['/intake/{id}', 'patch', 'Delivered by WXYC/Backend-Service#2796 (citation rules: WXYC/Backend-Service#2797; refusing a `format_id` on a digital album: WXYC/Backend-Service#3100).'],
-        ['/intake/{id}/checkout', 'post', 'Delivered by WXYC/Backend-Service#2798 (the music-director email for a digital album: WXYC/Backend-Service#3102).'],
+        ['/intake/{id}/checkout', 'post', 'Delivered by WXYC/Backend-Service#2798 (the music-director email for a digital album: WXYC/Backend-Service#3102; refusing an item with a review waiting: WXYC/Backend-Service#3387).'],
         ['/intake/{id}/accept', 'post', 'Delivered by WXYC/Backend-Service#2798 (the music-director email for a digital album: WXYC/Backend-Service#3102).'],
         ['/intake/{id}/accept-review', 'post', 'Delivered by WXYC/Backend-Service#2860 (clearing a digital album\'s holder: WXYC/Backend-Service#3101).'],
       ])('names the ticket that delivers the digital behaviour at %s %s', (path, method, sentence) => {

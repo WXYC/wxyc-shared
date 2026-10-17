@@ -4142,10 +4142,12 @@ components:
         of has not yet accepted), held by its holder as `checked_out`,
         `reviewed` once a music director has accepted a review for it
         (submitting a review does not move it), `filed` into the catalog, and
-        `finalized` once shelved. A `pool` item with a submitted review is not
-        on the review shelf: it waits for a music director to choose or delete
-        that review (`submitted_review_count` above 0 with `accepted_review_id`
-        null), and clients that draw the review shelf leave it out.
+        `finalized` once shelved. An item in effective state `pool` with a
+        submitted review is not on the review shelf: it waits for a music
+        director to choose or delete that review (`submitted_review_count`
+        above 0 with `accepted_review_id` null), and clients that draw the
+        review shelf leave it out. `POST /intake/{id}/checkout` refuses such an
+        item. Delivered by WXYC/Backend-Service#3387.
         `effective_state` on `IntakeItem` reads a stale `requested` as `pool`
         (WXYC/Backend-Service#2796): a `requested` row is stale once its
         `requested_at` is more than 7 days old, or once the DJ it was
@@ -14233,7 +14235,8 @@ paths:
         For a digital album, taking it is how a DJ claims it to review, and
         the server then emails the music directors so they can send the files.
         Delivered by WXYC/Backend-Service#2798 (the music-director email for a
-        digital album: WXYC/Backend-Service#3102).
+        digital album: WXYC/Backend-Service#3102; refusing an item with a
+        review waiting: WXYC/Backend-Service#3387).
       security:
         - BearerAuth: []
       responses:
