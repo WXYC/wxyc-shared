@@ -4067,7 +4067,7 @@ describe('OpenAPI Specification', () => {
     describe('listen-first links (#687)', () => {
       type LinkProp = { type?: string; format?: string; nullable?: boolean; maxLength?: number; description?: string };
       const schemaOf = (name: string) =>
-        spec.components.schemas[name] as { required?: string[]; properties?: Record<string, LinkProp> };
+        spec.components.schemas[name] as { description?: string; required?: string[]; properties?: Record<string, LinkProp> };
 
       it.each(LISTEN_FIRST_LINKS)(
         'declares IntakeItem.%s as an optional nullable plain string described as a preview, never the review copy',
@@ -4086,16 +4086,30 @@ describe('OpenAPI Specification', () => {
       // No request lets a music director enter a Spotify or Apple Music link
       // (only `bandcamp_url` is accepted), so these two cannot claim that a
       // found link spares one a music director entered.
+      it.each(LISTEN_FIRST_LINKS)('tells a client of an older server to treat a missing IntakeItem.%s like null, and says a rename can leave the old record\'s link', (field) => {
+        const text = flat(schemaOf('IntakeItem').properties?.[field]?.description);
+        expect(text).toContain('A server that predates the field leaves it out, so treat a missing key like `null`');
+        expect(text).toContain('A rename\'s own response can still carry the old record\'s link');
+      });
+
+      it('keeps the word logging out of every IntakeItem description', () => {
+        const item = schemaOf('IntakeItem');
+        const texts = [item.description, ...Object.values(item.properties ?? {}).map((p) => p.description)];
+        for (const text of texts) {
+          expect(flat(text)).not.toMatch(/logging/i);
+        }
+      });
+
       it.each(['spotify_url', 'apple_music_url'])('says IntakeItem.%s is only ever filled by a lookup, as no request carries it', (field) => {
         const text = flat(schemaOf('IntakeItem').properties?.[field]?.description);
-        expect(text).toContain('Filled by a lookup after logging');
+        expect(text).toContain('Filled by a lookup after adding and refreshed by one after a rename, never entered');
         expect(text).toContain('no request carries it');
         expect(text).not.toContain('music director entered');
       });
 
-      it('says IntakeItem.bandcamp_url is entered when logging or editing, and that a found link never replaces an entered one', () => {
+      it('says IntakeItem.bandcamp_url is entered when adding or editing, and that a found link never replaces an entered one', () => {
         const text = flat(schemaOf('IntakeItem').properties?.bandcamp_url?.description);
-        expect(text).toContain('Entered by a music director when logging or editing the record');
+        expect(text).toContain('Entered by a music director when adding or editing the record, or filled by a lookup after adding and refreshed by one after a rename');
         expect(text).toContain('a found link never replaces one a music director entered');
       });
 
