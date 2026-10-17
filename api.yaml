@@ -14598,10 +14598,11 @@ paths:
         '403':
           description: >-
             Caller lacks the `reviews: write` grant, in any state; or the item is
-            in effective state `requested` or `checked_out` and the caller is
-            neither the requested DJ nor the holder. Otherwise an item not in
-            effective state `requested` or `checked_out`, or a `checked_out` item
-            with a submitted review, answers 409 `state_changed` instead
+            in effective state `requested`, or `checked_out` with no submitted
+            review, and the caller is neither the requested DJ nor the holder.
+            Otherwise an item not in effective state `requested` or
+            `checked_out`, or a `checked_out` item with a submitted review,
+            answers 409 `state_changed` instead
         '404':
           description: No such intake item
           content:
