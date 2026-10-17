@@ -14395,7 +14395,7 @@ paths:
       x-wxyc-service: backend-service
       summary: Withdraw a review request
       description: >
-        Returns an effective `requested` item to the review shelf. A `requested` row
+        Returns an effective `requested` item to `pool`. A `requested` row
         past its 7-day lapse is effectively `pool` and answers 409
         `state_changed`. Grant: `reviews: manage`. Delivered by WXYC/Backend-Service#2798.
       security:
@@ -14564,7 +14564,7 @@ paths:
       x-wxyc-service: backend-service
       summary: Pass on an item
       description: >
-        Returns the item to the review shelf and records a pass. Accepts two
+        Returns the item to `pool` and records a pass. Accepts two
         cases: a request (an item in effective state `requested`, called by the
         requested DJ) and a held item (an item in state `checked_out` whose holder
         is the caller and which has no submitted review; the holder's checkout is

@@ -4429,7 +4429,9 @@ describe('OpenAPI Specification', () => {
       const o = operation('/intake/{id}/pass', 'post');
       expect(o.summary).toBe('Pass on an item');
       const text = flat(o.description);
-      expect(text).toContain('Returns the item to the review shelf and records a pass.');
+      expect(text).toContain('Returns the item to `pool` and records a pass.');
+      // A requested item can carry a submitted review, so the pass does not claim the review shelf.
+      expect(text).not.toContain('review shelf');
       expect(text).toContain('Accepts two cases: a request (an item in effective state `requested`, called by the requested DJ) and a held item (an item in state `checked_out` whose holder is the caller and which has no submitted review; the holder\'s checkout is cleared).');
       expect(text).toContain('The music directors are emailed only when the pass answers a request.');
       expect(text).toContain('Grant: `reviews: write`.');
@@ -4592,9 +4594,10 @@ describe('OpenAPI Specification', () => {
       const request = flat(operation('/intake/{id}/request', 'post').description);
       expect(request).toContain('effective state `pool`');
       expect(request).toContain('`dj_id` must name an account holding `reviews: write`, or the request is a 400');
-      expect(flat(operation('/intake/{id}/cancel-request', 'post').description)).toContain(
-        'effective `requested` item',
-      );
+      const cancel = flat(operation('/intake/{id}/cancel-request', 'post').description);
+      expect(cancel).toContain('Returns an effective `requested` item to `pool`.');
+      // A requested item can carry a submitted review, so the cancel does not claim the review shelf.
+      expect(cancel).not.toContain('review shelf');
     });
 
     it('names the role-level release grant like accept and pass', () => {
