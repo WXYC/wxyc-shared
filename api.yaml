@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.30.0
+  version: 11.30.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4137,7 +4137,7 @@ components:
       type: string
       enum: [pool, requested, checked_out, reviewed, filed, finalized]
       description: >
-        Where an intake item sits in its lifecycle: logged into `pool`, held
+        Where an intake item sits in its lifecycle: added to `pool`, held
         in the office for a named DJ as `requested` (the DJ it was requested
         of has not yet accepted), held by its holder as `checked_out`,
         `reviewed` once a music director has accepted a review for it
@@ -4159,7 +4159,7 @@ components:
     IntakeItem:
       type: object
       description: >
-        One record a music director logged and that is waiting for a review
+        One record a music director added and that is waiting for a review
         (WXYC/Backend-Service#2791): either a disc the station holds, or an
         album that arrived as files (`digital`), which a music director burns
         onto CD-R once its review is chosen. Its four name
@@ -4228,7 +4228,7 @@ components:
           description: >
             True when the album reached the station as files, not a disc. A
             music director burns it onto CD-R once a review is chosen for it,
-            so `format_id` is the CD-R format from the moment it is logged. It
+            so `format_id` is the CD-R format from the moment it is added. It
             stays true after filing; screens show the format as Digital until
             the record is filed.
         discogs_release_id:
