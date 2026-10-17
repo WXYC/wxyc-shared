@@ -4434,7 +4434,7 @@ describe('OpenAPI Specification', () => {
       expect(text).toContain('The music directors are emailed only when the pass answers a request.');
       expect(text).toContain('Grant: `reviews: write`.');
       expect(text).toContain('Precedence: a caller without the `reviews` grant the route requires gets a 403 in any state; otherwise an item not in effective state `requested` or `checked_out`, or a `checked_out` item with a submitted review, answers 409 `state_changed` (a holder of an item whose review is submitted marks the disc returned with `POST /intake/{id}/release` instead); otherwise a caller who is neither the requested DJ nor the holder gets a 403.');
-      expect(flat(o.responses?.['403']?.description)).toBe('Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` or `checked_out` and the caller is neither the requested DJ nor the holder. Otherwise an item not in effective state `requested` or `checked_out`, or a `checked_out` item with a submitted review, answers 409 `state_changed` instead');
+      expect(flat(o.responses?.['403']?.description)).toBe('Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested`, or `checked_out` with no submitted review, and the caller is neither the requested DJ nor the holder. Otherwise an item not in effective state `requested` or `checked_out`, or a `checked_out` item with a submitted review, answers 409 `state_changed` instead');
     });
 
     it('takes dj_id as the /request body', () => {
