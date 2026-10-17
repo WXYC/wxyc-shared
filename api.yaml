@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.28.2
+  version: 11.29.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4234,6 +4234,35 @@ components:
         discogs_release_id:
           type: integer
           nullable: true
+        spotify_url:
+          type: string
+          nullable: true
+          description: >
+            A link to the record on Spotify, or null when none is known. A
+            preview for choosing and hearing a record, not the station's
+            review copy: certification counts only a recorded listen of the
+            station's file. Filled by a lookup after logging; a found link
+            never replaces one a music director entered.
+        apple_music_url:
+          type: string
+          nullable: true
+          description: >
+            A link to the record on Apple Music, or null when none is known.
+            A preview for choosing and hearing a record, not the station's
+            review copy: certification counts only a recorded listen of the
+            station's file. Filled by a lookup after logging; a found link
+            never replaces one a music director entered.
+        bandcamp_url:
+          type: string
+          nullable: true
+          description: >
+            A link to the record on Bandcamp, or null when none is known. A
+            preview for choosing and hearing a record, not the station's
+            review copy: certification counts only a recorded listen of the
+            station's file. Entered by a music director when logging, or
+            filled by a lookup after logging; a found link never replaces one
+            a music director entered. There is no Discogs URL field: clients
+            build it from `discogs_release_id`.
         state:
           $ref: '#/components/schemas/IntakeItemState'
         effective_state:
@@ -4498,6 +4527,14 @@ components:
         discogs_release_id:
           type: integer
           nullable: true
+        bandcamp_url:
+          type: string
+          nullable: true
+          description: >
+            A link to the record on Bandcamp, a preview for choosing and
+            hearing it and not the station's review copy. Must be an `https`
+            URL on `bandcamp.com` or a subdomain of it; any other value is a
+            400.
 
     IntakeItemPatch:
       type: object
@@ -4568,6 +4605,14 @@ components:
         discogs_release_id:
           type: integer
           nullable: true
+        bandcamp_url:
+          type: string
+          nullable: true
+          description: >
+            A link to the record on Bandcamp, a preview for choosing and
+            hearing it and not the station's review copy. Must be an `https`
+            URL on `bandcamp.com` or a subdomain of it; any other value is a
+            400. A PATCH with `null` clears it.
         cited_album_id:
           type: integer
           nullable: true

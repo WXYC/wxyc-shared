@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.28.2');
+      expect(spec.info.version).toBe('11.29.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -3953,6 +3953,8 @@ describe('OpenAPI Specification', () => {
       ]);
     });
 
+    const LISTEN_FIRST_LINKS = ['spotify_url', 'apple_music_url', 'bandcamp_url'];
+
     it('requires the identity, state, and computed fields on IntakeItem, and every nullable column it always emits', () => {
       const item = spec.components.schemas.IntakeItem as {
         required?: string[];
@@ -4012,12 +4014,14 @@ describe('OpenAPI Specification', () => {
       // reading a server that predates them (see the dedicated test below).
       const optionalNullable = ['requested_by', 'requested_by_name'];
       const nullableFields = Object.entries(item.properties ?? {})
-        .filter(([name, prop]) => prop.nullable && !optionalNullable.includes(name))
+        .filter(([name, prop]) => prop.nullable && !optionalNullable.includes(name) && !LISTEN_FIRST_LINKS.includes(name))
         .map(([name]) => name);
       expect(nullableFields.length).toBeGreaterThan(0);
       for (const name of nullableFields) {
         expect(item.required).toContain(name);
       }
+      // The listen-first links (#687) are the exception: optional and
+      // nullable, because a lookup fills them after logging.
       // `passes` and `draft_authors` are gated to reviews: manage callers, so neither can be required.
       expect(item.required).not.toContain('passes');
       expect(item.required).not.toContain('draft_authors');
@@ -4054,6 +4058,45 @@ describe('OpenAPI Specification', () => {
       expect(existingRelease.required).toEqual(['kind', 'album_id']);
       expect(existingRelease.properties?.kind?.enum).toEqual(['existing_release']);
       expect(existingRelease.properties?.album_id).toBeDefined();
+    });
+
+    describe('listen-first links (#687)', () => {
+      type LinkProp = { type?: string; format?: string; nullable?: boolean; description?: string };
+      const schemaOf = (name: string) =>
+        spec.components.schemas[name] as { required?: string[]; properties?: Record<string, LinkProp> };
+
+      it.each(LISTEN_FIRST_LINKS)(
+        'declares IntakeItem.%s as an optional nullable plain string described as a preview, never the review copy',
+        (field) => {
+          const item = schemaOf('IntakeItem');
+          const prop = item.properties?.[field];
+          expect(prop).toMatchObject({ type: 'string', nullable: true });
+          expect(prop?.format).toBeUndefined();
+          expect(item.required).not.toContain(field);
+          const text = flat(prop?.description);
+          expect(text).toContain('preview');
+          expect(text).toContain('not the station\'s review copy');
+        },
+      );
+
+      it.each(['NewIntakeItemRequest', 'IntakeItemPatch'])(
+        'accepts an optional nullable bandcamp_url on %s and states the bandcamp.com https rule',
+        (name) => {
+          const schema = schemaOf(name);
+          const prop = schema.properties?.bandcamp_url;
+          expect(prop).toMatchObject({ type: 'string', nullable: true });
+          expect(prop?.format).toBeUndefined();
+          expect(schema.required ?? []).not.toContain('bandcamp_url');
+          const text = flat(prop?.description);
+          expect(text).toContain('https');
+          expect(text).toContain('bandcamp.com');
+          expect(text).toContain('400');
+        },
+      );
+
+      it('says a PATCH with null clears bandcamp_url', () => {
+        expect(flat(schemaOf('IntakeItemPatch').properties?.bandcamp_url?.description)).toContain('`null` clears it');
+      });
     });
 
     it('makes the patch refuse citing a submission and a release as non-null at once, but allows switching in one request', () => {
