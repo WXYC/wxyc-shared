@@ -4131,7 +4131,7 @@ describe('OpenAPI Specification', () => {
 
     // WXYC/wxyc-shared#684: a requested record shows who asked.
     it('declares IntakeItem.requested_by and requested_by_name as optional nullable strings after requested_dj_name', () => {
-      const item = spec.components.schemas.IntakeItem as { required: string[]; properties: Record<string, any> };
+      const item = spec.components.schemas.IntakeItem as { description?: string; required: string[]; properties: Record<string, any> };
       const keys = Object.keys(item.properties);
       expect(keys.indexOf('requested_by')).toBe(keys.indexOf('requested_dj_name') + 1);
       expect(keys.indexOf('requested_by_name')).toBe(keys.indexOf('requested_dj_name') + 2);
