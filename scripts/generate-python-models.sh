@@ -488,7 +488,25 @@ WRAPPERS = {"Optional", "Union", "Annotated", "Field"}
 # checked here instead.
 STR_NARROWING_KWARGS = {"max_length", "min_length", "pattern"}
 
+# (class, field) pairs that may carry a max_length (#687). These are request
+# bodies: a field that is only ever sent has its bound validated by the server,
+# and the contract ships the bound with the field because a request-side bound
+# added in a later minor is a breaking change. A bound on a field that is read
+# is still the #428 failure, so this is keyed on the pair, never the bare name,
+# and it allows max_length alone: no other keyword and no other type. No line
+# of this snippet may start with a closing brace in column 0: the bats suite
+# extracts this function with a sed range that ends at the first such line.
+BOUNDED_REQUEST_FIELDS = frozenset([
+    ("NewIntakeItemRequest", "bandcamp_url"),
+    ("IntakeItemPatch", "bandcamp_url"),
+])
+
 tree = ast.parse(source, filename=output_path)
+owner = {}
+for cls in ast.walk(tree):
+    if isinstance(cls, ast.ClassDef):
+        for stmt in cls.body:
+            owner[id(stmt)] = cls.name
 offenders = []
 for node in ast.walk(tree):
     if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
@@ -497,18 +515,23 @@ for node in ast.walk(tree):
             referenced = {
                 n.id for n in ast.walk(node.annotation) if isinstance(n, ast.Name)
             } - WRAPPERS
+            bounded_request = (owner.get(id(node)), node.target.id) in BOUNDED_REQUEST_FIELDS
             narrowing = sorted(
                 {
                     kw.arg
                     for call in ast.walk(node.annotation)
                     if isinstance(call, ast.Call)
                     and isinstance(call.func, ast.Name)
-                    and call.func.id == "Field"
+                    and call.func.id in ("Field", "constr")
                     for kw in call.keywords
                     if kw.arg in STR_NARROWING_KWARGS
                 }
             )
-            if referenced != {"str"}:
+            if bounded_request:
+                narrowing = [kw for kw in narrowing if kw != "max_length"]
+            if referenced != {"str"} and not (
+                bounded_request and referenced and referenced <= {"str", "constr"}
+            ):
                 offenders.append(f"{node.target.id} (line {node.lineno}): {annotation_src}")
             elif narrowing:
                 narrowed_by = ", ".join(narrowing)

@@ -1239,3 +1239,85 @@ EOF
         [[ "$output" != *"$field"* ]]
     done
 }
+
+# --- #687: NewIntakeItemRequest.bandcamp_url and IntakeItemPatch.bandcamp_url
+# --- carry `maxLength: 512` (the intake_items column width), which generates as
+# --- `constr(max_length=512)`. The post-condition above rejects any bound on the
+# --- five names because a bound on a field that is READ validates stored rows at
+# --- decode time (the #428 failure). A bound on a field that is only ever SENT
+# --- is the server's input validation, and the contract ships it with the field
+# --- because a request-side bound added in a later minor is a breaking change
+# --- (oasdiff request-property-max-length-set). The exemption is keyed on the
+# --- (class, field) pair, not the field name, so the same bound anywhere else
+# --- is still caught, and it allows only `max_length` -- nothing else narrows
+# --- or re-types the field.
+
+@test "the post-condition accepts max_length on bandcamp_url in the two intake request bodies only (#687)" {
+    cat > "$TEST_TEMP_DIR/request_bound_ok.py" <<'EOF2'
+from typing import Annotated
+from pydantic import BaseModel, Field, constr
+
+
+class NewIntakeItemRequest(BaseModel):
+    bandcamp_url: constr(max_length=512) | None = None
+
+
+class IntakeItemPatch(BaseModel):
+    bandcamp_url: Annotated[
+        str | None, Field(description='Bandcamp.', max_length=512)
+    ] = None
+
+
+class StreamingLinks(BaseModel):
+    spotify_url: str | None = None
+    apple_music_url: str | None = None
+    youtube_music_url: str | None = None
+    bandcamp_url: str | None = None
+    soundcloud_url: str | None = None
+EOF2
+    run run_post_condition_against "$TEST_TEMP_DIR/request_bound_ok.py"
+    [ "$status" -eq 0 ]
+}
+
+@test "the post-condition still rejects the same bound on bandcamp_url in any other class (#687)" {
+    cat > "$TEST_TEMP_DIR/response_bound.py" <<'EOF2'
+from pydantic import BaseModel, constr
+
+
+class IntakeItem(BaseModel):
+    bandcamp_url: constr(max_length=512) | None = None
+EOF2
+    run run_post_condition_against "$TEST_TEMP_DIR/response_bound.py"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"#428 pin did not apply"* ]]
+    [[ "$output" == *"bandcamp_url"* ]]
+}
+
+@test "the post-condition still rejects anything but max_length, and any other field, in an exempt request body (#687)" {
+    local case_name field annotation
+    # field|annotation pairs, each declared inside NewIntakeItemRequest.
+    local cases=(
+        "bandcamp_url|AnyUrl | None"
+        "bandcamp_url|constr(pattern='^https://') | None"
+        "bandcamp_url|constr(min_length=1, max_length=512) | None"
+        "bandcamp_url|Annotated[str | None, Field(pattern='^https://')]"
+        "bandcamp_url|StreamingUrl | None"
+        "spotify_url|constr(max_length=512) | None"
+    )
+    for case_name in "${cases[@]}"; do
+        field="${case_name%%|*}"
+        annotation="${case_name#*|}"
+        cat > "$TEST_TEMP_DIR/request_bad.py" <<EOF2
+from typing import Annotated
+from pydantic import AnyUrl, BaseModel, Field, constr
+
+
+class NewIntakeItemRequest(BaseModel):
+    $field: $annotation = None
+EOF2
+        run run_post_condition_against "$TEST_TEMP_DIR/request_bad.py"
+        [ "$status" -ne 0 ]
+        [[ "$output" == *"#428 pin did not apply"* ]]
+        [[ "$output" == *"$field"* ]]
+    done
+}
