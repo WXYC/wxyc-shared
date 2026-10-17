@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.28.1');
+      expect(spec.info.version).toBe('11.28.2');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -4385,7 +4385,7 @@ describe('OpenAPI Specification', () => {
       ['/intake/{id}/request', 'reviews: manage', '#2798'],
       ['/intake/{id}/cancel-request', 'reviews: manage', '#2798'],
       ['/intake/{id}/accept', 'Grant: `reviews: write`, and only the requested DJ.', '#2798'],
-      ['/intake/{id}/pass', 'Grant: `reviews: write`, and only the requested DJ.', '#2798'],
+      ['/intake/{id}/pass', 'Grant: `reviews: write`.', '#2798'],
     ])('declares post %s with its grant (%s) and delivering issue (%s)', (path, grant, issue) => {
       expectBackendRoute(path, 'post', { grant, issue });
       expect(
@@ -4407,7 +4407,6 @@ describe('OpenAPI Specification', () => {
     it.each([
       ['release', '`checked_out` or `reviewed`', 'a caller who is neither the holder nor a `reviews: manage` holder gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `checked_out` or `reviewed` and the caller is neither the holder nor a `reviews: manage` holder.'],
       ['accept', '`requested`', 'a caller who is not the requested DJ gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` and the caller is not the requested DJ.'],
-      ['pass', '`requested`', 'a caller who is not the requested DJ gets a 403.', 'Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` and the caller is not the requested DJ.'],
     ])('states the %s 403/409 precedence in the description and the 403 response', (action, state, who, forbiddenText) => {
       const o = operation(`/intake/{id}/${action}`, 'post');
       const text = flat(o.description);
@@ -4422,6 +4421,20 @@ describe('OpenAPI Specification', () => {
       const forbidden = flat(o.responses?.['403']?.description);
       expect(forbidden).toContain(forbiddenText);
       expect(forbidden).toContain(`Otherwise an item not in effective state ${state}${noHolder} answers 409 \`state_changed\` instead`);
+    });
+
+    it('describes both cases /pass accepts, the email rule and the 403/409/403 precedence', () => {
+      const o = operation('/intake/{id}/pass', 'post');
+      expect(o.summary).toBe('Pass on an item');
+      const text = flat(o.description);
+      expect(text).toContain('Returns the item to the review shelf and records a pass.');
+      expect(text).toContain('a request (an item in effective state `requested`, called by the requested DJ)');
+      expect(text).toContain('a held item (an item in state `checked_out` whose holder is the caller and which has no submitted review;');
+      expect(text).toContain('emailed only when the pass answers a request');
+      expect(text).toContain('Precedence: a caller without the `reviews` grant the route requires gets a 403 in any state; otherwise an item in neither state, or a held item with a submitted review, answers 409 `state_changed`');
+      expect(text).toContain('`POST /intake/{id}/release`');
+      expect(text).toContain('otherwise a caller who is neither the requested DJ nor the holder gets a 403.');
+      expect(flat(o.responses?.['403']?.description)).toContain('the caller is neither the requested DJ nor the holder');
     });
 
     it('takes dj_id as the /request body', () => {
