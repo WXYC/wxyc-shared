@@ -228,7 +228,7 @@ describe('OpenAPI Specification', () => {
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
       const patch = flat((spec.components.schemas.IntakeItemPatch as { description?: string }).description);
       expect(patch).toContain(
-        'Setting either citation to a non-null value also withdraws a pending request in the same update: a `requested` item returns to `pool`, and `requested_dj_id` and `requested_at` become null. A `checked_out` item keeps its holder. Clearing a citation touches no request. No email is sent for the withdrawn request. Implemented by WXYC/Backend-Service#3383.',
+        'Setting either citation to a non-null value also withdraws a pending request in the same update: a `requested` item returns to `pool`, and `requested_dj_id`, `requested_by` and `requested_at` become null. A `checked_out` item keeps its holder. Clearing a citation touches no request. No email is sent for the withdrawn request. Implemented by WXYC/Backend-Service#3383.',
       );
     });
 
