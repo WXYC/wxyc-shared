@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.28.0
+  version: 11.28.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4142,7 +4142,10 @@ components:
         of has not yet accepted), held by its holder as `checked_out`,
         `reviewed` once a music director has accepted a review for it
         (submitting a review does not move it), `filed` into the catalog, and
-        `finalized` once shelved.
+        `finalized` once shelved. A `pool` item with a submitted review is not
+        on the review shelf: it waits for a music director to choose or delete
+        that review (`submitted_review_count` above 0 with `accepted_review_id`
+        null), and clients that draw the review shelf leave it out.
         `effective_state` on `IntakeItem` reads a stale `requested` as `pool`
         (WXYC/Backend-Service#2796): a `requested` row is stale once its
         `requested_at` is more than 7 days old, or once the DJ it was
@@ -14224,6 +14227,9 @@ paths:
       summary: Check an intake item out
       description: >
         A DJ takes the item from the review shelf to review it. Grant: `reviews: write`.
+        An item with a submitted review waiting for a music director (`submitted_review_count`
+        above 0, `accepted_review_id` null) is not on the review shelf and answers 409
+        `state_changed`, as an item someone else took first does.
         For a digital album, taking it is how a DJ claims it to review, and
         the server then emails the music directors so they can send the files.
         Delivered by WXYC/Backend-Service#2798 (the music-director email for a
