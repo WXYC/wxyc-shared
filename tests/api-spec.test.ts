@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.26.5');
+      expect(spec.info.version).toBe('11.27.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -9600,11 +9600,43 @@ describe('OpenAPI Specification', () => {
         }
       });
 
-      it('gives Reviewer no on-air-name property', () => {
-        expect(Object.keys(reviewer().properties)).toEqual(['id', 'name']);
+      it('keeps the legal name apart from the on-air name: no dj_name or handle property', () => {
+        expect(Object.keys(reviewer().properties)).toEqual(['id', 'name', 'on_air_name', 'records_out', 'last_submitted_at']);
         for (const key of Object.keys(reviewer().properties)) {
           expect(key).not.toMatch(/dj_?name|handle/i);
         }
+      });
+
+      // Decision 9 of the 2026-10-16 review-screens UX review (WXYC/wxyc-shared#682).
+      it('declares the three optional activity facts, none required', () => {
+        const props = reviewer().properties as Record<string, any>;
+        expect([...reviewer().required].sort()).toEqual(['id', 'name']);
+        expect(props.on_air_name).toMatchObject({ type: 'string', nullable: true });
+        expect(props.records_out).toMatchObject({ type: 'integer', minimum: 0 });
+        expect(props.records_out.nullable).toBeUndefined();
+        expect(props.last_submitted_at).toMatchObject({ type: 'string', format: 'date-time', nullable: true });
+      });
+
+      it('keeps the station-only rule on each activity fact and says what the value means', () => {
+        const props = reviewer().properties as Record<string, any>;
+        for (const key of ['on_air_name', 'records_out', 'last_submitted_at']) {
+          const text = flat(props[key].description);
+          expect(text, key).toContain('Station-only: not for any public surface');
+          expect(text, key).toMatch(/never for client telemetry \(analytics properties, error breadcrumbs, logs\)/);
+        }
+        expect(flat(props.on_air_name.description)).toContain('`auth_user.dj_name`');
+        expect(flat(props.on_air_name.description)).toContain('"Anonymous"');
+        expect(flat(props.records_out.description)).toContain('unfiled records the account has checked out or taken now');
+        expect(flat(props.last_submitted_at.description)).toContain('When the account last submitted a review; `null` if never');
+      });
+
+      it('gives each IntakeItem pass an optional dj_id, the passing account', () => {
+        const pass = (spec.components.schemas as Record<string, any>).IntakeItem.properties.passes.items;
+        expect(pass.required).toEqual(['dj_name', 'passed_at']);
+        expect(pass.properties.dj_id.type).toBe('string');
+        expect(pass.properties.dj_id.nullable).toBeUndefined();
+        expect(flat(pass.properties.dj_id.description)).toContain("The passing account's `auth_user.id`");
+        expect(flat(pass.properties.dj_id.description)).toContain('Station-only');
       });
     });
 

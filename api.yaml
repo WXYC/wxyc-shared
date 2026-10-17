@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.26.5
+  version: 11.27.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4360,6 +4360,14 @@ components:
               passed_at:
                 type: string
                 format: date-time
+              dj_id:
+                type: string
+                description: >
+                  The passing account's `auth_user.id`, so a client can match
+                  a pass to an account without comparing names. Optional: a
+                  server that predates it omits it. Station-only: not for any
+                  public or anonymous surface; never for client telemetry
+                  (analytics properties, error breadcrumbs, logs).
         accepted_review_id:
           type: integer
           nullable: true
@@ -4684,6 +4692,35 @@ components:
             never the `dj_name` field. Shown only inside the station; not for
             any public or anonymous surface, because it holds a legal name;
             never for client telemetry (analytics properties, error
+            breadcrumbs, logs).
+        on_air_name:
+          type: string
+          nullable: true
+          description: >
+            The account's on-air name as the public playlist shows it
+            (`auth_user.dj_name`, except that a literal "Anonymous" counts as
+            none); `null` when there is none. Optional: a server that predates
+            it omits it. Station-only: not for any public surface, because
+            this is an activity fact about a person; never for client
+            telemetry (analytics properties, error breadcrumbs, logs).
+        records_out:
+          type: integer
+          minimum: 0
+          description: >
+            How many unfiled records the account has checked out or taken now.
+            Optional: a server that predates it omits it. Station-only: not
+            for any public surface, because this is an activity fact about a
+            person; never for client telemetry (analytics properties, error
+            breadcrumbs, logs).
+        last_submitted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            When the account last submitted a review; `null` if never.
+            Optional: a server that predates it omits it. Station-only: not
+            for any public surface, because this is an activity fact about a
+            person; never for client telemetry (analytics properties, error
             breadcrumbs, logs).
 
     Review:
