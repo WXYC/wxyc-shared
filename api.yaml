@@ -14570,12 +14570,14 @@ paths:
         is the caller and which has no submitted review; the holder's checkout is
         cleared). The music directors are emailed only when the pass answers a
         request. Grant: `reviews: write`. Precedence: a caller without the `reviews`
-        grant the route requires gets a 403 in any state; otherwise an item in
-        neither state, or a held item with a submitted review, answers 409
-        `state_changed` (a holder whose review is submitted marks the disc returned
-        with `POST /intake/{id}/release` instead); otherwise a caller who is
-        neither the requested DJ nor the holder gets a 403. Delivered by
-        WXYC/Backend-Service#2798.
+        grant the route requires gets a 403 in any state; otherwise an item not in
+        effective state `requested` or `checked_out`, or a `checked_out` item with
+        a submitted review, answers 409 `state_changed` (a holder of an item whose
+        review is submitted marks the disc returned with
+        `POST /intake/{id}/release` instead); otherwise a caller who is neither
+        the requested DJ nor the holder gets a 403. Delivered by
+        WXYC/Backend-Service#2798 (passing a held item, and emailing only for a
+        request: WXYC/Backend-Service#3388).
       security:
         - BearerAuth: []
       responses:
@@ -14595,10 +14597,11 @@ paths:
           description: No bearer token
         '403':
           description: >-
-            Caller lacks the `reviews: write` grant, in any state; or the caller
-            is neither the requested DJ nor the holder. An item in neither state,
-            or a held item with a submitted review, answers 409 `state_changed`
-            instead
+            Caller lacks the `reviews: write` grant, in any state; or the item is
+            in effective state `requested` or `checked_out` and the caller is
+            neither the requested DJ nor the holder. Otherwise an item not in
+            effective state `requested` or `checked_out`, or a `checked_out` item
+            with a submitted review, answers 409 `state_changed` instead
         '404':
           description: No such intake item
           content:
