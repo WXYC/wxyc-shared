@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.26.4
+  version: 11.26.5
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4488,6 +4488,12 @@ components:
         `cited_album_id` and counts as clearing it here: an accepted review
         chosen from that release goes with it. An accepted review of the
         item itself is kept. Implemented by WXYC/Backend-Service#2860.
+        Setting either citation to a non-null value also withdraws a pending
+        request in the same update: a `requested` item returns to `pool`, and
+        `requested_dj_id` and `requested_at` become null. A `checked_out` item
+        keeps its holder. Clearing a citation touches no request. No email is
+        sent for the withdrawn request. Implemented by
+        WXYC/Backend-Service#3383.
       not:
         allOf:
           - required:
