@@ -4020,8 +4020,12 @@ describe('OpenAPI Specification', () => {
       for (const name of nullableFields) {
         expect(item.required).toContain(name);
       }
-      // The listen-first links (#687) are the exception: optional and
-      // nullable, because a lookup fills them after logging.
+      // The listen-first links (#687) are the exception, by #687's choice and
+      // not because a lookup fills them: the contract ships before
+      // WXYC/Backend-Service#3390 serves the three columns, so a client built
+      // on it must still decode an item from a server that does not send them
+      // yet. That is no precedent for leaving a column the server always
+      // emits out of `required`.
       // `passes` and `draft_authors` are gated to reviews: manage callers, so neither can be required.
       expect(item.required).not.toContain('passes');
       expect(item.required).not.toContain('draft_authors');
@@ -4061,7 +4065,7 @@ describe('OpenAPI Specification', () => {
     });
 
     describe('listen-first links (#687)', () => {
-      type LinkProp = { type?: string; format?: string; nullable?: boolean; description?: string };
+      type LinkProp = { type?: string; format?: string; nullable?: boolean; maxLength?: number; description?: string };
       const schemaOf = (name: string) =>
         spec.components.schemas[name] as { required?: string[]; properties?: Record<string, LinkProp> };
 
@@ -4079,6 +4083,22 @@ describe('OpenAPI Specification', () => {
         },
       );
 
+      // No request lets a music director enter a Spotify or Apple Music link
+      // (only `bandcamp_url` is accepted), so these two cannot claim that a
+      // found link spares one a music director entered.
+      it.each(['spotify_url', 'apple_music_url'])('says IntakeItem.%s is only ever filled by a lookup, as no request carries it', (field) => {
+        const text = flat(schemaOf('IntakeItem').properties?.[field]?.description);
+        expect(text).toContain('Filled by a lookup after logging');
+        expect(text).toContain('no request carries it');
+        expect(text).not.toContain('music director entered');
+      });
+
+      it('says IntakeItem.bandcamp_url is entered when logging or editing, and that a found link never replaces an entered one', () => {
+        const text = flat(schemaOf('IntakeItem').properties?.bandcamp_url?.description);
+        expect(text).toContain('Entered by a music director when logging or editing the record');
+        expect(text).toContain('a found link never replaces one a music director entered');
+      });
+
       it.each(['NewIntakeItemRequest', 'IntakeItemPatch'])(
         'accepts an optional nullable bandcamp_url on %s and states the bandcamp.com https rule',
         (name) => {
@@ -4094,8 +4114,36 @@ describe('OpenAPI Specification', () => {
         },
       );
 
-      it('says a PATCH with null clears bandcamp_url', () => {
-        expect(flat(schemaOf('IntakeItemPatch').properties?.bandcamp_url?.description)).toContain('`null` clears it');
+      // Backend-Service parses the field with `normalizeOptionalText`: trim, then
+      // '' and whitespace-only become null. A blank string is therefore never a
+      // 400, and it is the only way a client that cannot send an explicit null
+      // (Swift omits nil optionals) can clear the link.
+      it.each(['NewIntakeItemRequest', 'IntakeItemPatch'])('says a blank bandcamp_url on %s means no link, not a 400', (name) => {
+        const text = flat(schemaOf(name).properties?.bandcamp_url?.description);
+        expect(text).toContain('Surrounding whitespace is trimmed');
+        expect(text).toContain('A blank or whitespace-only string means no link, the same as `null`');
+        expect(text).toContain('Any other value must be an `https` URL on `bandcamp.com` or a subdomain of it, or the request is a 400');
+        expect(text).not.toContain('any other value is a 400');
+      });
+
+      // The column is varchar(512). A request-side bound added in a later minor is a
+      // breaking change (oasdiff request-property-max-length-set), so it ships here.
+      it.each(['NewIntakeItemRequest', 'IntakeItemPatch'])('caps bandcamp_url on %s at the 512-character column width', (name) => {
+        expect(schemaOf(name).properties?.bandcamp_url?.maxLength).toBe(512);
+      });
+
+      // Any link sent sets the entered flag, which a lookup never overwrites, so a
+      // client that sends back the value a read returned freezes a found link.
+      it.each(['NewIntakeItemRequest', 'IntakeItemPatch'])('tells clients to send bandcamp_url on %s only when a music director entered or changed it', (name) => {
+        const text = flat(schemaOf(name).properties?.bandcamp_url?.description);
+        expect(text).toContain('counts as entered by a music director');
+        expect(text).toContain('send `bandcamp_url` only when a music director entered or changed it');
+      });
+
+      it('says a PATCH with null or a blank string clears bandcamp_url, and that Swift sends the blank string', () => {
+        const text = flat(schemaOf('IntakeItemPatch').properties?.bandcamp_url?.description);
+        expect(text).toContain('A PATCH with `null` or a blank string clears it');
+        expect(text).toContain('Swift omits nil optionals and cannot send an explicit `null`, so it sends an empty string');
       });
     });
 
