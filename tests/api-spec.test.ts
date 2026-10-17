@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.28.0');
+      expect(spec.info.version).toBe('11.28.1');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -243,6 +243,17 @@ describe('OpenAPI Specification', () => {
         expect(prose, `${method} ${path}`).not.toMatch(/\bpool(ed)?\b/i);
         expect(prose, `${method} ${path}`).not.toMatch(/\bpile\b/i);
       }
+    });
+
+    // WXYC/wxyc-shared#685: a `pool` item with a review waiting is off the
+    // review shelf, and checking it out answers 409 `state_changed`.
+    it('says a pool item with a submitted review is off the review shelf and cannot be checked out', () => {
+      const schemas = spec.components.schemas as Record<string, any>;
+      expect(schemas.IntakeItemState.description).toMatch(
+        /`pool` item with a submitted review is not on the review shelf/,
+      );
+      const checkout = (spec.paths as any)['/intake/{id}/checkout'].post;
+      expect(checkout.description).toMatch(/submitted review[^.]*409 `state_changed`/);
     });
 
     // WXYC/wxyc-shared#624: internal screens show the person's real name.
