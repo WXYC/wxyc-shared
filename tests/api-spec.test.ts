@@ -4144,11 +4144,18 @@ describe('OpenAPI Specification', () => {
       expect(by).toContain("The asking music director's account id, shaped like `checked_out_by`");
       expect(by).toContain('set together with `requested_dj_id` when the item enters `requested`');
       expect(by).toContain('Read it together with `state` and `effective_state`, not as proof of a live request');
-      expect(by).toContain("a checkout, accepting a review or filing clears it along with the request's other fields");
+      // Only a `requested` item carries it. Every transition out of
+      // `requested` clears it (Backend-Service's CLEAR_REQUEST), and a read
+      // never writes, so a stale `requested` item keeps it set.
+      expect(by).toContain('Only an item whose `state` is `requested` carries it');
+      expect(by).toContain("withdrawing the request, the requested DJ accepting or passing it, a checkout, accepting a review for the item and filing each clear it along with the request's other fields");
+      expect(by).toContain('so an item in any other state reads `null`');
+      expect(by).toContain('A read never writes, so a stale `requested` item, whose `effective_state` reads `pool`, keeps it set');
+      expect(by).not.toContain('no live request');
       expect(by).toContain('`null` while `state: requested` means the request was made before the server recorded the asker');
       expect(by).toContain("asker's account has since been deleted");
       expect(by).toContain('show a generic line, not an error, in either case');
-      expect(by).toContain('a server that predates the field leaves it out');
+      expect(by).toContain('A server that predates the field leaves it out, so treat a missing key like `null`');
       // The name is computed on every read and never stored, so it follows
       // the id: current at read time, and null whenever the id is.
       const byName = flat(item.properties.requested_by_name.description);

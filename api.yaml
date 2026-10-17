@@ -4281,16 +4281,18 @@ components:
           description: >
             The asking music director's account id, shaped like
             `checked_out_by`, set together with `requested_dj_id` when the
-            item enters `requested`. Read it together with `state` and
-            `effective_state`, not as proof of a live request: a stale
-            `requested` item keeps it set, and a checkout, accepting a review
-            or filing clears it along with the request's other fields. `null`
-            while `state: requested` means the request was made before the
-            server recorded the asker, or the asker's account has since been
-            deleted; show a generic line, not an error, in either case. It is
-            also `null` on an item with no live request, and a server that
-            predates the field leaves it out, so treat a missing key like
-            `null`.
+            item enters `requested`. Only an item whose `state` is `requested`
+            carries it: withdrawing the request, the requested DJ accepting or
+            passing it, a checkout, accepting a review for the item and filing
+            each clear it along with the request's other fields, so an item in
+            any other state reads `null`. A read never writes, so a stale
+            `requested` item, whose `effective_state` reads `pool`, keeps it
+            set. Read it together with `state` and `effective_state`, not as
+            proof of a live request. `null` while `state: requested` means the
+            request was made before the server recorded the asker, or the
+            asker's account has since been deleted; show a generic line, not
+            an error, in either case. A server that predates the field leaves
+            it out, so treat a missing key like `null`.
         requested_by_name:
           type: string
           nullable: true
