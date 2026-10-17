@@ -4241,8 +4241,8 @@ components:
             A link to the record on Spotify, or null when none is known. A
             preview for choosing and hearing a record, not the station's
             review copy: certification counts only a recorded listen of the
-            station's file. Filled by a lookup after logging; a found link
-            never replaces one a music director entered.
+            station's file. Filled by a lookup after logging, never entered
+            by a music director: no request carries it.
         apple_music_url:
           type: string
           nullable: true
@@ -4250,8 +4250,8 @@ components:
             A link to the record on Apple Music, or null when none is known.
             A preview for choosing and hearing a record, not the station's
             review copy: certification counts only a recorded listen of the
-            station's file. Filled by a lookup after logging; a found link
-            never replaces one a music director entered.
+            station's file. Filled by a lookup after logging, never entered
+            by a music director: no request carries it.
         bandcamp_url:
           type: string
           nullable: true
@@ -4259,10 +4259,10 @@ components:
             A link to the record on Bandcamp, or null when none is known. A
             preview for choosing and hearing a record, not the station's
             review copy: certification counts only a recorded listen of the
-            station's file. Entered by a music director when logging, or
-            filled by a lookup after logging; a found link never replaces one
-            a music director entered. There is no Discogs URL field: clients
-            build it from `discogs_release_id`.
+            station's file. Entered by a music director when logging or
+            editing the record, or filled by a lookup after logging; a found
+            link never replaces one a music director entered. There is no
+            Discogs URL field: clients build it from `discogs_release_id`.
         state:
           $ref: '#/components/schemas/IntakeItemState'
         effective_state:
@@ -4530,11 +4530,17 @@ components:
         bandcamp_url:
           type: string
           nullable: true
+          maxLength: 512
           description: >
             A link to the record on Bandcamp, a preview for choosing and
-            hearing it and not the station's review copy. Must be an `https`
-            URL on `bandcamp.com` or a subdomain of it; any other value is a
-            400.
+            hearing it and not the station's review copy. Surrounding
+            whitespace is trimmed. A blank or whitespace-only string means no
+            link, the same as `null`. Any other value must be an `https` URL
+            on `bandcamp.com` or a subdomain of it, or the request is a 400.
+            Any link sent counts as entered by a music director, and a lookup
+            never replaces it, so send `bandcamp_url` only when a music
+            director entered or changed it, not to send back the value a read
+            returned.
 
     IntakeItemPatch:
       type: object
@@ -4608,11 +4614,19 @@ components:
         bandcamp_url:
           type: string
           nullable: true
+          maxLength: 512
           description: >
             A link to the record on Bandcamp, a preview for choosing and
-            hearing it and not the station's review copy. Must be an `https`
-            URL on `bandcamp.com` or a subdomain of it; any other value is a
-            400. A PATCH with `null` clears it.
+            hearing it and not the station's review copy. Surrounding
+            whitespace is trimmed. A blank or whitespace-only string means no
+            link, the same as `null`. Any other value must be an `https` URL
+            on `bandcamp.com` or a subdomain of it, or the request is a 400.
+            A PATCH with `null` or a blank string clears it. Swift omits nil
+            optionals and cannot send an explicit `null`, so it sends an
+            empty string. Any link sent counts as entered by a music
+            director, and a lookup never replaces it, so send `bandcamp_url`
+            only when a music director entered or changed it, not to send
+            back the value a read returned.
         cited_album_id:
           type: integer
           nullable: true
