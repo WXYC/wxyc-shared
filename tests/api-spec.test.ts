@@ -4361,6 +4361,7 @@ describe('OpenAPI Specification', () => {
         ['/intake/{id}/checkout', 'post', 'Delivered by WXYC/Backend-Service#2798 (the music-director email for a digital album: WXYC/Backend-Service#3102; refusing an item with a review waiting: WXYC/Backend-Service#3387).'],
         ['/intake/{id}/accept', 'post', 'Delivered by WXYC/Backend-Service#2798 (the music-director email for a digital album: WXYC/Backend-Service#3102).'],
         ['/intake/{id}/accept-review', 'post', 'Delivered by WXYC/Backend-Service#2860 (clearing a digital album\'s holder: WXYC/Backend-Service#3101).'],
+        ['/intake/{id}/pass', 'post', 'Delivered by WXYC/Backend-Service#2798 (passing a held item, and emailing only for a request: WXYC/Backend-Service#3388).'],
       ])('names the ticket that delivers the digital behaviour at %s %s', (path, method, sentence) => {
         expect(flat(operation(path, method).description)).toContain(sentence);
       });
@@ -4423,18 +4424,17 @@ describe('OpenAPI Specification', () => {
       expect(forbidden).toContain(`Otherwise an item not in effective state ${state}${noHolder} answers 409 \`state_changed\` instead`);
     });
 
+    // Each sentence is pinned whole, so a partial edit fails the suite.
     it('describes both cases /pass accepts, the email rule and the 403/409/403 precedence', () => {
       const o = operation('/intake/{id}/pass', 'post');
       expect(o.summary).toBe('Pass on an item');
       const text = flat(o.description);
       expect(text).toContain('Returns the item to the review shelf and records a pass.');
-      expect(text).toContain('a request (an item in effective state `requested`, called by the requested DJ)');
-      expect(text).toContain('a held item (an item in state `checked_out` whose holder is the caller and which has no submitted review;');
-      expect(text).toContain('emailed only when the pass answers a request');
-      expect(text).toContain('Precedence: a caller without the `reviews` grant the route requires gets a 403 in any state; otherwise an item in neither state, or a held item with a submitted review, answers 409 `state_changed`');
-      expect(text).toContain('`POST /intake/{id}/release`');
-      expect(text).toContain('otherwise a caller who is neither the requested DJ nor the holder gets a 403.');
-      expect(flat(o.responses?.['403']?.description)).toContain('the caller is neither the requested DJ nor the holder');
+      expect(text).toContain('Accepts two cases: a request (an item in effective state `requested`, called by the requested DJ) and a held item (an item in state `checked_out` whose holder is the caller and which has no submitted review; the holder\'s checkout is cleared).');
+      expect(text).toContain('The music directors are emailed only when the pass answers a request.');
+      expect(text).toContain('Grant: `reviews: write`.');
+      expect(text).toContain('Precedence: a caller without the `reviews` grant the route requires gets a 403 in any state; otherwise an item not in effective state `requested` or `checked_out`, or a `checked_out` item with a submitted review, answers 409 `state_changed` (a holder of an item whose review is submitted marks the disc returned with `POST /intake/{id}/release` instead); otherwise a caller who is neither the requested DJ nor the holder gets a 403.');
+      expect(flat(o.responses?.['403']?.description)).toBe('Caller lacks the `reviews: write` grant, in any state; or the item is in effective state `requested` or `checked_out` and the caller is neither the requested DJ nor the holder. Otherwise an item not in effective state `requested` or `checked_out`, or a `checked_out` item with a submitted review, answers 409 `state_changed` instead');
     });
 
     it('takes dj_id as the /request body', () => {
