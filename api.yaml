@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.29.0
+  version: 11.30.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -5351,12 +5351,23 @@ components:
                 create. `false` creates a draft that is not accepted, like any
                 other create. Sent with an `album_id` subject, with either
                 value, it is a 400.
+            copied_from_submission_id:
+              type: integer
+              description: >
+                Only a caller with `reviews: manage` may send this, and only
+                with an `intake_item_id` subject (a 400 with `album_id`). The
+                `id` of the form review (`AlbumReview`, from `GET
+                /album-reviews`) whose text this review was copied from.
+                Sending it makes the create an on-behalf create, so `author` is
+                required. An id naming no form review is a 400. It is kept with
+                the review and never returned. How it affects `GET
+                /album-reviews` is set out in Backend-Service ADR 0011.
       description: >
         Creates a draft, except an on-behalf or handwritten create that names
         an `intake_item_id` and does not send `accept: false`, which creates a
         submitted, accepted review (see `accept`). Send exactly one of `intake_item_id` and `album_id`.
         A caller with `reviews: manage` may also send `author`,
-        `author_user_id` and `medium`, which makes it an on-behalf review:
+        `author_user_id`, `medium` and `copied_from_submission_id`, which makes it an on-behalf review:
         `author` is free text, `author_user_id` optionally links the
         reviewer's account, and the caller is recorded as the one who
         recorded it. When `author_user_id` is sent, that account is the

@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.29.0');
+      expect(spec.info.version).toBe('11.30.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -10218,8 +10218,8 @@ describe('OpenAPI Specification', () => {
       const request = schema('NewReviewRequest');
       expect(request.allOf?.[0]).toEqual(ref('ReviewFields'));
       expect(propertyKeysOf('NewReviewRequest').sort()).toEqual([
-        'accept', 'album_id', 'artist_blurb', 'author', 'author_user_id', 'buzzwords', 'credit', 'fcc', 'intake_item_id',
-        'medium', 'publish_apps', 'publish_instagram', 'publish_website', 'recommended_tracks', 'review',
+        'accept', 'album_id', 'artist_blurb', 'author', 'author_user_id', 'buzzwords', 'copied_from_submission_id', 'credit', 'fcc',
+        'intake_item_id', 'medium', 'publish_apps', 'publish_instagram', 'publish_website', 'recommended_tracks', 'review',
       ]);
       expect(requiredKeysOf('NewReviewRequest')).toEqual([]);
       const own = request.allOf?.[1] as Schema;
@@ -10305,6 +10305,21 @@ describe('OpenAPI Specification', () => {
       expect(description).toContain('a `typed` review with a `null` `review` is a 400 at create');
       expect(description).toContain('`false` creates a draft that is not accepted, like any other create.');
       expect(description).toContain('Sent with an `album_id` subject, with either value, it is a 400.');
+    });
+
+    it('declares NewReviewRequest.copied_from_submission_id as an optional integer that no response returns', () => {
+      const own = schema('NewReviewRequest').allOf![1] as Schema;
+      expect(own.properties?.copied_from_submission_id).toMatchObject({ type: 'integer' });
+      expect(own.required ?? []).not.toContain('copied_from_submission_id');
+      const description = flat(own.properties!.copied_from_submission_id!.description as string);
+      expect(description).toContain('Only a caller with `reviews: manage` may send this, and only with an `intake_item_id` subject (a 400 with `album_id`).');
+      expect(description).toContain('The `id` of the form review (`AlbumReview`, from `GET /album-reviews`) whose text this review was copied from.');
+      expect(description).toContain('Sending it makes the create an on-behalf create, so `author` is required.');
+      expect(description).toContain('An id naming no form review is a 400.');
+      expect(description).toContain('It is kept with the review and never returned.');
+      expect(description).toContain('How it affects `GET /album-reviews` is set out in Backend-Service ADR 0011.');
+      expect(flat(schema('NewReviewRequest').description)).toMatch(/`reviews: manage` may also send `author`,\s*`author_user_id`, `medium` and `copied_from_submission_id`/);
+      expect(schema('Review').properties).not.toHaveProperty('copied_from_submission_id');
     });
 
     it('generates NewReviewRequest.accept as an optional TypeScript property', () => {
