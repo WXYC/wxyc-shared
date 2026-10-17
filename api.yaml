@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.27.0
+  version: 11.28.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4157,19 +4157,20 @@ components:
         One record a music director logged and that is waiting for a review
         (WXYC/Backend-Service#2791): either a disc the station holds, or an
         album that arrived as files (`digital`), which a music director burns
-        onto CD-R once its review is chosen. Its three DJ-name
-        fields (`requested_dj_name`, `checked_out_by_name`,
+        onto CD-R once its review is chosen. Its four name
+        fields (`requested_dj_name`, `requested_by_name`, `checked_out_by_name`,
         `passes[].dj_name`) hold the person's real name as shown inside the
         station, falling back to their account name (on-air handle, else
-        username) when no real name is on file, current at read time. They
+        username) when no real name is on file, current at read time
+        (`requested_by_name` is read at request time instead). They
         are station-only: not for any public or anonymous surface, because
         they hold a legal name, and never for client telemetry (analytics
         properties, error breadcrumbs, logs). `passes` and `draft_authors` are
         present only for callers holding `reviews: manage`; `draft_authors`
         is `reviews.author` free text: a real name or account name for a DJ's
         own review, but whatever the music director typed for an on-behalf
-        review. It carries the same station-only caveat as the three
-        DJ-name fields; see `IntakeDeleteResponse.deleted_review_authors`.
+        review. It carries the same station-only caveat as the four
+        name fields; see `IntakeDeleteResponse.deleted_review_authors`.
       required:
         - id
         - artist_name
@@ -4272,6 +4273,27 @@ components:
             The requested DJ's real name as shown inside the station, falling back to
             their account name (on-air handle, else username) when no real
             name is on file, current at read time. Station-only: not for any
+            public or anonymous surface, because it holds a legal name; never
+            for client telemetry (analytics properties, error breadcrumbs,
+            logs).
+        requested_by:
+          type: string
+          nullable: true
+          description: >
+            The account that asked, set together with `requested_dj_id` when
+            the item enters `requested`. Read it together with `state` and
+            `effective_state`, not as proof of a live request: a checkout
+            clears the request's fields along with it. `null` means the
+            request was made before the server recorded the asker, or the
+            asker's account has since been deleted; show a generic line, not
+            an error, in either case.
+        requested_by_name:
+          type: string
+          nullable: true
+          description: >
+            The asker's real name as shown inside the station, falling back to
+            their account name (on-air handle, else username) when no real
+            name is on file, read at request time. Station-only: not for any
             public or anonymous surface, because it holds a legal name; never
             for client telemetry (analytics properties, error breadcrumbs,
             logs).
