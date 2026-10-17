@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.30.0');
+      expect(spec.info.version).toBe('11.30.1');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -4083,23 +4083,25 @@ describe('OpenAPI Specification', () => {
         },
       );
 
-      // No request lets a music director enter a Spotify or Apple Music link
-      // (only `bandcamp_url` is accepted), so these two cannot claim that a
-      // found link spares one a music director entered.
       it.each(LISTEN_FIRST_LINKS)('tells a client of an older server to treat a missing IntakeItem.%s like null, and says a rename can leave the old record\'s link', (field) => {
         const text = flat(schemaOf('IntakeItem').properties?.[field]?.description);
         expect(text).toContain('A server that predates the field leaves it out, so treat a missing key like `null`');
         expect(text).toContain('A rename\'s own response can still carry the old record\'s link');
       });
 
-      it('keeps the word logging out of every IntakeItem description', () => {
+      it('keeps the words log, logged and logging out of every IntakeItem description and out of IntakeItemState', () => {
         const item = schemaOf('IntakeItem');
-        const texts = [item.description, ...Object.values(item.properties ?? {}).map((p) => p.description)];
+        const state = spec.components.schemas.IntakeItemState as { description?: string };
+        const texts = [item.description, state.description, ...Object.values(item.properties ?? {}).map((p) => p.description)];
         for (const text of texts) {
-          expect(flat(text)).not.toMatch(/logging/i);
+          // The hyphen guards keep `print-log` (a real log) and the field name `logged_at` out of it.
+          expect(flat(text)).not.toMatch(/(?<![-\w])log(ged|ging)?(?![-\w])/i);
         }
       });
 
+      // No request lets a music director enter a Spotify or Apple Music link
+      // (only `bandcamp_url` is accepted), so these two cannot claim that a
+      // found link spares one a music director entered.
       it.each(['spotify_url', 'apple_music_url'])('says IntakeItem.%s is only ever filled by a lookup, as no request carries it', (field) => {
         const text = flat(schemaOf('IntakeItem').properties?.[field]?.description);
         expect(text).toContain('Filled by a lookup after adding and refreshed by one after a rename, never entered');
@@ -4367,7 +4369,7 @@ describe('OpenAPI Specification', () => {
         expect(item().required).toContain('digital');
         const text = flat(item().properties?.digital?.description);
         expect(text).toContain('True when the album reached the station as files, not a disc.');
-        expect(text).toContain('`format_id` is the CD-R format from the moment it is logged.');
+        expect(text).toContain('`format_id` is the CD-R format from the moment it is added.');
         expect(text).toContain('It stays true after filing; screens show the format as Digital until the record is filed.');
       });
 
@@ -4429,7 +4431,7 @@ describe('OpenAPI Specification', () => {
       // the station holds, which a digital album is not.
       it('words IntakeItem, POST /intake and checked_out_by so they are true of a disc and of an album that arrived as files', () => {
         const schemaText = flat((spec.components.schemas.IntakeItem as { description?: string }).description);
-        expect(schemaText).toContain('One record a music director logged and that is waiting for a review (WXYC/Backend-Service#2791): either a disc the station holds, or an album that arrived as files (`digital`), which a music director burns onto CD-R once its review is chosen.');
+        expect(schemaText).toContain('One record a music director added and that is waiting for a review (WXYC/Backend-Service#2791): either a disc the station holds, or an album that arrived as files (`digital`), which a music director burns onto CD-R once its review is chosen.');
         const post = flat(operation('/intake', 'post').description);
         expect(post).toContain('A music director logs a record the station wants reviewed: either a disc the station holds, or an album that arrived as files (`digital`), which a music director burns onto CD-R once its review is chosen.');
         const holder = flat(item().properties?.checked_out_by?.description);
