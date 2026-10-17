@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.27.0');
+      expect(spec.info.version).toBe('11.28.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -262,6 +262,12 @@ describe('OpenAPI Specification', () => {
         expect(text).toContain('current at read time');
         expect(text).toContain(notPublic);
       }
+      // requested_by_name is read at request time, not at read time, so it
+      // takes the rest of the rule but not the "current" clause.
+      const askedBy = flat(item.requested_by_name.description);
+      expect(askedBy).toContain(realName);
+      expect(askedBy).toContain(fallback);
+      expect(askedBy).toContain(notPublic);
       // Every author-style field must say why it is station-only. The phrase
       // is the new rule's, so the pre-#624 wording fails it on each field.
       const holdsLegalName = /because (it holds|they hold) a legal name/;
@@ -4006,8 +4012,12 @@ describe('OpenAPI Specification', () => {
       // idiom, matching `AlbumReview`'s own 14 nullable fields), not
       // optional+nullable -- otherwise a consumer can't tell "not sent"
       // apart from "meaningfully null".
+      // `requested_by` and `requested_by_name` (#684) are the deliberate
+      // exception: added after the fact, so they stay optional for a client
+      // reading a server that predates them (see the dedicated test below).
+      const optionalNullable = ['requested_by', 'requested_by_name'];
       const nullableFields = Object.entries(item.properties ?? {})
-        .filter(([, prop]) => prop.nullable)
+        .filter(([name, prop]) => prop.nullable && !optionalNullable.includes(name))
         .map(([name]) => name);
       expect(nullableFields.length).toBeGreaterThan(0);
       for (const name of nullableFields) {
@@ -4105,7 +4115,7 @@ describe('OpenAPI Specification', () => {
       // caveat and say so, and no longer calls it a weaker guarantee.
       const text = flat(item.description);
       expect(text).toContain('`passes` and `draft_authors` are present only for callers holding `reviews: manage`');
-      expect(text).toContain("`draft_authors` is `reviews.author` free text: a real name or account name for a DJ's own review, but whatever the music director typed for an on-behalf review. It carries the same station-only caveat as the three DJ-name fields; see `IntakeDeleteResponse.deleted_review_authors`.");
+      expect(text).toContain("`draft_authors` is `reviews.author` free text: a real name or account name for a DJ's own review, but whatever the music director typed for an on-behalf review. It carries the same station-only caveat as the four name fields; see `IntakeDeleteResponse.deleted_review_authors`.");
       expect(text).not.toContain('weaker guarantee');
     });
 
@@ -4118,10 +4128,32 @@ describe('OpenAPI Specification', () => {
       expect(text).not.toMatch(/held by a DJ as `requested` or `checked_out`/);
     });
 
-    it('names all three DJ-name fields in the single IntakeItem sentence', () => {
+    it('names all four name fields in the single IntakeItem sentence', () => {
       const item = spec.components.schemas.IntakeItem as { description?: string };
       const text = flat((item.description ?? ''));
-      expect(text).toMatch(/`requested_dj_name`, `checked_out_by_name`,? (and )?`passes\[\]\.dj_name`/);
+      expect(text).toMatch(/Its four name fields \(`requested_dj_name`, `requested_by_name`, `checked_out_by_name`,? (and )?`passes\[\]\.dj_name`\)/);
+    });
+
+    // WXYC/wxyc-shared#684: a requested record shows who asked.
+    it('declares IntakeItem.requested_by and requested_by_name as optional nullable strings after requested_dj_name', () => {
+      const item = spec.components.schemas.IntakeItem as { required: string[]; properties: Record<string, any> };
+      const keys = Object.keys(item.properties);
+      expect(keys.indexOf('requested_by')).toBe(keys.indexOf('requested_dj_name') + 1);
+      expect(keys.indexOf('requested_by_name')).toBe(keys.indexOf('requested_dj_name') + 2);
+      for (const name of ['requested_by', 'requested_by_name']) {
+        expect(item.properties[name].type, name).toBe('string');
+        expect(item.properties[name].nullable, name).toBe(true);
+        expect(item.required, name).not.toContain(name);
+      }
+      const by = flat(item.properties.requested_by.description);
+      expect(by).toContain('set together with `requested_dj_id` when the item enters `requested`');
+      expect(by).toContain('Read it together with `state` and `effective_state`, not as proof of a live request');
+      expect(by).toContain("a checkout clears the request's fields");
+      expect(by).toContain('made before the server recorded the asker');
+      expect(by).toContain("asker's account has since been deleted");
+      const byName = flat(item.properties.requested_by_name.description);
+      expect(byName).toContain("asker's real name as shown inside the station");
+      expect(byName).toContain('read at request time');
     });
 
     it('states five things a restore does not put back, as five separate list items', () => {
