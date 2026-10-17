@@ -4241,8 +4241,12 @@ components:
             A link to the record on Spotify, or null when none is known. A
             preview for choosing and hearing a record, not the station's
             review copy: certification counts only a recorded listen of the
-            station's file. Filled by a lookup after logging, never entered
-            by a music director: no request carries it.
+            station's file. Filled by a lookup after adding and refreshed by
+            one after a rename, never entered by a music director: no request
+            carries it. A rename's own response can still carry the old
+            record's link, as the lookup runs without being waited for. A
+            server that predates the field leaves it out, so treat a missing
+            key like `null`.
         apple_music_url:
           type: string
           nullable: true
@@ -4250,8 +4254,12 @@ components:
             A link to the record on Apple Music, or null when none is known.
             A preview for choosing and hearing a record, not the station's
             review copy: certification counts only a recorded listen of the
-            station's file. Filled by a lookup after logging, never entered
-            by a music director: no request carries it.
+            station's file. Filled by a lookup after adding and refreshed by
+            one after a rename, never entered by a music director: no request
+            carries it. A rename's own response can still carry the old
+            record's link, as the lookup runs without being waited for. A
+            server that predates the field leaves it out, so treat a missing
+            key like `null`.
         bandcamp_url:
           type: string
           nullable: true
@@ -4259,10 +4267,14 @@ components:
             A link to the record on Bandcamp, or null when none is known. A
             preview for choosing and hearing a record, not the station's
             review copy: certification counts only a recorded listen of the
-            station's file. Entered by a music director when logging or
-            editing the record, or filled by a lookup after logging; a found
-            link never replaces one a music director entered. There is no
-            Discogs URL field: clients build it from `discogs_release_id`.
+            station's file. Entered by a music director when adding or
+            editing the record, or filled by a lookup after adding and
+            refreshed by one after a rename; a found link never replaces one
+            a music director entered. A rename's own response can still carry
+            the old record's link, as the lookup runs without being waited
+            for. A server that predates the field leaves it out, so treat a
+            missing key like `null`. There is no Discogs URL field: clients
+            build it from `discogs_release_id`.
         state:
           $ref: '#/components/schemas/IntakeItemState'
         effective_state:
