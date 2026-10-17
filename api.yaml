@@ -4161,8 +4161,7 @@ components:
         fields (`requested_dj_name`, `requested_by_name`, `checked_out_by_name`,
         `passes[].dj_name`) hold the person's real name as shown inside the
         station, falling back to their account name (on-air handle, else
-        username) when no real name is on file, current at read time
-        (`requested_by_name` is read at request time instead). They
+        username) when no real name is on file, current at read time. They
         are station-only: not for any public or anonymous surface, because
         they hold a legal name, and never for client telemetry (analytics
         properties, error breadcrumbs, logs). `passes` and `draft_authors` are
@@ -4280,23 +4279,28 @@ components:
           type: string
           nullable: true
           description: >
-            The account that asked, set together with `requested_dj_id` when
-            the item enters `requested`. Read it together with `state` and
-            `effective_state`, not as proof of a live request: a checkout
-            clears the request's fields along with it. `null` means the
-            request was made before the server recorded the asker, or the
-            asker's account has since been deleted; show a generic line, not
-            an error, in either case.
+            The asking music director's account id, shaped like
+            `checked_out_by`, set together with `requested_dj_id` when the
+            item enters `requested`. Read it together with `state` and
+            `effective_state`, not as proof of a live request: a stale
+            `requested` item keeps it set, and a checkout, accepting a review
+            or filing clears it along with the request's other fields. `null`
+            while `state: requested` means the request was made before the
+            server recorded the asker, or the asker's account has since been
+            deleted; show a generic line, not an error, in either case. It is
+            also `null` on an item with no live request, and a server that
+            predates the field leaves it out, so treat a missing key like
+            `null`.
         requested_by_name:
           type: string
           nullable: true
           description: >
             The asker's real name as shown inside the station, falling back to
             their account name (on-air handle, else username) when no real
-            name is on file, read at request time. Station-only: not for any
-            public or anonymous surface, because it holds a legal name; never
-            for client telemetry (analytics properties, error breadcrumbs,
-            logs).
+            name is on file, current at read time. `null` whenever
+            `requested_by` is `null`. Station-only: not for any public or
+            anonymous surface, because it holds a legal name; never for client
+            telemetry (analytics properties, error breadcrumbs, logs).
         requested_at:
           type: string
           format: date-time
@@ -14500,7 +14504,7 @@ paths:
         reviewed digital album therefore has no holder, its `overdue` is
         false, and `POST /intake/{id}/release` refuses it with the existing
         409 `state_changed`. A pending
-        request is withdrawn: `requested_dj_id` and `requested_at` are
+        request is withdrawn: `requested_dj_id`, `requested_by` and `requested_at` are
         cleared, since the record no longer needs a review from that DJ, and
         no notice is sent. This is not
         `POST /intake/{id}/accept`, which is the requested DJ accepting a
@@ -14662,7 +14666,7 @@ paths:
         `reviews: manage` **and** `catalog: write`. Returns the item with
         `album_id` (and `rotation_id` when the new release entered rotation).
         Filing clears the holder fields (`checked_out_by`, `checked_out_at`)
-        and any request fields (`requested_dj_id`, `requested_at`), because
+        and any request fields (`requested_dj_id`, `requested_by`, `requested_at`), because
         the music director has the record in hand. Filing stamps the item's FCC notes with the release. The 409 is an `IntakeConflictError` (`state_changed`, `not_reviewed`),
         or a `LibraryFilingConflictError` when the new-release arm collides
         with the catalog. Delivered by WXYC/Backend-Service#2803.

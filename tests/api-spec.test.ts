@@ -254,6 +254,7 @@ describe('OpenAPI Specification', () => {
       const item = schemas.IntakeItem.properties;
       for (const text of [
         flat(item.requested_dj_name.description),
+        flat(item.requested_by_name.description),
         flat(item.checked_out_by_name.description),
         flat(item.passes.items.properties.dj_name.description),
       ]) {
@@ -262,12 +263,6 @@ describe('OpenAPI Specification', () => {
         expect(text).toContain('current at read time');
         expect(text).toContain(notPublic);
       }
-      // requested_by_name is read at request time, not at read time, so it
-      // takes the rest of the rule but not the "current" clause.
-      const askedBy = flat(item.requested_by_name.description);
-      expect(askedBy).toContain(realName);
-      expect(askedBy).toContain(fallback);
-      expect(askedBy).toContain(notPublic);
       // Every author-style field must say why it is station-only. The phrase
       // is the new rule's, so the pre-#624 wording fails it on each field.
       const holdsLegalName = /because (it holds|they hold) a legal name/;
@@ -4146,14 +4141,24 @@ describe('OpenAPI Specification', () => {
         expect(item.required, name).not.toContain(name);
       }
       const by = flat(item.properties.requested_by.description);
+      expect(by).toContain("The asking music director's account id, shaped like `checked_out_by`");
       expect(by).toContain('set together with `requested_dj_id` when the item enters `requested`');
       expect(by).toContain('Read it together with `state` and `effective_state`, not as proof of a live request');
-      expect(by).toContain("a checkout clears the request's fields");
-      expect(by).toContain('made before the server recorded the asker');
+      expect(by).toContain("a checkout, accepting a review or filing clears it along with the request's other fields");
+      expect(by).toContain('`null` while `state: requested` means the request was made before the server recorded the asker');
       expect(by).toContain("asker's account has since been deleted");
+      expect(by).toContain('show a generic line, not an error, in either case');
+      expect(by).toContain('a server that predates the field leaves it out');
+      // The name is computed on every read and never stored, so it follows
+      // the id: current at read time, and null whenever the id is.
       const byName = flat(item.properties.requested_by_name.description);
       expect(byName).toContain("asker's real name as shown inside the station");
-      expect(byName).toContain('read at request time');
+      expect(byName).toContain('current at read time');
+      expect(byName).not.toContain('read at request time');
+      expect(byName).toContain('`null` whenever `requested_by` is `null`');
+      // A real name: station-only and never for client telemetry.
+      expect(byName).toContain('never for client telemetry (analytics properties, error breadcrumbs, logs)');
+      expect(flat(item.description)).not.toContain('read at request time');
     });
 
     it('states five things a restore does not put back, as five separate list items', () => {
@@ -4594,7 +4599,7 @@ describe('OpenAPI Specification', () => {
         const text = flat(o.description);
         expect(text).toContain('Files an item that has an accepted review (effective state `reviewed`). A citation does not stand in for one: it makes the cited release\'s typed reviews eligible for `POST /intake/{id}/accept-review`, after which the item is `reviewed` like any other. An item with no accepted review is 409 `not_reviewed`, and an item already filed is 409 `state_changed`.');
         expect(text).not.toContain('a cited item may still be in `pool`');
-        expect(text).toContain('Filing clears the holder fields (`checked_out_by`, `checked_out_at`) and any request fields (`requested_dj_id`, `requested_at`), because the music director has the record in hand.');
+        expect(text).toContain('Filing clears the holder fields (`checked_out_by`, `checked_out_at`) and any request fields (`requested_dj_id`, `requested_by`, `requested_at`), because the music director has the record in hand.');
         expect(text).toContain('The 409 is an `IntakeConflictError` (`state_changed`, `not_reviewed`)');
         expect(text).not.toContain('invalid_citation');
         expect(text).toContain('`catalog: write`');
@@ -4705,7 +4710,7 @@ describe('OpenAPI Specification', () => {
         expect(text).toContain('From effective state `pool`, `requested` or `checked_out` the item becomes `reviewed`.');
         expect(text).toContain('the accepted review is swapped and the state stays');
         expect(text).toContain('`checked_out_by` and `checked_out_at` are left as they are, so an item accepted while a DJ still has it checked out is `reviewed` and still names its holder, except for a digital album: both are cleared, because nothing was lent out.');
-        expect(text).toContain('A pending request is withdrawn: `requested_dj_id` and `requested_at` are cleared, since the record no longer needs a review from that DJ, and no notice is sent.');
+        expect(text).toContain('A pending request is withdrawn: `requested_dj_id`, `requested_by` and `requested_at` are cleared, since the record no longer needs a review from that DJ, and no notice is sent.');
         expect(text).toContain('A reviewed digital album therefore has no holder, its `overdue` is false, and `POST /intake/{id}/release` refuses it with the existing 409 `state_changed`.');
         expect(text).not.toContain('The holder fields');
         expect(text).toContain("This is not `POST /intake/{id}/accept`, which is the requested DJ accepting a music director's request.");
