@@ -68,6 +68,7 @@ These variables use the same values on both request-o-matic and library-metadata
 | `DISCOGS_TOKEN` | Discogs API token | No (degrades gracefully) |
 | `DATABASE_URL_DISCOGS` | PostgreSQL URL for Discogs cache | No (degrades to API-only) |
 | `SENTRY_DSN` | Sentry error tracking | No |
+| `POSTHOG_ERRORS_API_KEY` | PostHog error tracking | No |
 | `POSTHOG_API_KEY` | PostHog telemetry | No |
 
 ### request-o-matic only

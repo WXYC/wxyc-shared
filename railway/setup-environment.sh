@@ -81,6 +81,7 @@ programmatically. Use the Railway dashboard to complete the following:
        DISCOGS_TOKEN=<your-discogs-token>
        DATABASE_URL_DISCOGS=<postgres-internal-url>
        SENTRY_DSN=<your-sentry-dsn>
+       POSTHOG_ERRORS_API_KEY=<your-posthog-errors-key>
        POSTHOG_API_KEY=<your-posthog-key>
 
 3. SERVICE: library-metadata-lookup
@@ -92,6 +93,7 @@ programmatically. Use the Railway dashboard to complete the following:
        DISCOGS_TOKEN=<your-discogs-token>
        DATABASE_URL_DISCOGS=<postgres-internal-url>
        SENTRY_DSN=<your-sentry-dsn>
+       POSTHOG_ERRORS_API_KEY=<your-posthog-errors-key>
        POSTHOG_API_KEY=<your-posthog-key>
 
 4. NETWORKING
