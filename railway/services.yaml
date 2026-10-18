@@ -44,6 +44,7 @@ services:
         - DISCOGS_TOKEN           # Discogs API for artwork + track lookup
         - SLACK_WEBHOOK_URL       # Slack webhook for posting results
         - SENTRY_DSN              # Sentry error tracking
+        - POSTHOG_ERRORS_API_KEY # PostHog error tracking
         - POSTHOG_API_KEY         # PostHog telemetry
         - DATABASE_URL_DISCOGS    # PostgreSQL URL for Discogs cache (from postgres-nard)
         - LIBRARY_DB_PATH         # Path to SQLite database (default: library.db)
@@ -71,6 +72,7 @@ services:
       optional:
         - DISCOGS_TOKEN           # Discogs API for artwork + track lookup
         - SENTRY_DSN              # Sentry error tracking
+        - POSTHOG_ERRORS_API_KEY # PostHog error tracking
         - POSTHOG_API_KEY         # PostHog telemetry
         - DATABASE_URL_DISCOGS    # PostgreSQL URL for Discogs cache (from postgres-nard)
         - LIBRARY_DB_PATH         # Path to SQLite database (default: library.db)
