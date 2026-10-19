@@ -80,8 +80,10 @@ jobs:
           node-version: '24'
           cache: 'npm'
 
+      # Pinned: v1.34.0 flags added response-enum values as breaking and fails
+      # tests/breaking-changes.test.ts. Unpin in #720.
       - name: Install oasdiff
-        run: GOBIN=/usr/local/bin go install github.com/oasdiff/oasdiff@latest
+        run: GOBIN=/usr/local/bin go install github.com/oasdiff/oasdiff@v1.33.0
 
       # scripts/generate-python-models.sh (#107) prefers `uv` so the pinned
       # datamodel-code-generator version in the script is authoritative rather
