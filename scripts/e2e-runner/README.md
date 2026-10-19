@@ -106,7 +106,8 @@ jobs:
           go-version: '1.22'
       - name: Install oasdiff
         run: |
-          go install github.com/oasdiff/oasdiff@latest
+          # Pinned to match ci.yml; unpin in #720.
+          go install github.com/oasdiff/oasdiff@v1.33.0
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: npm ci
         run: npm ci --ignore-scripts

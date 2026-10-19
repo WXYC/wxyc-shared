@@ -21,8 +21,10 @@ jobs:
           registry-url: 'https://npm.pkg.github.com'
           scope: '@wxyc'
 
+      # Pinned: v1.34.0 flags added response-enum values as breaking and fails
+      # tests/breaking-changes.test.ts. Unpin in #720.
       - name: Install oasdiff
-        run: GOBIN=/usr/local/bin go install github.com/oasdiff/oasdiff@latest
+        run: GOBIN=/usr/local/bin go install github.com/oasdiff/oasdiff@v1.33.0
 
       - name: Install dependencies (skip build)
         run: npm ci --ignore-scripts
