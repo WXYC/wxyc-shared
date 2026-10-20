@@ -113,6 +113,11 @@ describe("canAssignCapability", () => {
       [user("dj"), false, "dj cannot assign"],
       [user("member"), false, "member cannot assign"],
       [user("dj", ["webmaster"]), false, "webmaster cannot assign"],
+      [
+        user("musicDirector", ["webmaster"]),
+        false,
+        "musicDirector with webmaster cannot assign",
+      ],
       [user("dj", ["reviews_beta"]), false, "reviews_beta holder cannot assign"],
       [
         user("musicDirector", ["reviews_beta"]),

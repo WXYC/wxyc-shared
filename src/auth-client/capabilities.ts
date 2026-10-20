@@ -12,9 +12,8 @@ export type Capability = (typeof CAPABILITIES)[number];
  * Policy as data: who can assign which capabilities.
  *
  * Delegation chain:
- *   StationManager -> can assign webmaster or editor
+ *   StationManager -> can assign webmaster, editor or reviews_beta (no capability delegates reviews_beta)
  *   Webmaster (capability) -> can assign editor only
- *   StationManager -> alone can assign reviews_beta (no capability delegates it)
  */
 export const CAPABILITY_ASSIGNERS: Record<
   Capability,
