@@ -4809,6 +4809,30 @@ components:
         reason:
           $ref: '#/components/schemas/IntakeConflictReason'
 
+    IntakeRequestRefusedCode:
+      type: string
+      enum: [asked_dj_cannot_see_feature]
+      description: >
+        Discriminator for the coded `POST /intake/{id}/request` 400. Named
+        rather than inline, pairing with `IntakeRequestRefusedError` the way
+        `ShowAlreadyOpenErrorCode` pairs with `ShowAlreadyOpenError`.
+
+    IntakeRequestRefusedError:
+      type: object
+      description: >
+        The coded `POST /intake/{id}/request` 400 body, shape-compatible with
+        `ApiErrorResponse`. Sent when the reviews audience is not `everyone`
+        (so `staff` or `off`) and the asked account is below music director and
+        does not hold `reviews_beta`; no request is recorded.
+      required:
+        - message
+        - code
+      properties:
+        message:
+          type: string
+        code:
+          $ref: '#/components/schemas/IntakeRequestRefusedCode'
+
     IntakeDeleteResponse:
       type: object
       description: >
@@ -14842,11 +14866,20 @@ paths:
         '400':
           description: >-
             Validation failure, such as a malformed id or a missing or invalid
-            `dj_id` (including one that names no account holding `reviews: write`)
+            `dj_id` (including one that names no account holding `reviews: write`).
+            When the reviews audience is not `everyone` (so `staff` or `off`) and
+            the asked account is below music director and does not hold
+            `reviews_beta`, the body is `IntakeRequestRefusedError` with `code`
+            `asked_dj_cannot_see_feature` and `message` "This DJ can't see
+            reviews yet. A station manager can add them to the reviews beta in
+            the DJ Roster."; no request is recorded. Every other 400 here is the
+            plain `ApiErrorResponse` with no code.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiErrorResponse'
+                oneOf:
+                  - $ref: '#/components/schemas/IntakeRequestRefusedError'
+                  - $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
