@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.0.0');
+      expect(spec.info.version).toBe('12.1.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -5020,13 +5020,6 @@ describe('OpenAPI Specification', () => {
       }
     });
 
-    // Deleted, and asserted absent so it cannot return. Specialty shows exist
-    // in the schedule -- `Schedule.specialty_id` still carries the reference --
-    // but no endpoint ever resolved one into a name and description, so this
-    // shape described a lookup that is not offered.
-    it('does not define SpecialtyShow', () => {
-      expect(spec.components.schemas).not.toHaveProperty('SpecialtyShow');
-    });
   });
 
   describe('Request Line Schemas', () => {
@@ -7783,6 +7776,7 @@ describe('OpenAPI Specification', () => {
       ['get', '/flowsheet/search', 'public playlist-archive search'],
       ['get', '/library/genres', 'deliberately public per BS#1682 — station-wide reference data, and dj-site#1004 SSR cannot attach a JWT. POST /library/genres stays catalog:write'],
       ['get', '/schedule', 'no auth middleware on schedule_route.get("/")'],
+      ['get', '/specialty-shows', 'public catalog read, wxyc-shared#700 — now-playing surfaces and the DJ site read it without a session; publicly cacheable (max-age=300, ETag). The management list is a separate path'],
       ['post', '/auth/sign-in/email', 'better-auth sign-in route — the whole point is that the caller has no session yet'],
       ['post', '/auth/sign-in/username', 'better-auth sign-in route — same'],
       ['post', '/auth/sign-in/email-otp', 'better-auth OTP redemption — same; this is where a session is first created for the OTP flow'],
@@ -11084,6 +11078,90 @@ describe('OpenAPI Specification', () => {
       expect(patch).not.toMatch(/not writable by any/);
       expect(flat(sch('ArtistCard').description)).toContain('ArtistRefileResult');
       expect(flat(sch('LockUnavailableRefusal').description)).toContain('POST /library/artists/{id}/refile');
+    });
+  });
+
+  describe('specialty-show catalog (WXYC/wxyc-shared#700)', () => {
+    const sch = (name: string) => spec.components.schemas[name] as Record<string, any>;
+    const nullableRef = (name: string) => ({ allOf: [ref(name)], nullable: true });
+
+    it('declares SpotlightRole as exactly the five roles', () => {
+      expect(sch('SpotlightRole').type).toBe('string');
+      expect(sch('SpotlightRole').enum).toEqual(['performer', 'dj', 'reader', 'guest', 'host']);
+    });
+
+    it.each([
+      ['SpecialtyShowArtwork', ['square_url']],
+      ['SpecialtyShowSlot', ['day', 'start_time', 'duration_minutes', 'cadence']],
+      ['SpecialtyShowRef', ['id', 'slug', 'name', 'short_name', 'logs_playcuts']],
+      ['SpecialtyShow', ['id', 'slug', 'name', 'short_name', 'logs_playcuts', 'slots', 'active']],
+    ])('%s requires exactly %j', (name, required) => {
+      expect([...requiredKeysOf(name)].sort()).toEqual([...required].sort());
+    });
+
+    it('composes SpecialtyShow over SpecialtyShowRef and adds the roster fields', () => {
+      expect(sch('SpecialtyShow').allOf[0]).toEqual(ref('SpecialtyShowRef'));
+      expect(propertyOf('SpecialtyShow', 'slots')).toEqual({ type: 'array', items: ref('SpecialtyShowSlot') });
+      expect(propertyOf('SpecialtyShow', 'description')).toMatchObject({ type: 'string', nullable: true });
+      expect(propertyOf('SpecialtyShow', 'active')).toMatchObject({ type: 'boolean' });
+    });
+
+    it('nulls the optional ref fields and references the shared types', () => {
+      expect(propertyOf('SpecialtyShowRef', 'default_spotlight_role')).toMatchObject(nullableRef('SpotlightRole'));
+      expect(propertyOf('SpecialtyShowRef', 'artwork')).toMatchObject(nullableRef('SpecialtyShowArtwork'));
+      expect(propertyOf('SpecialtyShowRef', 'tagline')).toMatchObject({ type: 'string', nullable: true });
+      expect(propertyOf('SpecialtyShowRef', 'accent_color')).toMatchObject({
+        pattern: '^#[0-9A-Fa-f]{6}$',
+        nullable: true,
+      });
+      expect(flat(propertyOf('SpecialtyShowRef', 'accent_color')?.description as string)).toMatch(
+        /light and dark.*4\.5:1.*3:1/,
+      );
+    });
+
+    it('bounds a slot to a Monday-zero weekday, a wall-clock time and three cadences', () => {
+      const props = sch('SpecialtyShowSlot').properties;
+      expect(props.day).toMatchObject({ type: 'integer', minimum: 0, maximum: 6 });
+      expect(props.start_time.pattern).toBe('^\\d{2}:\\d{2}$');
+      expect(props.cadence.enum).toEqual(['weekly', 'some_weeks', 'last_of_month']);
+    });
+
+    it('serves GET /specialty-shows publicly as SpecialtyShow[] with a validator cache', () => {
+      const op = operation('/specialty-shows', 'get') as Operation & {
+        security?: unknown[];
+        responses: Record<string, any>;
+      };
+      expect(op['x-wxyc-service']).toBe('backend-service');
+      expect(op.security).toEqual([]);
+      expect(responseSchema('/specialty-shows', 'get', '200')).toEqual({ type: 'array', items: ref('SpecialtyShow') });
+      const headers = op.responses['200'].headers;
+      expect(flat(headers['Cache-Control'].description)).toContain('public, max-age=300');
+      expect(headers.ETag).toBeDefined();
+      expect(op.responses['304']).toBeDefined();
+      expect(flat(op.description)).toContain('If-None-Match');
+    });
+
+    it.each(['FlowsheetRangeShow', 'ShowPlaylist'])('%s embeds a nullable SpecialtyShowRef as specialty', (name) => {
+      expect(propertyOf(name, 'specialty')).toMatchObject(nullableRef('SpecialtyShowRef'));
+    });
+
+    it('keeps FlowsheetRangeShow.specialty optional and ShowPlaylist.specialty_show_name required', () => {
+      expect(requiredKeysOf('FlowsheetRangeShow')).not.toContain('specialty');
+      expect(requiredKeysOf('ShowPlaylist')).toContain('specialty_show_name');
+    });
+
+    it('re-describes show_name as the airing title, not the program name', () => {
+      expect(flat(propertyOf('FlowsheetRangeShow', 'show_name')?.description as string)).toContain(
+        "This airing's free-text title",
+      );
+    });
+
+    it('describes specialty_id, show_name and the extra 400 cause on POST /flowsheet/join', () => {
+      const o = operation('/flowsheet/join', 'post');
+      const body = o.requestBody?.content?.['application/json']?.schema as Record<string, any>;
+      expect(flat(body.properties.specialty_id.description)).toContain('catalog id of the specialty program');
+      expect(flat(body.properties.show_name.description)).toContain("This airing's title");
+      expect(flat(o.responses?.['400']?.description)).toMatch(/`specialty_id` that names no program or a retired one/);
     });
   });
 });
