@@ -12285,6 +12285,32 @@ components:
     # Proxy / Config Types
     # ===================
 
+    FeatureAudience:
+      type: string
+      enum: [off, staff, everyone]
+      description: >
+        Who a gated feature is open to, globally: nobody (`off`), music
+        directors and testers (`staff`), or every account with DJ access
+        (`everyone`).
+
+    FeatureAccessEntry:
+      type: object
+      required: [audience, can_see]
+      properties:
+        audience:
+          $ref: '#/components/schemas/FeatureAudience'
+        can_see:
+          type: boolean
+          description: Whether the calling account can see the feature now.
+
+    FeatureAccessResponse:
+      type: object
+      description: One property per gated feature; a later feature is an additive property.
+      required: [reviews]
+      properties:
+        reviews:
+          $ref: '#/components/schemas/FeatureAccessEntry'
+
     AppConfig:
       type: object
       required:
@@ -19348,6 +19374,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppConfig'
+
+  /feature-access:
+    get:
+      x-wxyc-service: backend-service
+      summary: Get the signed-in account's access to each gated feature
+      description: >
+        For each gated feature, returns the global `audience` (the same for
+        every caller) and `can_see`, whether this account can see the feature
+        now. The rule: `off` means nobody; `staff` means music director or
+        above, or holding the feature's tester capability (`reviews_beta` for
+        `reviews`); `everyone` means every account with DJ access. An account
+        without DJ access never sees a feature. `audience` is returned beside
+        `can_see` so a client can tell "hidden for now, opening later" (show
+        the staff-phase notice) from "not here". The response holds only the
+        caller's own access, never who holds a capability. The audience can
+        change at run time (Backend-Service re-reads its flag about once a
+        minute), so a client reads this per page load and never caches it
+        longer. Served `Cache-Control: private, no-store`.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The caller's access, keyed by feature
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureAccessResponse'
+        '401':
+          description: No bearer token
 
   /config/secrets:
     get:

@@ -11251,4 +11251,45 @@ describe('OpenAPI Specification', () => {
       expect(flat(o.responses?.['403']?.description)).toContain('{message, reason}');
     });
   });
+
+  // GET /feature-access (WXYC/wxyc-shared#723): the signed-in account's audience
+  // and access per feature, replacing the DJ site's build-time reviews flag.
+  describe('GET /feature-access (#723)', () => {
+    const schemas = () => spec.components.schemas as Record<string, any>;
+    const op = () =>
+      (spec.paths['/feature-access'] as { get: Record<string, any> }).get;
+
+    it('serves the caller-only answer to bearer-authenticated callers, with 200 and 401', () => {
+      expect(op()['x-wxyc-service']).toBe('backend-service');
+      expect(op().security).toEqual([{ BearerAuth: [] }]);
+      expect(Object.keys(op().responses).sort()).toEqual(['200', '401']);
+      expect(op().responses['200'].content['application/json'].schema).toEqual(ref('FeatureAccessResponse'));
+    });
+
+    it('states the access rule and the private, no-store cache policy', () => {
+      const description = flat(op().description);
+      expect(description).toContain('Cache-Control: private, no-store');
+      expect(description).toContain('reviews_beta');
+      expect(description).toMatch(/music director or above/);
+      expect(description).toMatch(/never caches/);
+    });
+
+    it('closes FeatureAudience over off, staff, everyone', () => {
+      expect(schemas().FeatureAudience.enum).toEqual(['off', 'staff', 'everyone']);
+    });
+
+    it('gives each entry a required audience ref and a required boolean can_see', () => {
+      const entry = schemas().FeatureAccessEntry;
+      expect(entry.required).toEqual(expect.arrayContaining(['audience', 'can_see']));
+      expect(entry.properties.audience).toEqual(ref('FeatureAudience'));
+      expect(entry.properties.can_see.type).toBe('boolean');
+    });
+
+    it('keys the response by feature, with reviews the only key today', () => {
+      const response = schemas().FeatureAccessResponse;
+      expect(Object.keys(response.properties)).toEqual(['reviews']);
+      expect(response.properties.reviews).toEqual(ref('FeatureAccessEntry'));
+      expect(response.required).toEqual(['reviews']);
+    });
+  });
 });
