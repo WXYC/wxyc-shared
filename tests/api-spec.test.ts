@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.31.0');
+      expect(spec.info.version).toBe('12.0.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -6622,15 +6622,24 @@ describe('OpenAPI Specification', () => {
       ]);
     });
 
-    // #727 / Backend-Service#3554: a credit row names a member or collaborator,
-    // not another spelling of the artist. Synonym consumers (the BS concerts
-    // resolver) must be able to tell the two classes apart from the contract.
-    it('should describe wxyc_library_credit as a relational credit, not a spelling variant', () => {
-      const schema = spec.components.schemas.ArtistSearchAliasSource as { description?: string };
-      const description = schema.description ?? '';
-      expect(description).toContain('`wxyc_library_credit` is relational');
-      expect(description).toContain('not a spelling variant');
-      expect(description).toContain('`discogs_member` is relational');
+    // #727 / Backend-Service#3554: the descriptions carry the source classes
+    // that consumers act on. A credit row names a member or collaborator, not
+    // another spelling; `wxyc_library_alt` is the raw alternate name, so it
+    // isn't a guaranteed synonym; and LML fills `matched_via_alias` on
+    // lookups since LML#1444.
+    const describedAs = (schemaName: string, prop?: string): string => {
+      const node = prop ? propertyOf(schemaName, prop) : spec.components.schemas[schemaName];
+      return ((node as { description?: string } | undefined)?.description ?? '').replace(/\s+/g, ' ');
+    };
+    it.each([
+      ['ArtistSearchAliasSource', undefined, '`wxyc_library_credit` is relational'],
+      ['ArtistSearchAliasSource', undefined, 'cannot fully trust `wxyc_library_alt`'],
+      ['ArtistSearchAliasMethod', undefined, '`wxyc_library_credit` rows use `alt_curated`'],
+      ['ArtistMatchHint', undefined, 'LML#1444'],
+      ['LookupResultItem', 'matched_via_alias', 'LML#1444'],
+      ['LibrarySearchItem', 'matched_via_alias', 'LML#1444'],
+    ] as const)('%s %s description says %s', (schemaName, prop, phrase) => {
+      expect(describedAs(schemaName, prop)).toContain(phrase);
     });
 
     it('should define ArtistSearchAliasMethod enum', () => {

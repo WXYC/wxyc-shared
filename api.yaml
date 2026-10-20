@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.31.0
+  version: 12.0.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -9517,10 +9517,11 @@ components:
           items:
             $ref: '#/components/schemas/ArtistMatchHint'
           description: >
-            Sibling to `matched_via`. Reserved for the day LML composes
-            artist-alias hits itself; not produced in v1 of the
-            artist-search-alias plan (BS-local cache only). Optional and
-            backward-compatible.
+            Sibling to `matched_via`. LML fills it since LML#1444 when a row
+            is in the results because its alternate artist name credits the
+            requested artist: one hint, with the stored credit line as
+            `matched_variant` and `wxyc_library_alt` as `source`. LML does not
+            emit `wxyc_library_credit`. Optional and backward-compatible.
 
     CacheStats:
       type: object
@@ -10717,21 +10718,29 @@ components:
     ArtistSearchAliasSource:
       type: string
       description: >
-        Origin of an artist search alias variant. Opaque to BS storage (just a
-        tag); used by future read-path ranking and audit. Open enum — new
-        sources can be added without a wire-format break, so a client must
-        tolerate a value it does not know.
+        Origin of an artist search alias variant. Consumers act on it: catalog
+        search reports it in `matched_via_alias`, and the Backend-Service
+        concerts resolver uses it to decide which rows may resolve a headliner.
+        Open enum: new sources can be added, so a client must tolerate a value
+        it does not know.
         Sources fall into two classes. A synonym source is another name for
-        the same artist: `discogs_name_variation`, `discogs_alias` and
-        `wxyc_library_alt`. A relational source names a different person or
-        group that is related to the artist, and a consumer that needs a true
-        synonym (for example, matching a concert headliner to an artist) must
-        skip it. `discogs_member` is relational: a Discogs band member.
+        the same artist: `discogs_name_variation` and `discogs_alias`. A
+        relational source names a different person or group that is related
+        to the artist, and a consumer that needs a true synonym (for example,
+        matching a concert headliner to an artist) must skip it.
+        `discogs_member` is relational: a Discogs band member.
         `wxyc_library_credit` is relational: one name taken from a
         comma-joined WXYC alternate artist name, such as a member or
         collaborator credited on a release filed under this artist's card.
         It is a member or collaborator credit, not a spelling variant
-        (Backend-Service#3554). Catalog search matches both classes.
+        (Backend-Service#3554).
+        `wxyc_library_alt` is the raw WXYC alternate artist name, stored as
+        one value. It is usually a spelling variant, but sometimes it is a
+        member or collaborator credit: Backend-Service's shadow ingest stores
+        the whole value, and LML's alternate-credit hint (LML#1444) labels a
+        row that a credit brought in with this source. A consumer that needs
+        strict synonyms cannot fully trust `wxyc_library_alt` today.
+        Catalog search matches every source.
       enum:
         - discogs_name_variation
         - discogs_alias
@@ -10744,7 +10753,9 @@ components:
       description: >
         Semantic classification of how this variant relates to the subject
         artist. Distinct from source — multiple sources can emit the same
-        method.
+        method. `wxyc_library_credit` rows use `alt_curated`, like
+        `wxyc_library_alt` rows, because both come from the station's curated
+        alternate artist name.
       enum:
         - name_variation
         - alias
@@ -11869,9 +11880,11 @@ components:
     ArtistMatchHint:
       type: object
       description: >
-        Populated on library search result items when an artist-alias match
-        from the BS-local `artist_search_alias` cache drove the inclusion of
-        this release into the results (artist-search-alias plan PR 5).
+        Populated on search result items when an artist alias drove the
+        inclusion of this release into the results: Backend-Service catalog
+        search reads its `artist_search_alias` cache (artist-search-alias plan
+        PR 5), and LML's `POST /api/v1/lookup` labels a row that an alternate
+        artist credit brought in (LML#1444).
         Sibling to TrackMatchHint — track hints carry title + position +
         artist_credit which have no meaning for alias matches; alias hints
         carry the variant string that scored and its source tag for UX
@@ -11993,10 +12006,10 @@ components:
           items:
             $ref: '#/components/schemas/ArtistMatchHint'
           description: >
-            Sibling to `matched_via`. Reserved for the day LML composes
-            artist-alias hits itself; not produced in v1 of the
-            artist-search-alias plan (BS-local cache only). Optional and
-            backward-compatible.
+            Sibling to `matched_via`. Carries an artist-alias hint when one
+            brought the row in. LML fills the same field on
+            `LookupResultItem` (`POST /api/v1/lookup`) since LML#1444; no path
+            returns this schema today. Optional and backward-compatible.
 
     LibrarySearchResponse:
       type: object
