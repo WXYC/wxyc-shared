@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 11.30.1
+  version: 11.31.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -10719,12 +10719,25 @@ components:
       description: >
         Origin of an artist search alias variant. Opaque to BS storage (just a
         tag); used by future read-path ranking and audit. Open enum — new
-        sources can be added by LML without a wire-format break.
+        sources can be added without a wire-format break, so a client must
+        tolerate a value it does not know.
+        Sources fall into two classes. A synonym source is another name for
+        the same artist: `discogs_name_variation`, `discogs_alias` and
+        `wxyc_library_alt`. A relational source names a different person or
+        group that is related to the artist, and a consumer that needs a true
+        synonym (for example, matching a concert headliner to an artist) must
+        skip it. `discogs_member` is relational: a Discogs band member.
+        `wxyc_library_credit` is relational: one name taken from a
+        comma-joined WXYC alternate artist name, such as a member or
+        collaborator credited on a release filed under this artist's card.
+        It is a member or collaborator credit, not a spelling variant
+        (Backend-Service#3554). Catalog search matches both classes.
       enum:
         - discogs_name_variation
         - discogs_alias
         - discogs_member
         - wxyc_library_alt
+        - wxyc_library_credit
 
     ArtistSearchAliasMethod:
       type: string
@@ -10786,7 +10799,7 @@ components:
           description: >
             Per-source default confidence (e.g. 0.95 for
             discogs_name_variation, 0.85 for discogs_alias / wxyc_library_alt,
-            0.70 for discogs_member). v1 search ignores this; stored for v2
+            0.70 for discogs_member / wxyc_library_credit). v1 search ignores this; stored for v2
             ranking calibration.
 
     ArtistSearchAliasesResult:

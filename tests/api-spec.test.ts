@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('11.30.1');
+      expect(spec.info.version).toBe('11.31.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -6610,7 +6610,7 @@ describe('OpenAPI Specification', () => {
   });
 
   describe('Artist Search Alias Schemas (artist-search-alias plan)', () => {
-    it('should define ArtistSearchAliasSource as an open enum with the v1 sources', () => {
+    it('should define ArtistSearchAliasSource as an open enum with the v1 sources plus wxyc_library_credit', () => {
       const schema = spec.components.schemas.ArtistSearchAliasSource as { enum?: string[] };
       expect(schema).toBeDefined();
       expect(schema.enum).toEqual([
@@ -6618,7 +6618,19 @@ describe('OpenAPI Specification', () => {
         'discogs_alias',
         'discogs_member',
         'wxyc_library_alt',
+        'wxyc_library_credit',
       ]);
+    });
+
+    // #727 / Backend-Service#3554: a credit row names a member or collaborator,
+    // not another spelling of the artist. Synonym consumers (the BS concerts
+    // resolver) must be able to tell the two classes apart from the contract.
+    it('should describe wxyc_library_credit as a relational credit, not a spelling variant', () => {
+      const schema = spec.components.schemas.ArtistSearchAliasSource as { description?: string };
+      const description = schema.description ?? '';
+      expect(description).toContain('`wxyc_library_credit` is relational');
+      expect(description).toContain('not a spelling variant');
+      expect(description).toContain('`discogs_member` is relational');
     });
 
     it('should define ArtistSearchAliasMethod enum', () => {

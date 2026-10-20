@@ -39,3 +39,22 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # their leading `#`, so prose in this header is never read as an entry.
+
+# wxyc-shared#727 (Backend-Service#3554): `ArtistSearchAliasSource` gains
+# `wxyc_library_credit`. The schema's description has always called it an open
+# enum. Checked 2026-10-20, no consumer decodes it strictly:
+#   - Swift (wxyc-dj-ios, wxyc-ios-64) decodes an unknown value to
+#     `.unknownDefaultOpenApi` (`enumUnknownDefaultCase` in swift6.yaml).
+#   - The TypeScript type only widens. Backend-Service keeps its own copy and
+#     doesn't import this one.
+#   - WXYC-Android, wxyc-dj-android and dj-site don't read the field.
+#   - The strict Python StrEnum in LML and request-o-matic is never used to
+#     decode these responses.
+# LML never emits the new value: its composer writes only the Discogs sources
+# and `wxyc_library_alt`, so the two LML-served paths below can't carry it.
+# Whether an added response-enum value counts as breaking in general is #720.
+post /api/v1/artists/search-aliases/bulk added the new `wxyc_library_credit` enum value to the `artists/items/sources_present/items/` response property for the response status `200`
+post /api/v1/artists/search-aliases/bulk added the new `wxyc_library_credit` enum value to the `artists/items/variants/items/source` response property for the response status `200`
+post /api/v1/lookup added the new `wxyc_library_credit` enum value to the `results/items/matched_via_alias/items/source` response property for the response status `200`
+get /library added the new `wxyc_library_credit` enum value to the `items/matched_via_alias/items/source` response property for the response status `200`
+get /library/query added the new `wxyc_library_credit` enum value to the `results/items/matched_via_alias/items/source` response property for the response status `200`
