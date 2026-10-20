@@ -225,6 +225,24 @@ describe('OpenAPI Specification', () => {
       expect(spec.info.version).toBe('12.5.0');
     });
 
+    // WXYC/wxyc-shared#724: the coded 400 on POST /intake/{id}/request when the asked DJ cannot see reviews yet.
+    it('documents the coded asked_dj_cannot_see_feature refusal on the request route 400 (WXYC/wxyc-shared#724)', () => {
+      const schemas = spec.components.schemas as Record<string, any>;
+      expect(schemas.IntakeRequestRefusedCode.enum).toEqual(['asked_dj_cannot_see_feature']);
+      expect(schemas.IntakeRequestRefusedError.required).toEqual(['message', 'code']);
+      expect(schemas.IntakeRequestRefusedError.properties.code.$ref).toBe(
+        '#/components/schemas/IntakeRequestRefusedCode',
+      );
+      const post = (spec.paths as Record<string, any>)['/intake/{id}/request'].post;
+      expect(post.responses['400'].content['application/json'].schema.oneOf).toEqual([
+        { $ref: '#/components/schemas/IntakeRequestRefusedError' },
+        { $ref: '#/components/schemas/ApiErrorResponse' },
+      ]);
+      expect(flat(post.responses['400'].description)).toContain(
+        "This DJ can't see reviews yet. A station manager can add them to the reviews beta in the DJ Roster.",
+      );
+    });
+
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
       const patch = flat((spec.components.schemas.IntakeItemPatch as { description?: string }).description);
       expect(patch).toContain(
@@ -4595,7 +4613,9 @@ describe('OpenAPI Specification', () => {
     });
 
     it('declares a 400 referencing ApiErrorResponse for a bad /request body', () => {
-      expect(responseSchema('/intake/{id}/request', 'post', '400')).toEqual(ref('ApiErrorResponse'));
+      expect(responseSchema('/intake/{id}/request', 'post', '400')).toEqual({
+        oneOf: [ref('IntakeRequestRefusedError'), ref('ApiErrorResponse')],
+      });
     });
 
     it('declares post /intake/{id}/print with its grant, delivering issue and IntakeId', () => {
@@ -4705,7 +4725,12 @@ describe('OpenAPI Specification', () => {
 
       it('declares the malformed-id 400 on every operation', () => {
         for (const [method, path] of idOperations(prefix)) {
-          expect(responseSchema(path, method, '400'), `${method} ${path}`).toEqual(ref('ApiErrorResponse'));
+          // the request route's 400 is a oneOf of the coded refusal and the plain error (#724)
+          const expected =
+            path === '/intake/{id}/request'
+              ? { oneOf: [ref('IntakeRequestRefusedError'), ref('ApiErrorResponse')] }
+              : ref('ApiErrorResponse');
+          expect(responseSchema(path, method, '400'), `${method} ${path}`).toEqual(expected);
           expect(flat(operation(path, method).responses?.['400']?.description), `${method} ${path}`).toContain(
             'malformed id',
           );
