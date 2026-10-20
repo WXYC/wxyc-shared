@@ -329,7 +329,7 @@ import { isHeartbeat, AutoDJCommandAction, type AutoDJStatus } from '@wxyc/share
 | `ROLES` | All WXYC roles ordered by privilege (the role chain's single declaration) |
 | `WXYCRole` | Type for role strings |
 | **Capabilities** | |
-| `CAPABILITIES` | Cross-cutting capabilities: `editor`, `webmaster` |
+| `CAPABILITIES` | Cross-cutting capabilities: `editor`, `webmaster`, `reviews_beta` |
 | `Capability` | Type for capability strings |
 | `hasCapability(caps, cap)` | Check if user has capability |
 | `canAssignCapability(user, cap)` | Check if user can assign capability |
