@@ -1071,10 +1071,12 @@ assert_all_pinned_fields_pinned_to_str() {
 }
 
 # Prints every field name in $1 whose generated type is AnyUrl, one per line,
-# deduplicated. #428's decided scope leaves exactly three: the archive
-# presigned-GET `url` and the OAuth device-flow `verification_uri` /
-# `verification_uri_complete`. Anything else appearing here is a streaming URL
-# field the pin did not reach.
+# deduplicated. #428's decided scope leaves exactly six: the archive
+# presigned-GET `url`, the OAuth device-flow `verification_uri` /
+# `verification_uri_complete`, and the specialty-show artwork URLs
+# `square_url` / `master_url` / `wide_url` (#700 -- catalog-controlled image
+# links, not stored streaming URLs). Anything else appearing here is a
+# streaming URL field the pin did not reach.
 anyurl_fields_in() {
     grep -oE "^ +[a-z_]+: [^=]*AnyUrl" "$1" | sed -E 's/^ +([a-z_]+):.*/\1/' | sort -u
 }
@@ -1105,10 +1107,13 @@ anyurl_fields_in() {
     #    which is the only moment anyone has the context to answer it.
     run anyurl_fields_in "$models"
     [ "$status" -eq 0 ]
-    [ "${#lines[@]}" -eq 3 ]
-    [ "${lines[0]}" = "url" ]
-    [ "${lines[1]}" = "verification_uri" ]
-    [ "${lines[2]}" = "verification_uri_complete" ]
+    [ "${#lines[@]}" -eq 6 ]
+    [ "${lines[0]}" = "master_url" ]
+    [ "${lines[1]}" = "square_url" ]
+    [ "${lines[2]}" = "url" ]
+    [ "${lines[3]}" = "verification_uri" ]
+    [ "${lines[4]}" = "verification_uri_complete" ]
+    [ "${lines[5]}" = "wide_url" ]
 }
 
 @test "a rename is caught even when only ONE of a field's five schemas moves (#466)" {
@@ -1148,7 +1153,7 @@ PYRENAME
     run anyurl_fields_in "$models"
     [ "$status" -eq 0 ]
     [[ "$output" == *"spotify_uri"* ]]
-    [ "${#lines[@]}" -eq 4 ]
+    [ "${#lines[@]}" -eq 7 ]
 }
 
 @test "a rename of ALL five schemas' copies is caught too (#466)" {

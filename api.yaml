@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.0.0
+  version: 12.1.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -718,7 +718,10 @@ components:
         show_name:
           type: string
           nullable: true
-          description: Specialty-show name, or `null` for a regular show.
+          description: >-
+            This airing's free-text title, such as a Thursday Night Feature
+            topic; not the program name. The program name comes from
+            `specialty`.
         dj_name:
           type: string
           nullable: true
@@ -731,6 +734,13 @@ components:
         specialty_id:
           type: integer
           nullable: true
+        specialty:
+          allOf:
+            - $ref: '#/components/schemas/SpecialtyShowRef'
+          nullable: true
+          description: >-
+            The catalog entry for `specialty_id`, embedded so a now-playing
+            surface needs no second request. `null` for a regular show.
         start_time:
           type: string
           format: date-time
@@ -2032,6 +2042,13 @@ components:
         specialty_id:
           type: integer
           nullable: true
+        specialty:
+          allOf:
+            - $ref: '#/components/schemas/SpecialtyShowRef'
+          nullable: true
+          description: >-
+            The catalog entry for `specialty_id`, embedded. `null` for a
+            regular show. `specialty_show_name` stays for compatibility.
         show_name:
           type: string
           nullable: true
@@ -7323,6 +7340,112 @@ components:
           type: string
         specialty_id:
           type: integer
+
+    SpotlightRole:
+      type: string
+      enum: [performer, dj, reader, guest, host]
+      description: >-
+        Closed set. Clients must render an unrecognized value with a neutral
+        label rather than fail, so a role can be added without a coordinated
+        release. Generated enum decoders reject unknown values, so clients
+        decode this field as a string and map it themselves.
+
+    SpecialtyShowArtwork:
+      type: object
+      required: [square_url]
+      properties:
+        square_url:
+          type: string
+          format: uri
+          description: 1024x1024 sRGB, immutable
+        master_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 3000x3000
+        wide_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 3:1 banner
+
+    SpecialtyShowSlot:
+      type: object
+      required: [day, start_time, duration_minutes, cadence]
+      properties:
+        day:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: 0 = Monday, matching Schedule.day
+        start_time:
+          type: string
+          pattern: '^\d{2}:\d{2}$'
+          description: America/New_York wall clock
+        duration_minutes:
+          type: integer
+          minimum: 1
+        cadence:
+          type: string
+          enum: [weekly, some_weeks, last_of_month]
+
+    SpecialtyShowRef:
+      description: The catalog fields a now-playing surface needs. Embedded; no extra request.
+      type: object
+      required: [id, slug, name, short_name, logs_playcuts]
+      properties:
+        id:
+          type: integer
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+        name:
+          type: string
+        short_name:
+          type: string
+        tagline:
+          type: string
+          nullable: true
+          description: One line for the show card
+        logs_playcuts:
+          type: boolean
+          description: >-
+            Whether this program normally logs tracks. When `false`, DJ clients
+            stop prompting for songs and history can say the show has no
+            tracklist.
+        default_spotlight_role:
+          allOf:
+            - $ref: '#/components/schemas/SpotlightRole'
+          nullable: true
+          description: What to call the person in the spotlight, when the show has one.
+        artwork:
+          allOf:
+            - $ref: '#/components/schemas/SpecialtyShowArtwork'
+          nullable: true
+        accent_color:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+          nullable: true
+          description: >-
+            One color serves light and dark mode. The catalog refuses a color
+            unless white text on it reaches 4.5:1 contrast and the color
+            reaches 3:1 against the app's darkest surface.
+
+    SpecialtyShow:
+      allOf:
+        - $ref: '#/components/schemas/SpecialtyShowRef'
+        - type: object
+          required: [slots, active]
+          properties:
+            description:
+              type: string
+              nullable: true
+            slots:
+              type: array
+              items:
+                $ref: '#/components/schemas/SpecialtyShowSlot'
+            active:
+              type: boolean
 
     Schedule:
       type: object
@@ -13214,10 +13337,17 @@ paths:
                   type: integer
                 show_name:
                   type: string
-                  description: Required only when starting a new show
+                  description: >-
+                    This airing's title, such as a Thursday Night Feature
+                    topic; not the program name, which comes from the
+                    specialty-show catalog. Required only when starting a new
+                    show.
                 specialty_id:
                   type: integer
-                  description: ID of specialty show entry
+                  description: >-
+                    The catalog id of the specialty program this airing is
+                    (`SpecialtyShow.id` from `GET /specialty-shows`). Omit it
+                    for a regular show.
                 dj_name_override:
                   type: string
                   maxLength: 255
@@ -13263,7 +13393,8 @@ paths:
             a missing or non-matching `dj_id`, a `show_name` absent on the
             new-show path, and a `dj_name_override` over its `maxLength` — the
             intent handshake adds two more causes, it does not replace them.
-            Do NOT render every 400 here as an intent problem.
+            Do NOT render every 400 here as an intent problem. A `specialty_id`
+            that names no program or a retired one is one more cause.
 
 
             The new causes are an unrecognized `intent` value and
@@ -17989,6 +18120,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+
+  /specialty-shows:
+    get:
+      x-wxyc-service: backend-service
+      summary: List the active specialty-show catalog
+      description: >-
+        Active programs only. Public and unauthenticated: Backend-Service has
+        no optional-auth middleware, so this route cannot vary its answer by
+        caller. Served `Cache-Control: public, max-age=300` with an `ETag`
+        derived from the catalog's newest `last_modified`; a matching
+        `If-None-Match` answers 304 with no body. Now-playing surfaces read the
+        embedded `SpecialtyShowRef` on the show instead of calling this.
+      security: []
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+          description: The `ETag` of a previous response.
+      responses:
+        '200':
+          description: The active specialty shows.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: '`public, max-age=300`.'
+            ETag:
+              schema:
+                type: string
+              description: Derived from the catalog's newest `last_modified`; echo back as `If-None-Match`.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SpecialtyShow'
+        '304':
+          description: Not Modified. The catalog is unchanged since the client's `If-None-Match`. No body.
 
   /schedule:
     get:
