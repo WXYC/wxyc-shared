@@ -39,22 +39,3 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # their leading `#`, so prose in this header is never read as an entry.
-
-# wxyc-shared#727 (Backend-Service#3554): `ArtistSearchAliasSource` gains
-# `wxyc_library_credit`. This is a real break for one consumer, so it ships
-# as a major version (12.0.0). The version is the signal, and these entries
-# only quiet the gate.
-#   - request-o-matic decodes `POST /api/v1/lookup` strictly
-#     (`LookupResponse.model_validate`, services/lookup_client.py). Its
-#     generated `ArtistSearchAliasSource` is a closed StrEnum, and LML fills
-#     `matched_via_alias` on that path (LML#1444).
-#   - LML does not emit `wxyc_library_credit`. The source is local to
-#     Backend-Service: only its alias consumer writes it, and only Backend-
-#     Service catalog search returns it. LML must not start emitting it
-#     until request-o-matic regenerates its models against 12.0.0.
-# Whether an added response-enum value counts as breaking in general is #720.
-post /api/v1/artists/search-aliases/bulk added the new `wxyc_library_credit` enum value to the `artists/items/sources_present/items/` response property for the response status `200`
-post /api/v1/artists/search-aliases/bulk added the new `wxyc_library_credit` enum value to the `artists/items/variants/items/source` response property for the response status `200`
-post /api/v1/lookup added the new `wxyc_library_credit` enum value to the `results/items/matched_via_alias/items/source` response property for the response status `200`
-get /library added the new `wxyc_library_credit` enum value to the `items/matched_via_alias/items/source` response property for the response status `200`
-get /library/query added the new `wxyc_library_credit` enum value to the `results/items/matched_via_alias/items/source` response property for the response status `200`
