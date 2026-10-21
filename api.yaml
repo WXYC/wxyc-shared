@@ -18834,7 +18834,8 @@ paths:
         '400':
           description: >-
             A `specialty_id` that names no program, or a `broadcast_date` that
-            has passed.
+            has passed and a caller without `flowsheet: manage`. Managers may
+            add a poster for a past date, such as after the show.
           content:
             application/json:
               schema:
@@ -18845,8 +18846,9 @@ paths:
           description: >-
             `code: closed_show` — the program's airing on that date has ended
             and the caller lacks `flowsheet: manage`. A 403 without that `code`
-            is a caller missing `flowsheet: write`. Clients should branch on
-            `code`.
+            is a caller the rule above excludes, such as one missing
+            `flowsheet: write`, or a DJ who is not on the airing while it is
+            on the air. Clients should branch on `code`.
           content:
             application/json:
               schema:
@@ -18927,11 +18929,12 @@ paths:
       summary: Finish a poster upload
       description: >-
         Checks the uploaded file, normalizes it and publishes the poster. Only
-        the uploader may call it, and it requires `flowsheet: write`.
-        Authorization follows the airing's state: before the airing the
-        uploader may complete, while it is on the air so may the airing's DJs
-        and managers, and once it has ended only managers may. A file the
-        server refuses answers 422 with a `failure_code`.
+        the uploader may call it, and it requires `flowsheet: write`. The
+        airing's state gates the uploader and nobody else: before the airing
+        and while it is on the air the uploader may complete, and once it has
+        ended only an uploader who holds `flowsheet: manage` may. The airing's
+        other DJs and other managers may not complete another person's
+        upload. A file the server refuses answers 422 with a `failure_code`.
       security:
         - BearerAuth: []
       parameters:
@@ -18947,7 +18950,7 @@ paths:
           description: No bearer token
         '403':
           description: >-
-            `code: closed_show` — the airing has ended and the caller lacks
+            `code: closed_show` — the airing has ended and the uploader lacks
             `flowsheet: manage`. A 403 without that `code` is a caller who is
             not the uploader, or lacks `flowsheet: write`.
           content:
@@ -19014,7 +19017,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/SpecialtyPoster'
         '400':
-          description: A `title` over its `maxLength`, or a `broadcast_date` that has passed.
+          description: >-
+            A `title` over its `maxLength`, or a `broadcast_date` that has
+            passed and a caller without `flowsheet: manage`. Managers may
+            rebind a poster to a past date.
           content:
             application/json:
               schema:

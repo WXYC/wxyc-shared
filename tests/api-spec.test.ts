@@ -11781,6 +11781,37 @@ describe('OpenAPI Specification', () => {
         }
       });
 
+      it('keeps completion uploader-only and scopes the past-date 400 to callers without flowsheet: manage', () => {
+        const complete = flat(operation('/specialty-posters/{id}/complete', 'post').description);
+        expect(complete).toMatch(/Only the uploader may call it/);
+        expect(complete).toMatch(/other DJs and other managers may not complete/);
+        expect(complete).not.toMatch(/so may the airing's DJs/);
+        for (const [path, method] of [['/specialty-posters', 'post'], ['/specialty-posters/{id}', 'patch']] as Array<[string, string]>) {
+          expect(flat(operation(path, method).responses?.['400']?.description)).toMatch(
+            /has passed and a caller without `flowsheet: manage`.*Managers may/,
+          );
+        }
+      });
+
+      it.each(idPath.concat([['/specialty-posters', 'post']]))('%s %s declares 401', (path, method) => {
+        expect(operation(path, method).responses?.['401']).toBeDefined();
+      });
+
+      it.each(idPath)('%s %s declares a 403', (path, method) => {
+        expect(responseSchema(path, method, '403')).toEqual(ref('ApiErrorResponse'));
+      });
+
+      it.each(idPath)('%s %s declares a 404', (path, method) => {
+        expect(responseSchema(path, method, '404')).toEqual(ref('ApiErrorResponse'));
+      });
+
+      it.each([['/specialty-posters', 'get'], ['/specialty-posters/{id}', 'patch']] as Array<[string, string]>)(
+        '%s %s declares a 400',
+        (path, method) => {
+          expect(responseSchema(path, method, '400')).toEqual(ref('ApiErrorResponse'));
+        },
+      );
+
       it.each(writes.filter(([path]) => !/\/(restore|purge)$/.test(path)))(
         '%s %s answers a closed show with 403 code closed_show',
         (path, method) => {
