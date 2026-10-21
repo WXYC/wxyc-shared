@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.10.1
+  version: 12.11.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -120,6 +120,18 @@ components:
       description: >-
         The poster's id. Must be a positive int4; a non-digit value, zero, or
         a value past 2147483647 is a 400.
+
+    SpecialtyShowId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+      description: >-
+        The specialty program's id (`SpecialtyShow.id`). Must be a positive
+        int4; a non-digit value, zero, or a value past 2147483647 is a 400.
 
   schemas:
     # ===================
@@ -7618,11 +7630,12 @@ components:
           description: 0 = Monday, matching Schedule.day
         start_time:
           type: string
-          pattern: '^\d{2}:\d{2}$'
-          description: America/New_York wall clock
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          description: America/New_York wall clock, `HH:MM`
         duration_minutes:
           type: integer
           minimum: 1
+          maximum: 720
         cadence:
           type: string
           enum: [weekly, some_weeks, last_of_month]
@@ -7691,6 +7704,128 @@ components:
               description: >-
                 The request line mode a show of this program starts with.
                 `null` means `requests`.
+
+    SpecialtyShowManaged:
+      description: >-
+        The catalog editor's view of a program: `SpecialtyShow` plus who
+        created, last edited and retired it. Served only to callers who may
+        manage the catalog; the public `SpecialtyShow` carries none of this.
+      allOf:
+        - $ref: '#/components/schemas/SpecialtyShow'
+        - type: object
+          properties:
+            created_by:
+              type: string
+              nullable: true
+              description: Public DJ handle of whoever created the program.
+            updated_by:
+              type: string
+              nullable: true
+              description: Public DJ handle of whoever last edited it.
+            retired_by:
+              type: string
+              nullable: true
+              description: Public DJ handle of whoever retired it. Null while active.
+            retired_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: When it was retired. Null while active.
+            future_poster_count:
+              type: integer
+              minimum: 0
+              description: >-
+                Posters waiting for a broadcast date that has not yet passed,
+                for the list and the retire dialog. Absent when the server
+                does not supply it; read `GET /specialty-posters` instead.
+
+    SpecialtyShowCreateRequest:
+      type: object
+      required: [slug, name, short_name, slots]
+      properties:
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: The stable public id. Never reused, even by a retired program.
+        name:
+          type: string
+        short_name:
+          type: string
+          maxLength: 32
+        tagline:
+          type: string
+          nullable: true
+          maxLength: 120
+        description:
+          type: string
+          nullable: true
+        slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecialtyShowSlot'
+        logs_playcuts:
+          type: boolean
+        default_spotlight_role:
+          allOf:
+            - $ref: '#/components/schemas/SpotlightRole'
+          nullable: true
+        default_request_mode:
+          allOf:
+            - $ref: '#/components/schemas/RequestLineMode'
+          nullable: true
+        accent_color:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+          nullable: true
+          description: >-
+            Refused with 400 `accent_too_light` or `accent_too_dark` unless
+            white text on it reaches 4.5:1 and it reaches 3:1 against the
+            app's darkest surface.
+
+    SpecialtyShowUpdateRequest:
+      description: >-
+        Any `SpecialtyShowCreateRequest` field, plus `active`. Omitted fields
+        are unchanged; `slots`, when sent, replaces the whole schedule.
+      type: object
+      properties:
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: Changes only while nothing uses the slug; otherwise 409 `slug_in_use`.
+        name:
+          type: string
+        short_name:
+          type: string
+          maxLength: 32
+        tagline:
+          type: string
+          nullable: true
+          maxLength: 120
+        description:
+          type: string
+          nullable: true
+        slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecialtyShowSlot'
+        logs_playcuts:
+          type: boolean
+        default_spotlight_role:
+          allOf:
+            - $ref: '#/components/schemas/SpotlightRole'
+          nullable: true
+        default_request_mode:
+          allOf:
+            - $ref: '#/components/schemas/RequestLineMode'
+          nullable: true
+        accent_color:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+          nullable: true
+          description: The same refusal as on create.
+        active:
+          type: boolean
+          description: '`false` retires the program; `true` brings it back.'
 
     ShowPoster:
       description: >-
@@ -18801,6 +18936,151 @@ paths:
                   $ref: '#/components/schemas/SpecialtyShow'
         '304':
           description: Not Modified. The catalog is unchanged since the client's `If-None-Match`. No body.
+
+    post:
+      x-wxyc-service: backend-service
+      summary: Create a specialty program
+      description: >-
+        Requires the `specialty_shows: manage` grant (station managers) or the
+        `programming` capability. Slugs are never reused: a slug already used
+        by an active or a retired program is a 409.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpecialtyShowCreateRequest'
+      responses:
+        '201':
+          description: The new program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialtyShowManaged'
+        '400':
+          description: >-
+            `accent_too_light` or `accent_too_dark`: the `accent_color` fails
+            the rule that white text on it reaches 4.5:1 and it reaches 3:1
+            against the app's darkest surface (roughly a relative luminance of
+            0.12 to 0.18), and the code says which side it missed. Any other
+            400 is a field that fails its schema.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: >-
+            The caller holds neither the `specialty_shows: manage` grant
+            (station managers) nor the `programming` capability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: The slug is already used by an active or a retired program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /specialty-shows/manage:
+    get:
+      x-wxyc-service: backend-service
+      summary: List every specialty program, retired ones included
+      description: >-
+        The catalog editor's list. Requires the `specialty_shows: manage`
+        grant (station managers) or the `programming` capability. A separate
+        path from the public `GET /specialty-shows` because Backend-Service
+        has no optional-auth middleware, so a query parameter on the public
+        route cannot be gated. Retired programs (`active: false`) are listed.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Every program.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SpecialtyShowManaged'
+        '401':
+          description: No bearer token
+        '403':
+          description: >-
+            The caller holds neither the `specialty_shows: manage` grant
+            (station managers) nor the `programming` capability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /specialty-shows/{id}:
+    patch:
+      x-wxyc-service: backend-service
+      summary: Edit, retire or bring back a specialty program
+      description: >-
+        Requires the `specialty_shows: manage` grant (station managers) or the
+        `programming` capability. Omitted fields are unchanged. Retiring is
+        `active: false` and bringing back is `active: true`; there is no hard
+        delete, because shows, schedule rows and posters reference the row.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SpecialtyShowId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpecialtyShowUpdateRequest'
+      responses:
+        '200':
+          description: The updated program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialtyShowManaged'
+        '400':
+          description: >-
+            `accent_too_light` or `accent_too_dark`: the `accent_color` fails
+            the rule that white text on it reaches 4.5:1 and it reaches 3:1
+            against the app's darkest surface (roughly a relative luminance of
+            0.12 to 0.18), and the code says which side it missed. Any other
+            400 is a field that fails its schema.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: >-
+            The caller holds neither the `specialty_shows: manage` grant
+            (station managers) nor the `programming` capability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No program with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >-
+            `slug_in_use`: the slug changes after a show has been tagged with
+            the program or a poster exists for it, or the new slug belongs to
+            another active or retired program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /specialty-posters:
     post:

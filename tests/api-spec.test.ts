@@ -228,7 +228,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.10.1');
+      expect(spec.info.version).toBe('12.11.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -11244,7 +11244,7 @@ describe('OpenAPI Specification', () => {
     it('bounds a slot to a Monday-zero weekday, a wall-clock time and three cadences', () => {
       const props = sch('SpecialtyShowSlot').properties;
       expect(props.day).toMatchObject({ type: 'integer', minimum: 0, maximum: 6 });
-      expect(props.start_time.pattern).toBe('^\\d{2}:\\d{2}$');
+      expect(props.start_time.pattern).toBeDefined();
       expect(props.cadence.enum).toEqual(['weekly', 'some_weeks', 'last_of_month']);
     });
 
@@ -11285,6 +11285,112 @@ describe('OpenAPI Specification', () => {
       expect(flat(body.properties.show_name.description)).toContain("This airing's title");
       expect(flat(o.responses?.['400']?.description)).toMatch(/`specialty_id` that names no program or a retired one/);
     });
+  });
+
+  describe('specialty-show management (WXYC/wxyc-shared#708)', () => {
+    const managed: Array<[string, string]> = [
+      ['/specialty-shows', 'post'],
+      ['/specialty-shows/{id}', 'patch'],
+      ['/specialty-shows/manage', 'get'],
+    ];
+
+    it('adds exactly the three program operations beside the public catalog read', () => {
+      const declared = Object.entries(spec.paths as Record<string, Record<string, unknown>>)
+        .filter(([path]) => path.startsWith('/specialty-shows'))
+        .flatMap(([path, item]) => Object.keys(item).filter((k) => k !== 'parameters').map((m) => `${m} ${path}`))
+        .sort();
+      expect(declared).toEqual(
+        ['get /specialty-shows', ...managed.map(([path, method]) => `${method} ${path}`)].sort(),
+      );
+    });
+
+    it.each(managed)('%s %s needs a signed-in caller and documents the 401 and the 403', (path, method) => {
+      const o = operation(path, method) as Operation & { security?: unknown[] };
+      expect(o['x-wxyc-service']).toBe('backend-service');
+      expect(o.security).toEqual([{ BearerAuth: [] }]);
+      expect(o.responses?.['401']).toBeDefined();
+      expect(flat(o.responses?.['403']?.description)).toMatch(/specialty_shows: manage.*`programming`/);
+      expect(responseSchema(path, method, '403')).toEqual(ref('ApiErrorResponse'));
+    });
+
+    it('keeps GET /specialty-shows public', () => {
+      expect((operation('/specialty-shows', 'get') as Operation & { security?: unknown[] }).security).toEqual([]);
+    });
+
+    it('composes SpecialtyShowManaged over SpecialtyShow with the audit fields', () => {
+      expect(sch('SpecialtyShowManaged').allOf[0]).toEqual(ref('SpecialtyShow'));
+      for (const key of ['created_by', 'updated_by', 'retired_by']) {
+        expect(propertyOf('SpecialtyShowManaged', key)).toMatchObject({ type: 'string', nullable: true });
+      }
+      expect(propertyOf('SpecialtyShowManaged', 'retired_at')).toMatchObject({ format: 'date-time', nullable: true });
+      expect(propertyOf('SpecialtyShowManaged', 'future_poster_count')).toMatchObject({ type: 'integer', minimum: 0 });
+      expect(requiredKeysOf('SpecialtyShowManaged')).not.toContain('future_poster_count');
+    });
+
+    it('creates with 201 and the management view, or 400 and 409', () => {
+      const o = operation('/specialty-shows', 'post');
+      expect(o.requestBody?.content?.['application/json']?.schema).toEqual(ref('SpecialtyShowCreateRequest'));
+      expect(responseSchema('/specialty-shows', 'post', '201')).toEqual(ref('SpecialtyShowManaged'));
+      for (const status of ['400', '409']) {
+        expect(responseSchema('/specialty-shows', 'post', status)).toEqual(ref('ApiErrorResponse'));
+      }
+      expect(flat(o.responses?.['409']?.description)).toMatch(/active or a retired/);
+    });
+
+    it('edits with PATCH, retiring as active: false, and refuses a slug change once the slug is used', () => {
+      const o = operation('/specialty-shows/{id}', 'patch');
+      expect(o.parameters).toEqual([{ $ref: '#/components/parameters/SpecialtyShowId' }]);
+      expect(o.requestBody?.content?.['application/json']?.schema).toEqual(ref('SpecialtyShowUpdateRequest'));
+      expect(responseSchema('/specialty-shows/{id}', 'patch', '200')).toEqual(ref('SpecialtyShowManaged'));
+      expect(flat(o.description)).toMatch(/`active: false`.*`active: true`/);
+      expect(flat(o.responses?.['409']?.description)).toMatch(/`slug_in_use`.*tagged.*poster/);
+      expect(responseSchema('/specialty-shows/{id}', 'patch', '404')).toEqual(ref('ApiErrorResponse'));
+    });
+
+    it('lists every program, retired ones included, as the management view', () => {
+      const o = operation('/specialty-shows/manage', 'get');
+      expect(responseSchema('/specialty-shows/manage', 'get', '200')).toEqual({
+        type: 'array',
+        items: ref('SpecialtyShowManaged'),
+      });
+      expect(flat(o.description)).toMatch(/[Rr]etired/);
+    });
+
+    it('lets the update request change any create field plus active, and requires none', () => {
+      const create = propertyKeysOf('SpecialtyShowCreateRequest').sort();
+      expect(propertyKeysOf('SpecialtyShowUpdateRequest').sort()).toEqual([...create, 'active'].sort());
+      expect(requiredKeysOf('SpecialtyShowUpdateRequest')).toEqual([]);
+      expect([...requiredKeysOf('SpecialtyShowCreateRequest')].sort()).toEqual(['name', 'short_name', 'slots', 'slug']);
+    });
+
+    it.each(['SpecialtyShowCreateRequest', 'SpecialtyShowUpdateRequest'])('%s bounds its text fields', (name) => {
+      expect(propertyOf(name, 'slug')).toMatchObject({ pattern: '^[a-z0-9]+(-[a-z0-9]+)*$' });
+      expect(propertyOf(name, 'short_name')).toMatchObject({ maxLength: 32 });
+      expect(propertyOf(name, 'tagline')).toMatchObject({ maxLength: 120, nullable: true });
+      expect(propertyOf(name, 'accent_color')).toMatchObject({ pattern: '^#[0-9A-Fa-f]{6}$' });
+      expect(propertyOf(name, 'slots')).toMatchObject({ type: 'array', items: ref('SpecialtyShowSlot') });
+      expect(propertyOf(name, 'default_request_mode')).toMatchObject(nullableRef('RequestLineMode'));
+      expect(propertyOf(name, 'default_spotlight_role')).toMatchObject(nullableRef('SpotlightRole'));
+    });
+
+    it('bounds a slot to 1-720 minutes and an HH:MM wall clock', () => {
+      const props = sch('SpecialtyShowSlot').properties;
+      expect(props.duration_minutes).toMatchObject({ type: 'integer', minimum: 1, maximum: 720 });
+      const time = new RegExp(props.start_time.pattern);
+      for (const ok of ['00:00', '09:30', '23:59']) expect(time.test(ok)).toBe(true);
+      for (const bad of ['24:00', '9:30', '12:60', '12:5']) expect(time.test(bad)).toBe(false);
+    });
+
+    it.each([['/specialty-shows', 'post'], ['/specialty-shows/{id}', 'patch']])(
+      '%s %s names accent_too_light and accent_too_dark on the 400',
+      (path, method) => {
+        const text = flat(operation(path, method).responses?.['400']?.description);
+        expect(text).toContain('`accent_too_light`');
+        expect(text).toContain('`accent_too_dark`');
+        expect(text).toMatch(/4\.5:1/);
+        expect(text).toMatch(/3:1/);
+      },
+    );
   });
 
   describe('request line mode (WXYC/wxyc-shared#706)', () => {
