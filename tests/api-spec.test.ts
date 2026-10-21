@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.1.0');
+      expect(spec.info.version).toBe('12.2.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -11162,6 +11162,53 @@ describe('OpenAPI Specification', () => {
       expect(flat(body.properties.specialty_id.description)).toContain('catalog id of the specialty program');
       expect(flat(body.properties.show_name.description)).toContain("This airing's title");
       expect(flat(o.responses?.['400']?.description)).toMatch(/`specialty_id` that names no program or a retired one/);
+    });
+  });
+
+  describe('PATCH /flowsheet/shows/{id} and the closed_show answer on row writes (WXYC/wxyc-shared#701)', () => {
+    const SHOW = '/flowsheet/shows/{id}';
+
+    it('declares the show-id path parameter', () => {
+      expect(operation(SHOW, 'patch').parameters).toEqual([
+        expect.objectContaining({ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }),
+      ]);
+    });
+
+    it('takes optional nullable specialty_id and show_name (maxLength 128), neither required', () => {
+      const body = operation(SHOW, 'patch').requestBody?.content?.['application/json']?.schema as Record<string, any>;
+      expect(body.required).toBeUndefined();
+      expect(body.properties.specialty_id).toMatchObject({ type: 'integer', nullable: true });
+      expect(body.properties.show_name).toMatchObject({ type: 'string', nullable: true, maxLength: 128 });
+    });
+
+    it('answers 200 with the FlowsheetRangeShow projection', () => {
+      expect(responseSchema(SHOW, 'patch', '200')).toEqual({ $ref: '#/components/schemas/FlowsheetRangeShow' });
+    });
+
+    it('documents 400, 403 closed_show and 404', () => {
+      const o = operation(SHOW, 'patch');
+      expect(flat(o.responses?.['400']?.description)).toMatch(/`specialty_id` that names no program or a retired one/);
+      expect(flat(o.responses?.['400']?.description)).toContain('DJ not a member of show');
+      expect(flat(o.responses?.['403']?.description)).toContain('closed_show');
+      expect(o.responses?.['404']).toBeDefined();
+    });
+
+    it('states the permission rule: on-air DJs while open, flowsheet: manage once ended', () => {
+      const o = operation(SHOW, 'patch');
+      expect(flat(o.description)).toContain('flowsheet: manage');
+      expect(flat(o.description)).toContain('show_end');
+      expect(o).not.toHaveProperty('security');
+    });
+
+    it.each([
+      ['/flowsheet', 'patch'],
+      ['/flowsheet', 'delete'],
+      ['/flowsheet/play-order', 'patch'],
+    ])('%s %s declares 403 closed_show beside the existing 400 for a non-member', (path, method) => {
+      const o = operation(path, method);
+      expect(flat(o.responses?.['403']?.description)).toContain('closed_show');
+      expect(flat(o.responses?.['403']?.description)).toContain('flowsheet: manage');
+      expect(flat(o.responses?.['400']?.description)).toContain('DJ not a member of show');
     });
   });
 });
