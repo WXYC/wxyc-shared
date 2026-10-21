@@ -3513,6 +3513,7 @@ describe('OpenAPI Specification', () => {
       'FlowsheetV2TalksetEntry',
       'FlowsheetV2BreakpointEntry',
       'FlowsheetV2MessageEntry',
+      'FlowsheetV2SpotlightEntry',
     ];
 
     // Schema names `$ref`-ed anywhere in a subtree. Structural, not textual:
@@ -3602,7 +3603,9 @@ describe('OpenAPI Specification', () => {
       const pathHolders = Object.entries(spec.paths)
         .filter(([, item]) => refsIn(item).has(member))
         .map(([path]) => path);
-      expect([...holders, ...pathHolders]).toEqual(['FlowsheetV2Entry']);
+      // OnAirInfo.spotlight (#703) is the one deliberate second holder.
+      const allowed = member === 'FlowsheetV2SpotlightEntry' ? ['FlowsheetV2Entry', 'OnAirInfo'] : ['FlowsheetV2Entry'];
+      expect([...holders, ...pathHolders].sort()).toEqual(allowed);
     });
 
     it('points every schema call site at the named union rather than inlining it', () => {
@@ -11304,6 +11307,86 @@ describe('OpenAPI Specification', () => {
       });
       expect(o.responses?.['401']).toBeDefined();
       expect(flat(o.responses?.['403']?.description)).toContain('{message, reason}');
+    });
+  });
+
+  describe('the spotlight flowsheet entry (WXYC/wxyc-shared#703)', () => {
+    const FLOWSHEET = '/flowsheet';
+
+    it('adds spotlight to FlowsheetEntryType and maps it in the FlowsheetV2Entry discriminator', () => {
+      expect((spec.components.schemas.FlowsheetEntryType as { enum: string[] }).enum).toContain('spotlight');
+      const union = spec.components.schemas.FlowsheetV2Entry as { discriminator: { mapping: Record<string, string> } };
+      expect(union.discriminator.mapping.spotlight).toBe('#/components/schemas/FlowsheetV2SpotlightEntry');
+    });
+
+    it('requires role, name and the server-composed message, and refs the existing SpotlightRole', () => {
+      expect(requiredKeysOf('FlowsheetV2SpotlightEntry')).toEqual(
+        expect.arrayContaining(['entry_type', 'spotlight_role', 'spotlight_name', 'message']),
+      );
+      const members = (spec.components.schemas.FlowsheetV2SpotlightEntry as { allOf: Array<Record<string, any>> }).allOf;
+      expect(members[0]).toEqual(ref('FlowsheetV2Base'));
+      expect(members[1]?.properties.entry_type.enum).toEqual(['spotlight']);
+      expect(members[1]?.properties.spotlight_role).toEqual(ref('SpotlightRole'));
+      expect(members[1]?.properties.spotlight_name.type).toBe('string');
+      expect(Object.keys(spec.components.schemas).filter((n) => /SpotlightRole/.test(n))).toEqual(['SpotlightRole']);
+    });
+
+    it('adds OnAirInfo.spotlight as optional, nullable, and a ref to the spotlight entry', () => {
+      expect(requiredKeysOf('OnAirInfo')).not.toContain('spotlight');
+      expect(propertyOf('OnAirInfo', 'spotlight')).toMatchObject({
+        allOf: [ref('FlowsheetV2SpotlightEntry')],
+        nullable: true,
+      });
+    });
+
+    it.each([['FlowsheetEntryType'], ['FlowsheetV2Entry']])(
+      'states the unknown entry_type tolerance rule on %s',
+      (name) => {
+        const description = flat((spec.components.schemas[name] as { description?: string }).description);
+        expect(description).toContain('grows without a coordinated release');
+        expect(description).toContain('must not fail the page');
+        expect(description).toContain('server-composed `message`');
+        expect(description).toContain('skips the row');
+      },
+    );
+
+    it('accepts a spotlight create body on POST /flowsheet beside the existing three', () => {
+      const body = operation(FLOWSHEET, 'post').requestBody?.content?.['application/json']?.schema as Record<string, any>;
+      expect(body.oneOf).toContainEqual(ref('FlowsheetCreateSpotlight'));
+      const create = spec.components.schemas.FlowsheetCreateSpotlight as Record<string, any>;
+      expect(create.required).toEqual(['entry_type', 'spotlight_role', 'spotlight_name']);
+      expect(create.properties.entry_type.enum).toEqual(['spotlight']);
+      expect(create.properties.spotlight_role).toEqual(ref('SpotlightRole'));
+      expect(create.properties.spotlight_name).toMatchObject({ type: 'string', minLength: 1, maxLength: 128 });
+    });
+
+    it('lets PATCH /flowsheet edit role and name but never entry_type', () => {
+      const update = spec.components.schemas.FlowsheetUpdateRequest as Record<string, any>;
+      expect(update.properties.spotlight_role).toEqual(ref('SpotlightRole'));
+      expect(update.properties.spotlight_name).toMatchObject({ type: 'string', minLength: 1, maxLength: 128 });
+      expect(update.properties).not.toHaveProperty('entry_type');
+    });
+
+    it('documents the 400 causes and the 403 spotlight_disabled answer on POST /flowsheet', () => {
+      const o = operation(FLOWSHEET, 'post');
+      expect(flat(o.responses?.['400']?.description)).toMatch(/unknown `spotlight_role`.*over-128.*track field/);
+      const forbidden = flat(o.responses?.['403']?.description);
+      expect(forbidden).toContain('spotlight_disabled');
+      expect(forbidden).toContain('{message, reason}');
+      expect(o.responses?.['401']).toBeDefined();
+    });
+
+    // One 403 per operation, so the PATCH answer lists every shape rather than
+    // gaining a second entry, and the code-less sentence can no longer say
+    // "without that `code`" now that two codes exist.
+    it('amends the single PATCH /flowsheet 403 to both codes, the precedence and the code-less shapes', () => {
+      const forbidden = flat(operation(FLOWSHEET, 'patch').responses?.['403']?.description);
+      expect(forbidden).toContain('closed_show');
+      expect(forbidden).toContain('spotlight_disabled');
+      expect(forbidden).toContain('flowsheet: manage');
+      expect(forbidden).toContain('{message, reason}');
+      expect(forbidden).toMatch(/`spotlight_disabled` wins/);
+      expect(forbidden).not.toContain('without that `code`');
     });
   });
 

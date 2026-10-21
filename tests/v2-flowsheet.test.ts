@@ -121,12 +121,13 @@ describe('FlowsheetEntryType', () => {
     'talkset',
     'breakpoint',
     'message',
+    'spotlight',
   ])('should include "%s"', (value) => {
     expect(Object.values(FlowsheetEntryType)).toContain(value);
   });
 
-  it('should have exactly 8 values', () => {
-    expect(Object.keys(FlowsheetEntryType)).toHaveLength(8);
+  it('should have exactly 9 values', () => {
+    expect(Object.keys(FlowsheetEntryType)).toHaveLength(9);
   });
 });
 
