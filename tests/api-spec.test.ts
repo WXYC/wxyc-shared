@@ -228,7 +228,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.10.0');
+      expect(spec.info.version).toBe('12.10.1');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -4629,9 +4629,6 @@ describe('OpenAPI Specification', () => {
         ['the approved message, word for word', "\"This DJ can't see reviews yet. A station manager can add them to the reviews beta in the DJ Roster.\""],
         ['the code', '`code` `asked_dj_cannot_see_feature`'],
         ['it applies only to an account that can be asked', 'applies only to an account that can be asked: one that holds `reviews: write` and is not a service account'],
-        ['an audience that is not everyone, including off', 'the reviews audience is not `everyone` (so `staff` or `off`)'],
-        ['an asked account below music director', 'below music director'],
-        ['an asked account without reviews_beta', 'does not hold `reviews_beta`'],
         ['no request is recorded', 'no request is recorded'],
         [
           'a dj_id that is not an account that can be asked gets the plain 400',
@@ -4650,11 +4647,44 @@ describe('OpenAPI Specification', () => {
 
       it.each([
         ['it is sent only for an account that can be asked', 'Sent only for an account that can be asked (one that holds `reviews: write` and is not a service account)'],
-        ['an audience that is not everyone, including off', 'the reviews audience is not `everyone` (so `staff` or `off`)'],
-        ['an asked account below music director without reviews_beta', 'below music director and does not hold `reviews_beta`'],
         ['no request is recorded', 'no request is recorded'],
       ])('says in the IntakeRequestRefusedError description when it is sent: %s', (_what, phrase) => {
         expect(refusedErrorDescription()).toContain(phrase);
+      });
+
+      // The refusal follows the access rule `GET /feature-access` reports as `can_see`
+      // (WXYC/wxyc-shared#745, decision 15 in WXYC/Backend-Service#3528). The old text made
+      // "below music director" the condition at every audience, so at `off` a music director
+      // or a `reviews_beta` holder was asked although neither could see reviews. Both
+      // descriptions state the rule, and Backend-Service copies the 400 one verbatim, so
+      // each has to hold it whole.
+      describe.each([
+        ['the 400 description', request400],
+        ['the IntakeRequestRefusedError description', refusedErrorDescription],
+      ])('states in %s that the refusal follows the access rule', (_where, description) => {
+        it.each([
+          ['it is tied to what the asked account can see now', 'cannot see reviews now under the access rule that `GET /feature-access` reports as `can_see`'],
+          ['at off every account that can be asked is refused', 'at `off`, every such account'],
+          ['at staff the account is one below music director without reviews_beta', 'at `staff`, one below music director that does not hold `reviews_beta`'],
+          ['at everyone the account is one without DJ access', 'at `everyone`, one without DJ access'],
+        ])('says %s', (_what, phrase) => {
+          expect(description()).toContain(phrase);
+        });
+
+        it('no longer makes "below music director" the condition at every audience', () => {
+          expect(description()).not.toContain('the reviews audience is not `everyone`');
+          expect(description()).not.toContain('(so `staff` or `off`)');
+          // The only place left for it is the `staff` clause.
+          expect(description().match(/below music director/g)).toHaveLength(1);
+          expect(description()).toContain('at `staff`, one below music director');
+        });
+      });
+
+      it('states the same three-audience rule that GET /feature-access reports as can_see', () => {
+        const rule = flat((spec.paths['/feature-access'] as { get: { description?: string } }).get.description);
+        expect(rule).toContain('`off` means nobody');
+        expect(rule).toMatch(/`staff` means music director or above, or holding the feature's tester capability \(`reviews_beta`/);
+        expect(rule).toContain('`everyone` means every account with DJ access');
       });
     });
 

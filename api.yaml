@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.10.0
+  version: 12.10.1
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -4960,8 +4960,10 @@ components:
         The coded `POST /intake/{id}/request` 400 body, shape-compatible with
         `ApiErrorResponse`. Sent only for an account that can be asked (one
         that holds `reviews: write` and is not a service account), when the
-        reviews audience is not `everyone` (so `staff` or `off`) and that
-        account is below music director and does not hold `reviews_beta`; no
+        account cannot see reviews now under the access rule that
+        `GET /feature-access` reports as `can_see` (at `off`, every such
+        account; at `staff`, one below music director that does not hold
+        `reviews_beta`; at `everyone`, one without DJ access); no
         request is recorded. Any other `dj_id` that fails validation gets the
         plain `ApiErrorResponse` with no code.
       required:
@@ -15231,9 +15233,11 @@ paths:
             `dj_id` (including one that names no account holding `reviews: write`).
             The coded refusal applies only to an account that can be asked: one
             that holds `reviews: write` and is not a service account. For such an
-            account, when the reviews audience is not `everyone` (so `staff` or
-            `off`) and the asked account is below music director and does not hold
-            `reviews_beta`, the body is `IntakeRequestRefusedError` with `code`
+            account, when it cannot see reviews now under the access rule that
+            `GET /feature-access` reports as `can_see` (at `off`, every such
+            account; at `staff`, one below music director that does not hold
+            `reviews_beta`; at `everyone`, one without DJ access), the body is
+            `IntakeRequestRefusedError` with `code`
             `asked_dj_cannot_see_feature` and `message` "This DJ can't see
             reviews yet. A station manager can add them to the reviews beta in
             the DJ Roster."; no request is recorded. A `dj_id` that does not name
