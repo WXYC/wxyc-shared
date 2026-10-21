@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.6.0
+  version: 12.7.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -759,6 +759,14 @@ components:
           description: >-
             The catalog entry for `specialty_id`, embedded so a now-playing
             surface needs no second request. `null` for a regular show.
+        poster:
+          allOf:
+            - $ref: '#/components/schemas/ShowPoster'
+          nullable: true
+          description: >-
+            This airing's poster, or `null` when it has none; fall back to the
+            program's artwork, then to the text tile. Optional so a server that
+            predates it stays valid.
         start_time:
           type: string
           format: date-time
@@ -1804,6 +1812,14 @@ components:
             an ordinary show. The tag can be set, changed or cleared mid-show
             through `PATCH /flowsheet/shows/{id}`, so the value can change for
             the same `show_id`; re-read it on every poll.
+        poster:
+          allOf:
+            - $ref: '#/components/schemas/ShowPoster'
+          nullable: true
+          description: >-
+            This airing's poster, or `null` when it has none; fall back to the
+            program's artwork, then to the text tile. Optional so a server that
+            predates it stays valid.
 
     OnAirDJ:
       type: object
@@ -2105,6 +2121,14 @@ components:
           description: >-
             The catalog entry for `specialty_id`, embedded. `null` for a
             regular show. `specialty_show_name` stays for compatibility.
+        poster:
+          allOf:
+            - $ref: '#/components/schemas/ShowPoster'
+          nullable: true
+          description: >-
+            This airing's poster, or `null` when it has none; fall back to the
+            program's artwork, then to the text tile. Optional so a server that
+            predates it stays valid.
         show_name:
           type: string
           nullable: true
@@ -7529,6 +7553,148 @@ components:
                 $ref: '#/components/schemas/SpecialtyShowSlot'
             active:
               type: boolean
+
+    ShowPoster:
+      description: >-
+        An airing's poster, normalized by the server. Public, with no uploader.
+        Both URLs are immutable.
+      type: object
+      required: [id, aspect_ratio, renditions]
+      properties:
+        id:
+          type: integer
+        aspect_ratio:
+          type: number
+          description: Width divided by height, 0.667 to 1.0, so a client can lay out before the image loads.
+        renditions:
+          type: array
+          description: >-
+            The poster at its own aspect ratio, never cropped or padded, one
+            entry per width, ascending. Today 600 and 1200 px wide, never
+            upscaled, so the largest entry may be narrower than 1200.
+          items:
+            type: object
+            required: [width, height, url]
+            properties:
+              width:
+                type: integer
+              height:
+                type: integer
+              url:
+                type: string
+                format: uri
+
+    SpecialtyPoster:
+      description: >-
+        The DJ site's management view of one poster. A story-format 9:16 image
+        is refused with `failure_code` `bad_aspect`.
+      type: object
+      required: [id, specialty_id, broadcast_date, status, created_at]
+      properties:
+        id:
+          type: integer
+        specialty_id:
+          type: integer
+        broadcast_date:
+          type: string
+          format: date
+          description: America/New_York broadcast day, starting 06:00.
+        title:
+          type: string
+          nullable: true
+          maxLength: 128
+        status:
+          type: string
+          enum: [uploading, published, replaced, removed, purged, failed]
+        status_changed_by:
+          type: string
+          nullable: true
+          description: Public DJ handle of whoever replaced, removed, restored or purged it.
+        status_changed_at:
+          type: string
+          format: date-time
+          nullable: true
+        replaced_by_poster_id:
+          type: integer
+          nullable: true
+        restorable_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the held renditions expire. Null unless replaced or removed.
+        show_id:
+          type: integer
+          nullable: true
+          description: The airing it is bound to, if any.
+        poster:
+          allOf:
+            - $ref: '#/components/schemas/ShowPoster'
+          nullable: true
+          description: Null until published.
+        uploaded_by:
+          type: string
+          nullable: true
+          description: The uploader's public DJ handle.
+        failure_code:
+          type: string
+          nullable: true
+          enum: [not_uploaded, unsupported_type, too_large, too_small, bad_aspect, animated, decode_failed]
+        created_at:
+          type: string
+          format: date-time
+
+    PosterFileDeclaration:
+      type: object
+      required: [content_type, byte_length]
+      properties:
+        content_type:
+          type: string
+          enum: [image/jpeg, image/png, image/webp]
+        byte_length:
+          type: integer
+          minimum: 1
+          maximum: 10485760
+
+    PosterUploadRequest:
+      type: object
+      required: [specialty_id, broadcast_date, poster]
+      properties:
+        specialty_id:
+          type: integer
+        broadcast_date:
+          type: string
+          format: date
+        title:
+          type: string
+          maxLength: 128
+        poster:
+          $ref: '#/components/schemas/PosterFileDeclaration'
+
+    PosterUploadResponse:
+      type: object
+      required: [poster, upload]
+      properties:
+        poster:
+          $ref: '#/components/schemas/SpecialtyPoster'
+        upload:
+          type: object
+          required: [url, headers, expires_at]
+          properties:
+            url:
+              type: string
+              format: uri
+              description: Presigned PUT. Never logged.
+            headers:
+              type: object
+              additionalProperties:
+                type: string
+              description: >-
+                The Content-Type to send exactly. Content-Length is not
+                included because a browser sets it itself; the server checks
+                the size with HEAD on complete.
+            expires_at:
+              type: string
+              format: date-time
 
     Schedule:
       type: object

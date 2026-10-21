@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.6.0');
+      expect(spec.info.version).toBe('12.7.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -8544,7 +8544,9 @@ describe('OpenAPI Specification', () => {
     // Schemas declared before the paths that reference them, so a schema-first
     // slice can land ahead of its paths. Prune an entry once its path lands:
     // the "carries no exemption" guard below fails until it is removed.
-    const DECLARED_AHEAD_OF_PATHS: string[] = [];
+    const DECLARED_AHEAD_OF_PATHS: string[] = [
+      'PosterFileDeclaration', 'PosterUploadRequest', 'PosterUploadResponse', 'SpecialtyPoster',
+    ];
 
     const EXEMPT = new Set([
       ...WEBSOCKET_PROTOCOL,
@@ -11421,5 +11423,73 @@ describe('OpenAPI Specification', () => {
         expect(values.filter((value) => typeof value !== 'string')).toEqual([]);
       },
     );
+  });
+
+  describe('specialty-show posters (WXYC/wxyc-shared#705)', () => {
+    const sch = (name: string) => spec.components.schemas[name] as Record<string, any>;
+    const nullableRef = (name: string) => ({ allOf: [ref(name)], nullable: true });
+
+    it.each([
+      ['ShowPoster', ['id', 'aspect_ratio', 'renditions']],
+      ['SpecialtyPoster', ['id', 'specialty_id', 'broadcast_date', 'status', 'created_at']],
+      ['PosterFileDeclaration', ['content_type', 'byte_length']],
+      ['PosterUploadRequest', ['specialty_id', 'broadcast_date', 'poster']],
+      ['PosterUploadResponse', ['poster', 'upload']],
+    ])('%s requires exactly %j', (name, required) => {
+      expect([...requiredKeysOf(name)].sort()).toEqual([...required].sort());
+    });
+
+    it('gives ShowPoster no uploader, status or management field', () => {
+      expect(propertyKeysOf('ShowPoster').sort()).toEqual(['aspect_ratio', 'id', 'renditions']);
+      expect(flat(sch('ShowPoster').description)).toContain('no uploader');
+    });
+
+    it('lists renditions at the poster\'s own aspect, each with width, height and a uri', () => {
+      const items = propertyOf('ShowPoster', 'renditions')?.items as Record<string, any>;
+      expect(items.required).toEqual(['width', 'height', 'url']);
+      expect(items.properties.url).toMatchObject({ type: 'string', format: 'uri' });
+      expect(propertyOf('ShowPoster', 'aspect_ratio')).toMatchObject({ type: 'number' });
+    });
+
+    it('enumerates SpecialtyPoster status and failure_code, with failure_code nullable', () => {
+      expect(propertyOf('SpecialtyPoster', 'status')?.enum).toEqual([
+        'uploading', 'published', 'replaced', 'removed', 'purged', 'failed',
+      ]);
+      expect(propertyOf('SpecialtyPoster', 'failure_code')).toMatchObject({ nullable: true });
+      expect(propertyOf('SpecialtyPoster', 'failure_code')?.enum).toEqual([
+        'not_uploaded', 'unsupported_type', 'too_large', 'too_small', 'bad_aspect', 'animated', 'decode_failed',
+      ]);
+    });
+
+    it('embeds a nullable ShowPoster and keeps the uploader in the management view only', () => {
+      expect(propertyOf('SpecialtyPoster', 'poster')).toMatchObject(nullableRef('ShowPoster'));
+      expect(propertyOf('SpecialtyPoster', 'uploaded_by')).toMatchObject({ type: 'string', nullable: true });
+      expect(propertyOf('SpecialtyPoster', 'title')).toMatchObject({ nullable: true, maxLength: 128 });
+      expect(propertyOf('SpecialtyPoster', 'restorable_until')).toMatchObject({ format: 'date-time', nullable: true });
+    });
+
+    it('limits a declared file to three image types and 10 MiB', () => {
+      expect(propertyOf('PosterFileDeclaration', 'content_type')?.enum).toEqual([
+        'image/jpeg', 'image/png', 'image/webp',
+      ]);
+      expect(propertyOf('PosterFileDeclaration', 'byte_length')).toMatchObject({ minimum: 1, maximum: 10485760 });
+    });
+
+    it('returns a presigned PUT with the headers to send and an expiry', () => {
+      expect(propertyOf('PosterUploadResponse', 'poster')).toEqual(ref('SpecialtyPoster'));
+      const upload = propertyOf('PosterUploadResponse', 'upload') as Record<string, any>;
+      expect(upload.required).toEqual(['url', 'headers', 'expires_at']);
+      expect(upload.properties.headers.additionalProperties).toEqual({ type: 'string' });
+      expect(upload.properties.url.format).toBe('uri');
+    });
+
+    it.each(['OnAirInfo', 'FlowsheetRangeShow', 'ShowPlaylist'])('%s carries an optional nullable poster', (name) => {
+      expect(propertyOf(name, 'poster')).toMatchObject(nullableRef('ShowPoster'));
+      expect(requiredKeysOf(name)).not.toContain('poster');
+    });
+
+    it('refuses story-format 9:16 posters with the bad_aspect code', () => {
+      expect(flat(sch('SpecialtyPoster').description)).toMatch(/9:16.*bad_aspect/);
+    });
   });
 });
