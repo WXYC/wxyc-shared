@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.7.0
+  version: 12.8.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -13700,11 +13700,8 @@ paths:
         '400':
           description: >-
             The caller is not on the show this entry belongs to while it is on
-            the air, or the request is malformed. For a spotlight edit,
-            malformed means an unknown `spotlight_role`, an empty or over-128
-            `spotlight_name`, spotlight fields on a track row, or track fields
-            on a spotlight row. Clients should branch on the status, not on the
-            message text.
+            the air, or the request is malformed. Clients should branch on the
+            status, not on the message text.
           content:
             application/json:
               schema:
@@ -14333,11 +14330,8 @@ paths:
         '400':
           description: >-
             The caller is not on the show this entry belongs to while it is on
-            the air, or the request is malformed. For a spotlight edit,
-            malformed means an unknown `spotlight_role`, an empty or over-128
-            `spotlight_name`, spotlight fields on a track row, or track fields
-            on a spotlight row. Clients should branch on the status, not on the
-            message text.
+            the air, or the request is malformed. Clients should branch on the
+            status, not on the message text.
           content:
             application/json:
               schema:
