@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.8.0');
+      expect(spec.info.version).toBe('12.9.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -11254,6 +11254,48 @@ describe('OpenAPI Specification', () => {
       expect(flat(body.properties.specialty_id.description)).toContain('catalog id of the specialty program');
       expect(flat(body.properties.show_name.description)).toContain("This airing's title");
       expect(flat(o.responses?.['400']?.description)).toMatch(/`specialty_id` that names no program or a retired one/);
+    });
+  });
+
+  describe('request line mode (WXYC/wxyc-shared#706)', () => {
+    const sch = (name: string) => spec.components.schemas[name] as Record<string, any>;
+    const nullableRef = (name: string) => ({ allOf: [ref(name)], nullable: true });
+
+    it('declares RequestLineMode as exactly the three modes', () => {
+      expect(sch('RequestLineMode').type).toBe('string');
+      expect(sch('RequestLineMode').enum).toEqual(['requests', 'feedback', 'closed']);
+    });
+
+    it('tells clients to decode the mode as a string and treat an unknown value as requests', () => {
+      const description = flat(sch('RequestLineMode').description);
+      expect(description).toContain('unrecognized value as `requests`');
+      expect(description).toContain('decode this field as a string');
+    });
+
+    it('adds an optional request_line to OnAirInfo with a required mode and a four-valued source', () => {
+      expect(requiredKeysOf('OnAirInfo')).toEqual(['dj_name']);
+      const requestLine = propertyOf('OnAirInfo', 'request_line') as Record<string, any>;
+      expect(requestLine.type).toBe('object');
+      expect(requestLine.nullable).toBeUndefined();
+      expect([...requestLine.required].sort()).toEqual(['mode', 'source']);
+      expect(requestLine.properties.mode).toEqual(ref('RequestLineMode'));
+      expect(requestLine.properties.source).toMatchObject({
+        type: 'string',
+        enum: ['dj', 'program', 'spotlight', 'default'],
+      });
+    });
+
+    it('takes an optional nullable request_mode on the show PATCH body', () => {
+      const body = operation('/flowsheet/shows/{id}', 'patch').requestBody?.content?.['application/json']
+        ?.schema as Record<string, any>;
+      expect(body.required).toBeUndefined();
+      expect(body.properties.request_mode).toMatchObject(nullableRef('RequestLineMode'));
+      expect(flat(body.properties.request_mode.description)).toContain('`null` returns the show to its default');
+    });
+
+    it('gives SpecialtyShow a nullable default_request_mode it does not require', () => {
+      expect(propertyOf('SpecialtyShow', 'default_request_mode')).toMatchObject(nullableRef('RequestLineMode'));
+      expect(requiredKeysOf('SpecialtyShow')).not.toContain('default_request_mode');
     });
   });
 
