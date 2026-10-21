@@ -39,17 +39,3 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # their leading `#`, so prose in this header is never read as an entry.
-
-# wxyc-shared#703 (Backend-Service#3459): `FlowsheetV2Entry` gains the
-# `FlowsheetV2SpotlightEntry` member, so five GET responses gain a `oneOf` arm.
-# oasdiff reads any added arm as breaking; on the wire nothing changes until
-# Backend-Service turns the spotlight flag on, and that flip waits on the client
-# fixes that make an unrecognized `entry_type` safe (dj-site#2265 renders the
-# row's `message`, WXYC-Android#82 skips the row). The rule is now written on
-# `FlowsheetEntryType` and `FlowsheetV2Entry` so the next new type needs no
-# per-client fix. The version moves as a minor, per the issue.
-get /flowsheet added `#/components/schemas/FlowsheetV2SpotlightEntry` to the `oneOf[#/components/schemas/FlowsheetV2PaginatedResponse]/entries/items/` response property `oneOf` list for the response status `200`
-get /flowsheet added `#/components/schemas/FlowsheetV2SpotlightEntry` to the `oneOf[subschema #2]/items/` response property `oneOf` list for the response status `200`
-get /flowsheet/latest added `#/components/schemas/FlowsheetV2SpotlightEntry` to the response body `oneOf` list for the response status `200`
-get /flowsheet/playlist added `#/components/schemas/FlowsheetV2SpotlightEntry` to the `entries/items/` response property `oneOf` list for the response status `200`
-get /flowsheet/range added `#/components/schemas/FlowsheetV2SpotlightEntry` to the `entries/items/` response property `oneOf` list for the response status `200`
