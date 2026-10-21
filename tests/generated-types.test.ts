@@ -32,6 +32,7 @@ import {
   type DiscogsMatchResult,
   type DiscogsWriterCredits,
   type TrackMatchHint,
+  IntakeRequestRefusedCode,
   RotationBin,
   RequestStatus,
   MetadataSource,
@@ -697,6 +698,30 @@ describe('Generated TypeScript Types', () => {
       // Null is the common case for the abandoned-show backlog, and the schema
       // says so structurally rather than asking clients to guard by convention.
       expect(conflict.details?.show?.dj_name).toBeNull();
+    });
+
+    // WXYC/wxyc-shared#724 — the POST /intake/{id}/request 400 is a union of
+    // the coded refusal and ApiErrorResponse, whose `code` is a plain optional
+    // string. A `code` comparison therefore does not narrow the union, and a
+    // misspelled string literal compiles without complaint and never matches.
+    // The safe idiom is to compare against the generated const, which a rename
+    // of the enum turns into a compile error.
+    it('POST /intake/{id}/request 400 is told apart by comparing code with the generated IntakeRequestRefusedCode const', () => {
+      type Request400 =
+        paths['/intake/{id}/request']['post']['responses']['400']['content']['application/json'];
+
+      const isCodedRefusal = (body: Request400): boolean =>
+        body.code === IntakeRequestRefusedCode.asked_dj_cannot_see_feature;
+
+      const coded: Request400 = {
+        message: "This DJ can't see reviews yet. A station manager can add them to the reviews beta in the DJ Roster.",
+        code: IntakeRequestRefusedCode.asked_dj_cannot_see_feature,
+      };
+      const plain: Request400 = { message: 'dj_id does not name an account that can be asked to review' };
+
+      expect(IntakeRequestRefusedCode.asked_dj_cannot_see_feature).toBe('asked_dj_cannot_see_feature');
+      expect(isCodedRefusal(coded)).toBe(true);
+      expect(isCodedRefusal(plain)).toBe(false);
     });
 
     // BS#1308 — POST /flowsheet/ for a track on a rotation album that isn't in

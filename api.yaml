@@ -4821,9 +4821,12 @@ components:
       type: object
       description: >
         The coded `POST /intake/{id}/request` 400 body, shape-compatible with
-        `ApiErrorResponse`. Sent when the reviews audience is not `everyone`
-        (so `staff` or `off`) and the asked account is below music director and
-        does not hold `reviews_beta`; no request is recorded.
+        `ApiErrorResponse`. Sent only for an account that can be asked (one
+        that holds `reviews: write` and is not a service account), when the
+        reviews audience is not `everyone` (so `staff` or `off`) and that
+        account is below music director and does not hold `reviews_beta`; no
+        request is recorded. Any other `dj_id` that fails validation gets the
+        plain `ApiErrorResponse` with no code.
       required:
         - message
         - code
@@ -14839,7 +14842,8 @@ paths:
         the request is a 400. A service account, such as the auto-DJ account,
         is the same 400 as an account without `reviews: write`. Delivered by
         WXYC/Backend-Service#2798 (the request) and WXYC/Backend-Service#3076
-        (service accounts).
+        (service accounts). The coded refusal on the 400 is delivered by
+        WXYC/Backend-Service#3531.
       security:
         - BearerAuth: []
       requestBody:
@@ -14867,12 +14871,17 @@ paths:
           description: >-
             Validation failure, such as a malformed id or a missing or invalid
             `dj_id` (including one that names no account holding `reviews: write`).
-            When the reviews audience is not `everyone` (so `staff` or `off`) and
-            the asked account is below music director and does not hold
+            The coded refusal applies only to an account that can be asked: one
+            that holds `reviews: write` and is not a service account. For such an
+            account, when the reviews audience is not `everyone` (so `staff` or
+            `off`) and the asked account is below music director and does not hold
             `reviews_beta`, the body is `IntakeRequestRefusedError` with `code`
             `asked_dj_cannot_see_feature` and `message` "This DJ can't see
             reviews yet. A station manager can add them to the reviews beta in
-            the DJ Roster."; no request is recorded. Every other 400 here is the
+            the DJ Roster."; no request is recorded. A `dj_id` that does not name
+            an account that can be asked (no such account, a service account, or
+            an account without `reviews: write`) gets the plain `ApiErrorResponse`
+            with no code, whatever the audience. Every other 400 here is the
             plain `ApiErrorResponse` with no code.
           content:
             application/json:
