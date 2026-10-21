@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.2.0
+  version: 12.3.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -230,9 +230,10 @@ components:
     ShowAlreadyOpenShow:
       type: object
       description: >
-        Identity of the open show the caller collided with. A strict subset of
-        `OpenShow`, whose rows `GET /flowsheet/open-shows` returns — same
-        fields, same nullability, same BS#1371 resolution chain for `dj_name`.
+        Identity of the open show the caller collided with. Carries `OpenShow`'s
+        identity fields, with the same nullability and the same BS#1371
+        resolution chain for `dj_name`, plus the embedded `specialty`, which
+        `OpenShow` (the rows `GET /flowsheet/open-shows` returns) does not have.
       required:
         - id
         - start_time
@@ -271,7 +272,9 @@ components:
           type: string
           nullable: true
           description: >-
-            The show's title, `null` when it has none. Optional so a server that
+            This airing's free-text title, such as a Thursday Night Feature
+            topic; not the program name. The program name comes from
+            `specialty`. `null` when it has none. Optional so a server that
             predates it stays valid.
         specialty:
           allOf:
@@ -1750,8 +1753,9 @@ components:
       required:
         - dj_name
       description: >-
-        Minimal, name-only on-air DJ shape for the `on_air` field. Deliberately
-        separate from `OnAirDJ`, which additionally carries an `id` (a nullable
+        On-air banner shape for the `on_air` field: the DJ's public handle plus
+        the live show's identity (`show_id`, `show_name`, `specialty`).
+        Deliberately separate from `OnAirDJ`, which additionally carries an `id` (a nullable
         `auth_user.id` string) that the `on_air` banner has no use for.
       properties:
         dj_name:
@@ -1771,14 +1775,20 @@ components:
         show_name:
           type: string
           nullable: true
-          description: The airing's title, `null` when the show has none.
+          description: >-
+            This airing's free-text title, such as a Thursday Night Feature
+            topic; not the program name. The program name comes from
+            `specialty`. `null` when the show has none.
         specialty:
           allOf:
             - $ref: '#/components/schemas/SpecialtyShowRef'
           nullable: true
           description: >-
-            The specialty program, set only when a DJ signed on as that show.
-            Never inferred from the time slot. `null` for an ordinary show.
+            The specialty program, set only when a DJ signed on as that show or
+            tagged it afterwards. Never inferred from the time slot. `null` for
+            an ordinary show. The tag can be set, changed or cleared mid-show
+            through `PATCH /flowsheet/shows/{id}`, so the value can change for
+            the same `show_id`; re-read it on every poll.
 
     OnAirDJ:
       type: object
