@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.1.0
+  version: 12.2.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -13263,6 +13263,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FlowsheetEntryResponse'
+        '400':
+          description: >-
+            The caller is not a member of the row's show while it is on the
+            air (`DJ not a member of show`), or the request is malformed.
+        '403':
+          description: >-
+            `code: closed_show` — the row's show has ended and the caller lacks
+            `flowsheet: manage`. A row of an open show the caller is not on
+            stays a 400.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
     delete:
       x-wxyc-service: backend-service
@@ -13285,6 +13298,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FlowsheetEntryResponse'
+        '400':
+          description: >-
+            The caller is not a member of the row's show while it is on the
+            air (`DJ not a member of show`), or the request is malformed.
+        '403':
+          description: >-
+            `code: closed_show` — the row's show has ended and the caller lacks
+            `flowsheet: manage`. A row of an open show the caller is not on
+            stays a 400.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /flowsheet/latest:
     get:
@@ -13591,6 +13617,81 @@ paths:
         '403':
           description: 'Caller lacks the `flowsheet: read` permission'
 
+  /flowsheet/shows/{id}:
+    patch:
+      x-wxyc-service: backend-service
+      summary: Update a show's specialty tag or title
+      description: >
+        Changes `specialty_id` and/or `show_name` after the show has opened, so
+        a DJ can tag the show once it is on the air and Edit show details can
+        fix a wrong answer. Omitted fields are unchanged. `specialty_id: null`
+        clears the tag; an empty or whitespace-only `show_name` is stored as
+        null.
+
+
+        Requires `flowsheet: write`. While the show is on the air, any DJ on it,
+        co-hosts included, may call this. Once it has ended, only a caller with
+        `flowsheet: manage` (music directors and station managers) may. A show
+        has ended when its `end_time` is set or its newest row is a `show_end`
+        marker.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Backend-Service `shows.id`, not the tubafrenzy `legacy_show_id`.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                specialty_id:
+                  type: integer
+                  nullable: true
+                  description: >-
+                    Catalog id of the specialty program, or `null` to clear the
+                    tag (a freeform show).
+                show_name:
+                  type: string
+                  nullable: true
+                  maxLength: 128
+                  description: >-
+                    This airing's title; not the program name. Empty or
+                    whitespace-only is stored as `null`.
+      responses:
+        '200':
+          description: The updated show
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlowsheetRangeShow'
+        '400':
+          description: >-
+            A `specialty_id` that names no program or a retired one, a
+            `show_name` over its `maxLength`, or a caller who is not on the
+            show while it is on the air (`DJ not a member of show`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: >-
+            `code: closed_show` — the show has ended and the caller lacks
+            `flowsheet: manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No show with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
   /flowsheet/shows/{id}/force-end:
     post:
       x-wxyc-service: backend-service
@@ -13809,6 +13910,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FlowsheetEntryResponse'
+        '400':
+          description: >-
+            The caller is not a member of the row's show while it is on the
+            air (`DJ not a member of show`), or the request is malformed.
+        '403':
+          description: >-
+            `code: closed_show` — the row's show has ended and the caller lacks
+            `flowsheet: manage`. A row of an open show the caller is not on
+            stays a 400.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /flowsheet/playlist:
     get:
