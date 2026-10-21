@@ -13265,13 +13265,23 @@ paths:
                 $ref: '#/components/schemas/FlowsheetEntryResponse'
         '400':
           description: >-
-            The caller is not a member of the row's show while it is on the
-            air (`DJ not a member of show`), or the request is malformed.
+            The caller is not on the show this entry belongs to while it is on
+            the air, or the request is malformed. Clients should branch on the
+            status, not on the message text.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
         '403':
           description: >-
             `code: closed_show` — the row's show has ended and the caller lacks
             `flowsheet: manage`. A row of an open show the caller is not on
-            stays a 400.
+            stays a 400. A 403 without that `code` is a different denial: a
+            caller missing the `flowsheet: write` permission gets a body of
+            `{error}`, and a banned caller gets `{message, reason}`. Clients
+            should branch on `code`.
           content:
             application/json:
               schema:
@@ -13300,13 +13310,23 @@ paths:
                 $ref: '#/components/schemas/FlowsheetEntryResponse'
         '400':
           description: >-
-            The caller is not a member of the row's show while it is on the
-            air (`DJ not a member of show`), or the request is malformed.
+            The caller is not on the show this entry belongs to while it is on
+            the air, or the request is malformed. Clients should branch on the
+            status, not on the message text.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
         '403':
           description: >-
             `code: closed_show` — the row's show has ended and the caller lacks
             `flowsheet: manage`. A row of an open show the caller is not on
-            stays a 400.
+            stays a 400. A 403 without that `code` is a different denial: a
+            caller missing the `flowsheet: write` permission gets a body of
+            `{error}`, and a banned caller gets `{message, reason}`. Clients
+            should branch on `code`.
           content:
             application/json:
               schema:
@@ -13670,17 +13690,25 @@ paths:
                 $ref: '#/components/schemas/FlowsheetRangeShow'
         '400':
           description: >-
-            A `specialty_id` that names no program or a retired one, a
+            A `specialty_id` that names no program, or that switches the show
+            to a retired program (re-sending the show's current `specialty_id`
+            is accepted even if that program has since been retired), a
             `show_name` over its `maxLength`, or a caller who is not on the
-            show while it is on the air (`DJ not a member of show`).
+            show while it is on the air. Clients should branch on the status,
+            not on the message text.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
         '403':
           description: >-
             `code: closed_show` — the show has ended and the caller lacks
-            `flowsheet: manage`.
+            `flowsheet: manage`. A 403 without that `code` is a different
+            denial: a caller missing the `flowsheet: write` permission gets a
+            body of `{error}`, and a banned caller gets `{message, reason}`.
+            Clients should branch on `code`.
           content:
             application/json:
               schema:
@@ -13912,13 +13940,23 @@ paths:
                 $ref: '#/components/schemas/FlowsheetEntryResponse'
         '400':
           description: >-
-            The caller is not a member of the row's show while it is on the
-            air (`DJ not a member of show`), or the request is malformed.
+            The caller is not on the show this entry belongs to while it is on
+            the air, or the request is malformed. Clients should branch on the
+            status, not on the message text.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
         '403':
           description: >-
             `code: closed_show` — the row's show has ended and the caller lacks
             `flowsheet: manage`. A row of an open show the caller is not on
-            stays a 400.
+            stays a 400. A 403 without that `code` is a different denial: a
+            caller missing the `flowsheet: write` permission gets a body of
+            `{error}`, and a banned caller gets `{message, reason}`. Clients
+            should branch on `code`.
           content:
             application/json:
               schema:
