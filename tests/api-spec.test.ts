@@ -11266,23 +11266,46 @@ describe('OpenAPI Specification', () => {
       expect(op().responses['200'].content['application/json'].schema).toEqual(ref('FeatureAccessResponse'));
     });
 
-    it('states the access rule and the private, no-store cache policy', () => {
+    // Each row pins one settled clause of the access rule. The DJ-access floor
+    // is the clause that keeps a `member` who holds `reviews_beta` out of a
+    // `staff`-phase feature; losing it would turn `can_see` true for that account.
+    it.each([
+      ['the private, no-store cache policy', 'Cache-Control: private, no-store'],
+      ['the tester capability for reviews', 'reviews_beta'],
+      ['off means nobody', '`off` means nobody'],
+      ['staff reaches music director or above', /`staff` means music director or above/],
+      ['everyone means every account with DJ access', /`everyone` means every account with DJ access/],
+      ['the DJ-access floor', 'An account without DJ access never sees a feature'],
+      ['why audience is returned beside can_see', /`audience` is returned beside `can_see`/],
+      ['the caller-only response', /only the caller's own access, never who holds a capability/],
+      ['the run-time change and per-page-load read', /can change at run time/],
+      ['clients never cache', /never caches/],
+    ])('states %s', (_clause, expected) => {
       const description = flat(op().description);
-      expect(description).toContain('Cache-Control: private, no-store');
-      expect(description).toContain('reviews_beta');
-      expect(description).toMatch(/music director or above/);
-      expect(description).toMatch(/never caches/);
+      if (typeof expected === 'string') {
+        expect(description).toContain(expected);
+      } else {
+        expect(description).toMatch(expected);
+      }
     });
 
     it('closes FeatureAudience over off, staff, everyone', () => {
       expect(schemas().FeatureAudience.enum).toEqual(['off', 'staff', 'everyone']);
     });
 
-    it('gives each entry a required audience ref and a required boolean can_see', () => {
+    // The schema text is attached to the generated type as its doc comment,
+    // apart from the operation text, so it has to state the same rule.
+    it('describes the staff audience as music directors and above, not music directors alone', () => {
+      expect(flat(schemas().FeatureAudience.description)).toMatch(/music directors and above/);
+    });
+
+    it('gives each entry a required audience ref and a required boolean can_see, and nothing else', () => {
       const entry = schemas().FeatureAccessEntry;
       expect(entry.required).toEqual(expect.arrayContaining(['audience', 'can_see']));
       expect(entry.properties.audience).toEqual(ref('FeatureAudience'));
       expect(entry.properties.can_see.type).toBe('boolean');
+      // Closed: a list of capability holders here would break "the caller's own access only".
+      expect(Object.keys(entry.properties)).toEqual(['audience', 'can_see']);
     });
 
     it('keys the response by feature, with reviews the only key today', () => {
@@ -11291,5 +11314,59 @@ describe('OpenAPI Specification', () => {
       expect(response.properties.reviews).toEqual(ref('FeatureAccessEntry'));
       expect(response.required).toEqual(['reviews']);
     });
+  });
+
+  // The `yaml` package reads api.yaml as YAML 1.2, where a bare `off` is the
+  // string 'off'. The Java openapi-generator (Jackson YAML, which produces the
+  // Swift and Kotlin output) reads YAML 1.1, where `off`, `on`, `yes`, `no`,
+  // `y` and `n` are booleans: a bare `off` in a string enum becomes Swift
+  // `case false` and Kotlin `` `false` ``. CI never runs those generators, so
+  // this is the only place the spelling is checked: parse the spec the way a
+  // 1.1 reader does, and require every value of a string enum to still be a string.
+  describe('string enums read as strings by a YAML 1.1 reader (#723)', () => {
+    type EnumSite = { pointer: string; type: unknown; values: unknown[] };
+
+    const yaml11Enums = (): EnumSite[] => {
+      const doc = parse(readFileSync(join(__dirname, '..', 'api.yaml'), 'utf-8'), { version: '1.1' });
+      const found: EnumSite[] = [];
+      const walk = (node: unknown, pointer: string): void => {
+        if (Array.isArray(node)) {
+          node.forEach((child, index) => walk(child, `${pointer}/${index}`));
+          return;
+        }
+        if (!node || typeof node !== 'object') return;
+        const record = node as Record<string, unknown>;
+        if (Array.isArray(record.enum)) {
+          found.push({ pointer, type: record.type, values: record.enum });
+        }
+        for (const [key, child] of Object.entries(record)) {
+          walk(child, `${pointer}/${key}`);
+        }
+      };
+      walk(doc, '#');
+      return found;
+    };
+
+    const stringEnums = yaml11Enums().filter((site) => site.type === 'string');
+
+    it('finds the string enums to check, including FeatureAudience', () => {
+      expect(stringEnums.length).toBeGreaterThan(50);
+      expect(stringEnums.map((site) => site.pointer)).toContain('#/components/schemas/FeatureAudience');
+    });
+
+    it('can fail: a bare off reads as a boolean in YAML 1.1 and as a string in YAML 1.2', () => {
+      const text = 'enum: [off, on, yes, no, y, n, staff]';
+      expect((parse(text, { version: '1.1' }) as { enum: unknown[] }).enum).toEqual([
+        false, true, true, false, true, false, 'staff',
+      ]);
+      expect((parse(text) as { enum: unknown[] }).enum).toEqual(['off', 'on', 'yes', 'no', 'y', 'n', 'staff']);
+    });
+
+    it.each(stringEnums.map((site) => [site.pointer, site.values] as const))(
+      '%s holds only strings',
+      (_pointer, values) => {
+        expect(values.filter((value) => typeof value !== 'string')).toEqual([]);
+      },
+    );
   });
 });
