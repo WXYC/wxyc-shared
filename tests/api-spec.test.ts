@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.5.0');
+      expect(spec.info.version).toBe('12.6.0');
     });
 
     // WXYC/wxyc-shared#724: the coded 400 on POST /intake/{id}/request when the asked DJ cannot see reviews yet.
