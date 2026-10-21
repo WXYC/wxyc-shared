@@ -72,3 +72,5 @@ export function validateEmail(email: string): ValidationResult {
 
   return { valid: true };
 }
+
+export * from "./tag-lint.js";
