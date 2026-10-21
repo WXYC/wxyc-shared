@@ -3640,6 +3640,28 @@ describe('OpenAPI Specification', () => {
       expect(refsIn(spec.components.schemas.FlowsheetV2PaginatedResponse)).toContain('OnAirInfo');
     });
 
+    // Show identity on the on-air banner and the Go Live 409 (WXYC/wxyc-shared#702).
+    // All additive and optional: dj_name stays the only required field, so every
+    // decoder that predates them keeps working.
+    it('adds optional show identity to OnAirInfo and keeps dj_name the only required field', () => {
+      expect(requiredKeysOf('OnAirInfo')).toEqual(['dj_name']);
+      expect(propertyOf('OnAirInfo', 'show_id')?.type).toBe('integer');
+      expect(propertyOf('OnAirInfo', 'show_name')).toMatchObject({ type: 'string', nullable: true });
+      expect(propertyOf('OnAirInfo', 'specialty')).toMatchObject({
+        allOf: [{ $ref: '#/components/schemas/SpecialtyShowRef' }],
+        nullable: true,
+      });
+    });
+
+    it('adds nullable specialty and show_name to ShowAlreadyOpenShow without requiring them', () => {
+      expect(requiredKeysOf('ShowAlreadyOpenShow')).toEqual(['id', 'start_time']);
+      expect(propertyOf('ShowAlreadyOpenShow', 'show_name')).toMatchObject({ type: 'string', nullable: true });
+      expect(propertyOf('ShowAlreadyOpenShow', 'specialty')).toMatchObject({
+        allOf: [{ $ref: '#/components/schemas/SpecialtyShowRef' }],
+        nullable: true,
+      });
+    });
+
     // V1 is not retired: four write operations still $ref it, and repointing
     // the read paths orphans none of them. Asserted by counting $ref sites
     // rather than by finding the name somewhere in `spec.paths` — the name

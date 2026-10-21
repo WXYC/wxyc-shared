@@ -267,6 +267,20 @@ components:
         start_time:
           type: string
           format: date-time
+        show_name:
+          type: string
+          nullable: true
+          description: >-
+            The show's title, `null` when it has none. Optional so a server that
+            predates it stays valid.
+        specialty:
+          allOf:
+            - $ref: '#/components/schemas/SpecialtyShowRef'
+          nullable: true
+          description: >-
+            The specialty program the open show was signed on as, so a Go Live
+            handoff prompt can name it. `null` for an ordinary show. Optional so
+            a server that predates it stays valid.
 
     PaginationParams:
       type: object
@@ -1748,6 +1762,23 @@ components:
             (BS#1371), except when unresolvable this substitutes the station
             name ("WXYC") rather than `null` — it's the enclosing `on_air`
             field that goes `null`, not this one.
+        show_id:
+          type: integer
+          description: >-
+            `shows.id` of the live show, so a client can tell which show a
+            flowsheet entry belongs to (an entry's own `show_id` names the
+            same key).
+        show_name:
+          type: string
+          nullable: true
+          description: The airing's title, `null` when the show has none.
+        specialty:
+          allOf:
+            - $ref: '#/components/schemas/SpecialtyShowRef'
+          nullable: true
+          description: >-
+            The specialty program, set only when a DJ signed on as that show.
+            Never inferred from the time slot. `null` for an ordinary show.
 
     OnAirDJ:
       type: object
