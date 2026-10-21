@@ -11376,6 +11376,18 @@ describe('OpenAPI Specification', () => {
       expect(o.responses?.['401']).toBeDefined();
     });
 
+    it('documents the PATCH /flowsheet 400 answers for invalid spotlight edits', () => {
+      const bad = flat(operation(FLOWSHEET, 'patch').responses?.['400']?.description);
+      expect(bad).toMatch(/unknown `spotlight_role`/);
+      expect(bad).toMatch(/empty or over-128 `spotlight_name`/);
+      expect(bad).toMatch(/spotlight fields? on a track row/);
+      expect(bad).toMatch(/track fields? on a spotlight row/);
+    });
+
+    it('scopes the POST /flowsheet 400 to malformed bodies, not only spotlight entries', () => {
+      expect(flat(operation(FLOWSHEET, 'post').responses?.['400']?.description)).toMatch(/^The body is malformed/);
+    });
+
     // One 403 per operation, so the PATCH answer lists every shape rather than
     // gaining a second entry, and the code-less sentence can no longer say
     // "without that `code`" now that two codes exist.
