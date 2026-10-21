@@ -11365,6 +11365,8 @@ describe('OpenAPI Specification', () => {
 
     it.each(['SpecialtyShowCreateRequest', 'SpecialtyShowUpdateRequest'])('%s bounds its text fields', (name) => {
       expect(propertyOf(name, 'slug')).toMatchObject({ pattern: '^[a-z0-9]+(-[a-z0-9]+)*$' });
+      expect(propertyOf(name, 'slug')).toMatchObject({ maxLength: 64 });
+      expect(propertyOf(name, 'name')).toMatchObject({ maxLength: 64 });
       expect(propertyOf(name, 'short_name')).toMatchObject({ maxLength: 32 });
       expect(propertyOf(name, 'tagline')).toMatchObject({ maxLength: 120, nullable: true });
       expect(propertyOf(name, 'accent_color')).toMatchObject({ pattern: '^#[0-9A-Fa-f]{6}$' });

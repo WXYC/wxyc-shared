@@ -7746,9 +7746,11 @@ components:
         slug:
           type: string
           pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 64
           description: The stable public id. Never reused, even by a retired program.
         name:
           type: string
+          maxLength: 64
         short_name:
           type: string
           maxLength: 32
@@ -7791,9 +7793,11 @@ components:
         slug:
           type: string
           pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 64
           description: Changes only while nothing uses the slug; otherwise 409 `slug_in_use`.
         name:
           type: string
+          maxLength: 64
         short_name:
           type: string
           maxLength: 32
