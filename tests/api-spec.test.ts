@@ -222,7 +222,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.3.0');
+      expect(spec.info.version).toBe('12.4.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -3629,6 +3629,18 @@ describe('OpenAPI Specification', () => {
       expect(propertyKeysOf('FlowsheetV2PaginatedResponse')).toContain('on_air');
       expect(requiredKeysOf('FlowsheetV2PaginatedResponse')).not.toContain('on_air');
       expect(propertyOf('FlowsheetV2PaginatedResponse', 'on_air')?.nullable).toBe(true);
+    });
+
+    // `shows` reuses the `GET /flowsheet/range` show shape by $ref so one
+    // decoder serves both endpoints, and stays optional so an older server that
+    // omits it is still valid (absence means "no headers").
+    it('adds an optional shows array of FlowsheetRangeShow', () => {
+      const shows = propertyOf('FlowsheetV2PaginatedResponse', 'shows');
+      expect(shows?.type).toBe('array');
+      expect((shows?.items as { $ref?: string } | undefined)?.$ref).toBe(
+        '#/components/schemas/FlowsheetRangeShow',
+      );
+      expect(requiredKeysOf('FlowsheetV2PaginatedResponse')).not.toContain('shows');
     });
 
     // Reaching the envelope from the path is what makes `OnAirInfo` reachable

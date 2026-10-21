@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.3.0
+  version: 12.4.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1747,6 +1747,20 @@ components:
             needs the third state must decode by key presence (e.g. Swift's
             `container.contains` + `decodeNil`), as the iOS app does — do not rely
             on a generated model to tell `null` from absent.
+        shows:
+          type: array
+          items:
+            $ref: '#/components/schemas/FlowsheetRangeShow'
+          description: >-
+            The shows behind `entries`, so a client can group rows under a
+            per-show header: every show referenced by an entry's `show_id`, plus
+            the open show if there is one, each once. It reuses the
+            `GET /flowsheet/range` show shape (`FlowsheetRangeShow`, including
+            the embedded `specialty` program) on purpose, so one decoder serves
+            both endpoints. Order is unspecified; key it by `id`. Carries public
+            DJ handles only, never a legal name. Not in `required`: an older
+            server that omits it stays valid, and a client treats absence as "no
+            headers".
 
     OnAirInfo:
       type: object
