@@ -1033,9 +1033,10 @@ components:
           minLength: 1
           maxLength: 128
           description: >-
-            With `spotlight_role`, corrects a spotlight row in place, such as a
-            misspelled band. Applies to spotlight rows only; `entry_type` is not
-            client-writable.
+            `spotlight_role` and `spotlight_name` each correct a spotlight row
+            in place, alone or together, such as a misspelled band. They apply
+            to spotlight rows only; on a track row they get a 400.
+            `entry_type` is not client-writable.
         track_title:
           type: string
         track_position:
@@ -13605,9 +13606,10 @@ paths:
                 $ref: '#/components/schemas/FlowsheetEntryResponse'
         '400':
           description: >-
-            For a spotlight entry: an unknown `spotlight_role`, an empty or
-            over-128 `spotlight_name`, or any track field present. Clients
-            should branch on the status, not on the message text.
+            The body is malformed. For a spotlight entry, that means an unknown
+            `spotlight_role`, an empty or over-128 `spotlight_name`, or any
+            track field present. Clients should branch on the status, not on
+            the message text.
           content:
             application/json:
               schema:
@@ -13645,8 +13647,11 @@ paths:
         '400':
           description: >-
             The caller is not on the show this entry belongs to while it is on
-            the air, or the request is malformed. Clients should branch on the
-            status, not on the message text.
+            the air, or the request is malformed. For a spotlight edit,
+            malformed means an unknown `spotlight_role`, an empty or over-128
+            `spotlight_name`, spotlight fields on a track row, or track fields
+            on a spotlight row. Clients should branch on the status, not on the
+            message text.
           content:
             application/json:
               schema:
@@ -13695,8 +13700,11 @@ paths:
         '400':
           description: >-
             The caller is not on the show this entry belongs to while it is on
-            the air, or the request is malformed. Clients should branch on the
-            status, not on the message text.
+            the air, or the request is malformed. For a spotlight edit,
+            malformed means an unknown `spotlight_role`, an empty or over-128
+            `spotlight_name`, spotlight fields on a track row, or track fields
+            on a spotlight row. Clients should branch on the status, not on the
+            message text.
           content:
             application/json:
               schema:
@@ -14325,8 +14333,11 @@ paths:
         '400':
           description: >-
             The caller is not on the show this entry belongs to while it is on
-            the air, or the request is malformed. Clients should branch on the
-            status, not on the message text.
+            the air, or the request is malformed. For a spotlight edit,
+            malformed means an unknown `spotlight_role`, an empty or over-128
+            `spotlight_name`, spotlight fields on a track row, or track fields
+            on a spotlight row. Clients should branch on the status, not on the
+            message text.
           content:
             application/json:
               schema:
