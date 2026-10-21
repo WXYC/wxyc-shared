@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.9.0
+  version: 12.10.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -107,6 +107,18 @@ components:
         maximum: 2147483647
       description: >-
         The FCC note's id. Must be a positive int4; a non-digit value, zero, or
+        a value past 2147483647 is a 400.
+
+    SpecialtyPosterId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+      description: >-
+        The poster's id. Must be a positive int4; a non-digit value, zero, or
         a value past 2147483647 is a 400.
 
   schemas:
@@ -7760,12 +7772,27 @@ components:
           nullable: true
           description: The uploader's public DJ handle.
         failure_code:
-          type: string
+          allOf:
+            - $ref: '#/components/schemas/PosterFailureCode'
           nullable: true
-          enum: [not_uploaded, unsupported_type, too_large, too_small, bad_aspect, animated, decode_failed]
         created_at:
           type: string
           format: date-time
+
+    PosterFailureCode:
+      type: string
+      description: Why a poster upload was refused. `bad_aspect` includes a story-format 9:16 image.
+      enum: [not_uploaded, unsupported_type, too_large, too_small, bad_aspect, animated, decode_failed]
+
+    PosterCompletionFailure:
+      description: The 422 body of `POST /specialty-posters/{id}/complete`.
+      allOf:
+        - $ref: '#/components/schemas/ApiErrorResponse'
+        - type: object
+          required: [failure_code]
+          properties:
+            failure_code:
+              $ref: '#/components/schemas/PosterFailureCode'
 
     PosterFileDeclaration:
       type: object
@@ -18770,6 +18797,354 @@ paths:
                   $ref: '#/components/schemas/SpecialtyShow'
         '304':
           description: Not Modified. The catalog is unchanged since the client's `If-None-Match`. No body.
+
+  /specialty-posters:
+    post:
+      x-wxyc-service: backend-service
+      summary: Begin a poster upload for a specialty show's airing
+      description: >-
+        Registers the poster and returns a presigned PUT; the client uploads
+        the file, then calls `POST /specialty-posters/{id}/complete`.
+        Requires `flowsheet: write`. Authorization follows the airing's state:
+        before the airing any DJ may upload, while it is on the air the
+        airing's DJs and managers may, and once it has ended only managers may.
+        "Managers" are music directors and station managers, the roles that
+        hold `flowsheet: manage`.
+
+
+        A second upload for the same program and broadcast date is a replace,
+        not a conflict: when it is published, the earlier poster becomes
+        `replaced` and the binding moves to the new one. The replaced poster is
+        held, unserved, for restore.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PosterUploadRequest'
+      responses:
+        '201':
+          description: The poster in `uploading` status and the presigned PUT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PosterUploadResponse'
+        '400':
+          description: >-
+            A `specialty_id` that names no program, or a `broadcast_date` that
+            has passed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: >-
+            `code: closed_show` — the program's airing on that date has ended
+            and the caller lacks `flowsheet: manage`. A 403 without that `code`
+            is a caller missing `flowsheet: write`. Clients should branch on
+            `code`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    get:
+      x-wxyc-service: backend-service
+      summary: List specialty-show posters
+      description: >-
+        Requires `flowsheet: read`. Without `status`, the list holds
+        `published` and `uploading` posters, which any DJ may read. Asking for
+        `replaced`, `removed` or `purged` (the managers' Replaced and removed
+        list) requires `flowsheet: manage`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: specialty_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Only posters of this program.
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Only posters whose `broadcast_date` is on or after this day.
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Only posters whose `broadcast_date` is on or before this day.
+        - name: status
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [uploading, published, replaced, removed, purged, failed]
+          description: >-
+            Comma-separated statuses. The default is `published` and
+            `uploading`.
+      responses:
+        '200':
+          description: The matching posters.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SpecialtyPoster'
+        '400':
+          description: A `from`, `to` or `status` that does not parse.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: >-
+            The caller lacks `flowsheet: read`, or asked for `replaced`,
+            `removed` or `purged` without `flowsheet: manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /specialty-posters/{id}/complete:
+    post:
+      x-wxyc-service: backend-service
+      summary: Finish a poster upload
+      description: >-
+        Checks the uploaded file, normalizes it and publishes the poster. Only
+        the uploader may call it, and it requires `flowsheet: write`.
+        Authorization follows the airing's state: before the airing the
+        uploader may complete, while it is on the air so may the airing's DJs
+        and managers, and once it has ended only managers may. A file the
+        server refuses answers 422 with a `failure_code`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SpecialtyPosterId'
+      responses:
+        '200':
+          description: The published poster.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialtyPoster'
+        '401':
+          description: No bearer token
+        '403':
+          description: >-
+            `code: closed_show` — the airing has ended and the caller lacks
+            `flowsheet: manage`. A 403 without that `code` is a caller who is
+            not the uploader, or lacks `flowsheet: write`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No poster with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: >-
+            The file was refused; `failure_code` says why. A story-format 9:16
+            image is refused with `bad_aspect`, and the DJ site maps that code
+            to its copy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PosterCompletionFailure'
+
+  /specialty-posters/{id}:
+    patch:
+      x-wxyc-service: backend-service
+      summary: Edit a poster's date, title or airing
+      description: >-
+        Requires `flowsheet: write`. Authorization follows the airing's state:
+        before the airing only the uploader and managers may edit, while it is
+        on the air the airing's DJs and managers may, and once it has ended
+        only managers may. "Managers" are music directors and station
+        managers, the roles that hold `flowsheet: manage`. Omitted fields are
+        unchanged.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SpecialtyPosterId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                broadcast_date:
+                  type: string
+                  format: date
+                  description: Rebinds the poster to another broadcast day.
+                title:
+                  type: string
+                  nullable: true
+                  maxLength: 128
+                show_id:
+                  type: integer
+                  nullable: true
+                  description: >-
+                    The airing to bind to, or `null` to unbind. For managers
+                    only.
+      responses:
+        '200':
+          description: The updated poster.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialtyPoster'
+        '400':
+          description: A `title` over its `maxLength`, or a `broadcast_date` that has passed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: >-
+            `code: closed_show` — the airing has ended and the caller lacks
+            `flowsheet: manage`. A 403 without that `code` is a caller the
+            rule above excludes, or a `show_id` from a caller without
+            `flowsheet: manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No poster with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    delete:
+      x-wxyc-service: backend-service
+      summary: Remove a poster, keeping its files for restore
+      description: >-
+        Removes the poster softly: it is unbound and its renditions are held,
+        not deleted, until `restorable_until`. Requires `flowsheet: write`.
+        Authorization follows the airing's state: before the airing any DJ may
+        remove it, while it is on the air the airing's DJs and managers may,
+        and once it has ended only managers may. "Managers" are music
+        directors and station managers, the roles that hold `flowsheet: manage`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SpecialtyPosterId'
+      responses:
+        '204':
+          description: Removed. No body.
+        '401':
+          description: No bearer token
+        '403':
+          description: >-
+            `code: closed_show` — the airing has ended and the caller lacks
+            `flowsheet: manage`. A 403 without that `code` is a caller the
+            rule above excludes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No poster with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /specialty-posters/{id}/restore:
+    post:
+      x-wxyc-service: backend-service
+      summary: Restore a replaced or removed poster
+      description: >-
+        Requires `flowsheet: manage`: music directors and station managers may
+        restore at any time, whatever the airing's state, and no other role
+        may. Works on a `replaced` or `removed` poster until its
+        `restorable_until`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SpecialtyPosterId'
+      responses:
+        '200':
+          description: The restored poster.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialtyPoster'
+        '401':
+          description: No bearer token
+        '403':
+          description: 'The caller lacks `flowsheet: manage`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No poster with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '410':
+          description: >-
+            `code: renditions_gone` — the 90-day hold has ended, or the poster
+            was purged, so the held files no longer exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /specialty-posters/{id}/purge:
+    post:
+      x-wxyc-service: backend-service
+      summary: Delete a replaced or removed poster's held files for good
+      description: >-
+        Requires `flowsheet: manage`: music directors and station managers may
+        purge at any time, whatever the airing's state, and no other role may.
+        This is the explicit manager action; catalog-side admin never
+        hard-deletes. Acts on a `replaced` or `removed` poster.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SpecialtyPosterId'
+      responses:
+        '204':
+          description: Purged. No body.
+        '401':
+          description: No bearer token
+        '403':
+          description: 'The caller lacks `flowsheet: manage`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No poster with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /schedule:
     get:
