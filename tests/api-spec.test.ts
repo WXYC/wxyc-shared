@@ -225,24 +225,6 @@ describe('OpenAPI Specification', () => {
       expect(spec.info.version).toBe('12.6.0');
     });
 
-    // WXYC/wxyc-shared#724: the coded 400 on POST /intake/{id}/request when the asked DJ cannot see reviews yet.
-    it('documents the coded asked_dj_cannot_see_feature refusal on the request route 400 (WXYC/wxyc-shared#724)', () => {
-      const schemas = spec.components.schemas as Record<string, any>;
-      expect(schemas.IntakeRequestRefusedCode.enum).toEqual(['asked_dj_cannot_see_feature']);
-      expect(schemas.IntakeRequestRefusedError.required).toEqual(['message', 'code']);
-      expect(schemas.IntakeRequestRefusedError.properties.code.$ref).toBe(
-        '#/components/schemas/IntakeRequestRefusedCode',
-      );
-      const post = (spec.paths as Record<string, any>)['/intake/{id}/request'].post;
-      expect(post.responses['400'].content['application/json'].schema.oneOf).toEqual([
-        { $ref: '#/components/schemas/IntakeRequestRefusedError' },
-        { $ref: '#/components/schemas/ApiErrorResponse' },
-      ]);
-      expect(flat(post.responses['400'].description)).toContain(
-        "This DJ can't see reviews yet. A station manager can add them to the reviews beta in the DJ Roster.",
-      );
-    });
-
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
       const patch = flat((spec.components.schemas.IntakeItemPatch as { description?: string }).description);
       expect(patch).toContain(
@@ -4612,9 +4594,58 @@ describe('OpenAPI Specification', () => {
       expect(text).not.toContain('legacy');
     });
 
-    it('declares a 400 referencing ApiErrorResponse for a bad /request body', () => {
+    // The one assertion of the /request 400 shape: the coded refusal first, then the plain error (WXYC/wxyc-shared#724).
+    it('declares a 400 that is a oneOf of IntakeRequestRefusedError and ApiErrorResponse for the /request route', () => {
       expect(responseSchema('/intake/{id}/request', 'post', '400')).toEqual({
         oneOf: [ref('IntakeRequestRefusedError'), ref('ApiErrorResponse')],
+      });
+    });
+
+    describe('POST /intake/{id}/request coded refusal (WXYC/wxyc-shared#724)', () => {
+      const request400 = () => flat(operation('/intake/{id}/request', 'post').responses?.['400']?.description);
+      const refusedErrorDescription = () =>
+        flat((spec.components.schemas.IntakeRequestRefusedError as { description?: string }).description);
+
+      it('defines IntakeRequestRefusedError as a message and a code drawn from the named IntakeRequestRefusedCode enum', () => {
+        const schemas = spec.components.schemas as unknown as Record<
+          string,
+          { enum?: string[]; required?: string[]; properties?: Record<string, unknown> }
+        >;
+        expect(schemas.IntakeRequestRefusedCode!.enum).toEqual(['asked_dj_cannot_see_feature']);
+        expect(schemas.IntakeRequestRefusedError!.required).toEqual(['message', 'code']);
+        expect(schemas.IntakeRequestRefusedError!.properties!.code).toEqual(ref('IntakeRequestRefusedCode'));
+      });
+
+      it.each([
+        ['the approved message, word for word', "\"This DJ can't see reviews yet. A station manager can add them to the reviews beta in the DJ Roster.\""],
+        ['the code', '`code` `asked_dj_cannot_see_feature`'],
+        ['it applies only to an account that can be asked', 'applies only to an account that can be asked: one that holds `reviews: write` and is not a service account'],
+        ['an audience that is not everyone, including off', 'the reviews audience is not `everyone` (so `staff` or `off`)'],
+        ['an asked account below music director', 'below music director'],
+        ['an asked account without reviews_beta', 'does not hold `reviews_beta`'],
+        ['no request is recorded', 'no request is recorded'],
+        [
+          'a dj_id that is not an account that can be asked gets the plain 400',
+          'A `dj_id` that does not name an account that can be asked (no such account, a service account, or an account without `reviews: write`) gets the plain `ApiErrorResponse` with no code, whatever the audience.',
+        ],
+        ['every other 400 is the plain error', 'Every other 400 here is the plain `ApiErrorResponse` with no code.'],
+      ])('says in the 400 description when the refusal fires: %s', (_what, phrase) => {
+        expect(request400()).toContain(phrase);
+      });
+
+      it('names WXYC/Backend-Service#3531 as the issue that delivers the coded refusal', () => {
+        expect(flat(operation('/intake/{id}/request', 'post').description)).toContain(
+          'The coded refusal on the 400 is delivered by WXYC/Backend-Service#3531.',
+        );
+      });
+
+      it.each([
+        ['it is sent only for an account that can be asked', 'Sent only for an account that can be asked (one that holds `reviews: write` and is not a service account)'],
+        ['an audience that is not everyone, including off', 'the reviews audience is not `everyone` (so `staff` or `off`)'],
+        ['an asked account below music director without reviews_beta', 'below music director and does not hold `reviews_beta`'],
+        ['no request is recorded', 'no request is recorded'],
+      ])('says in the IntakeRequestRefusedError description when it is sent: %s', (_what, phrase) => {
+        expect(refusedErrorDescription()).toContain(phrase);
       });
     });
 
@@ -4725,12 +4756,9 @@ describe('OpenAPI Specification', () => {
 
       it('declares the malformed-id 400 on every operation', () => {
         for (const [method, path] of idOperations(prefix)) {
-          // the request route's 400 is a oneOf of the coded refusal and the plain error (#724)
-          const expected =
-            path === '/intake/{id}/request'
-              ? { oneOf: [ref('IntakeRequestRefusedError'), ref('ApiErrorResponse')] }
-              : ref('ApiErrorResponse');
-          expect(responseSchema(path, method, '400'), `${method} ${path}`).toEqual(expected);
+          // The request route's 400 is a oneOf with the plain error as one branch; its exact shape is pinned once, in its own test.
+          const schema = responseSchema(path, method, '400') as { oneOf?: unknown[] };
+          expect(schema.oneOf ?? [schema], `${method} ${path}`).toContainEqual(ref('ApiErrorResponse'));
           expect(flat(operation(path, method).responses?.['400']?.description), `${method} ${path}`).toContain(
             'malformed id',
           );
