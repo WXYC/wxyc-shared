@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.8.0
+  version: 12.9.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1899,6 +1899,28 @@ components:
             The current spotlight: the newest spotlight row in the open show,
             computed by the server so a client never searches a window of
             entries for it. `null` or absent when the show has none.
+        request_line:
+          type: object
+          required: [mode, source]
+          description: >-
+            What the listener request button does right now, computed once on
+            the server so every client agrees. Apps obey `mode` and nothing
+            else; `source` lets the DJ site explain itself ("Closed while a
+            band is on"). Absent from an older server. When nobody is on the
+            air `on_air` is `null` and there is no answer here: apps keep
+            today's behaviour.
+          properties:
+            mode:
+              $ref: '#/components/schemas/RequestLineMode'
+            source:
+              type: string
+              enum: [dj, program, spotlight, default]
+              description: >-
+                Which rule produced `mode`: `dj` the show's own choice
+                (`request_mode` on `PATCH /flowsheet/shows/{id}`), `program`
+                the specialty program's `default_request_mode`, `spotlight`
+                the person in the spotlight (a band or a reader hides the
+                button by default), `default` none of those applied.
 
     OnAirDJ:
       type: object
@@ -7536,6 +7558,22 @@ components:
         release. Generated enum decoders reject unknown values, so clients
         decode this field as a string and map it themselves.
 
+    RequestLineMode:
+      type: string
+      enum: [requests, feedback, closed]
+      description: >-
+        What the listener request button is for. `requests`: today's flow,
+        where the message is parsed, searched and posted, and a message the
+        parser judges not to be a request keeps its label; listeners see
+        "Request" (DJs see "Requests"). `feedback`: every message is posted as
+        feedback with no parse and no library search; listeners see "Message"
+        (DJs see "Messages only"). `closed`: messages are refused and nothing
+        is posted; listeners see no button (DJs see "Closed"). Closed set.
+        Clients must treat an unrecognized value as `requests`. Generated enum
+        decoders reject unknown values, so clients decode this field as a
+        string and map it themselves, so a mode can be added without a
+        coordinated release.
+
     SpecialtyShowArtwork:
       type: object
       required: [square_url]
@@ -7632,6 +7670,13 @@ components:
                 $ref: '#/components/schemas/SpecialtyShowSlot'
             active:
               type: boolean
+            default_request_mode:
+              allOf:
+                - $ref: '#/components/schemas/RequestLineMode'
+              nullable: true
+              description: >-
+                The request line mode a show of this program starts with.
+                `null` means `requests`.
 
     ShowPoster:
       description: >-
@@ -14070,6 +14115,15 @@ paths:
                   description: >-
                     This airing's title; not the program name. Empty or
                     whitespace-only is stored as `null`.
+                request_mode:
+                  allOf:
+                    - $ref: '#/components/schemas/RequestLineMode'
+                  nullable: true
+                  description: >-
+                    What the listener request button is for during this show.
+                    `null` returns the show to its default (the program's
+                    `default_request_mode`, else `requests`). Omitted is
+                    unchanged.
       responses:
         '200':
           description: The updated show
