@@ -171,6 +171,12 @@ describe('OpenAPI Specification', () => {
   // A `$ref` to a component schema, for toEqual against a response or request body schema.
   const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 
+  // A component schema by name, loosely typed for property-level assertions.
+  const sch = (name: string) => spec.components.schemas[name] as Record<string, any>;
+
+  // A `$ref` that may also be `null`, the shape this spec gives an optional embedded schema.
+  const nullableRef = (name: string) => ({ allOf: [ref(name)], nullable: true });
+
   // The schema names a `oneOf` branches over, in declaration order.
   function oneOfNames(schema: Record<string, unknown>): string[] {
     const branches = (schema.oneOf as Array<{ $ref?: string }> | undefined) ?? [];
@@ -222,7 +228,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.9.0');
+      expect(spec.info.version).toBe('12.10.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -8547,9 +8553,7 @@ describe('OpenAPI Specification', () => {
     // Schemas declared before the paths that reference them, so a schema-first
     // slice can land ahead of its paths. Prune an entry once its path lands:
     // the "carries no exemption" guard below fails until it is removed.
-    const DECLARED_AHEAD_OF_PATHS: string[] = [
-      'PosterFileDeclaration', 'PosterUploadRequest', 'PosterUploadResponse', 'SpecialtyPoster',
-    ];
+    const DECLARED_AHEAD_OF_PATHS: string[] = [];
 
     const EXEMPT = new Set([
       ...WEBSOCKET_PROTOCOL,
@@ -11011,7 +11015,6 @@ describe('OpenAPI Specification', () => {
 
   describe('Artist re-file (WXYC/Backend-Service#2643)', () => {
     const path = '/library/artists/{id}/refile';
-    const sch = (name: string) => spec.components.schemas[name] as Record<string, any>;
 
     it('declares the POST as a backend-service route gated on catalog write', () => {
       const o = operation(path, 'post') as Record<string, any>;
@@ -11174,9 +11177,6 @@ describe('OpenAPI Specification', () => {
   });
 
   describe('specialty-show catalog (WXYC/wxyc-shared#700)', () => {
-    const sch = (name: string) => spec.components.schemas[name] as Record<string, any>;
-    const nullableRef = (name: string) => ({ allOf: [ref(name)], nullable: true });
-
     it('declares SpotlightRole as exactly the five roles', () => {
       expect(sch('SpotlightRole').type).toBe('string');
       expect(sch('SpotlightRole').enum).toEqual(['performer', 'dj', 'reader', 'guest', 'host']);
@@ -11258,9 +11258,6 @@ describe('OpenAPI Specification', () => {
   });
 
   describe('request line mode (WXYC/wxyc-shared#706)', () => {
-    const sch = (name: string) => spec.components.schemas[name] as Record<string, any>;
-    const nullableRef = (name: string) => ({ allOf: [ref(name)], nullable: true });
-
     it('declares RequestLineMode as exactly the three modes', () => {
       expect(sch('RequestLineMode').type).toBe('string');
       expect(sch('RequestLineMode').enum).toEqual(['requests', 'feedback', 'closed']);
@@ -11563,9 +11560,6 @@ describe('OpenAPI Specification', () => {
   });
 
   describe('specialty-show posters (WXYC/wxyc-shared#705)', () => {
-    const sch = (name: string) => spec.components.schemas[name] as Record<string, any>;
-    const nullableRef = (name: string) => ({ allOf: [ref(name)], nullable: true });
-
     it.each([
       ['ShowPoster', ['id', 'aspect_ratio', 'renditions']],
       ['SpecialtyPoster', ['id', 'specialty_id', 'broadcast_date', 'status', 'created_at']],
@@ -11593,9 +11587,6 @@ describe('OpenAPI Specification', () => {
         'uploading', 'published', 'replaced', 'removed', 'purged', 'failed',
       ]);
       expect(propertyOf('SpecialtyPoster', 'failure_code')).toMatchObject({ nullable: true });
-      expect(propertyOf('SpecialtyPoster', 'failure_code')?.enum).toEqual([
-        'not_uploaded', 'unsupported_type', 'too_large', 'too_small', 'bad_aspect', 'animated', 'decode_failed',
-      ]);
     });
 
     it('embeds a nullable ShowPoster and keeps the uploader in the management view only', () => {
@@ -11627,6 +11618,178 @@ describe('OpenAPI Specification', () => {
 
     it('refuses story-format 9:16 posters with the bad_aspect code', () => {
       expect(flat(sch('SpecialtyPoster').description)).toMatch(/9:16.*bad_aspect/);
+    });
+
+    describe('operations (WXYC/wxyc-shared#742)', () => {
+      const writes: Array<[string, string]> = [
+        ['/specialty-posters', 'post'],
+        ['/specialty-posters/{id}/complete', 'post'],
+        ['/specialty-posters/{id}', 'patch'],
+        ['/specialty-posters/{id}', 'delete'],
+        ['/specialty-posters/{id}/restore', 'post'],
+        ['/specialty-posters/{id}/purge', 'post'],
+      ];
+      const idPath: Array<[string, string]> = [
+        ['/specialty-posters/{id}/complete', 'post'],
+        ['/specialty-posters/{id}', 'patch'],
+        ['/specialty-posters/{id}', 'delete'],
+        ['/specialty-posters/{id}/restore', 'post'],
+        ['/specialty-posters/{id}/purge', 'post'],
+      ];
+
+      it('declares exactly the seven operations, all backend-service routes behind a bearer token', () => {
+        const declared = operations()
+          .filter(([, path]) => path.startsWith('/specialty-posters'))
+          .map(([method, path]) => `${method} ${path}`)
+          .sort();
+        expect(declared).toEqual([
+          'delete /specialty-posters/{id}',
+          'get /specialty-posters',
+          'patch /specialty-posters/{id}',
+          'post /specialty-posters',
+          'post /specialty-posters/{id}/complete',
+          'post /specialty-posters/{id}/purge',
+          'post /specialty-posters/{id}/restore',
+        ]);
+        for (const [path, method] of [['/specialty-posters', 'get'], ...writes] as Array<[string, string]>) {
+          const o = operation(path, method) as Record<string, any>;
+          expect(o['x-wxyc-service']).toBe('backend-service');
+          expect(o.security).toEqual([{ BearerAuth: [] }]);
+        }
+      });
+
+      it.each(idPath)('%s %s takes the shared SpecialtyPosterId parameter', (path, method) => {
+        expect(operation(path, method).parameters).toContainEqual({
+          $ref: '#/components/parameters/SpecialtyPosterId',
+        });
+      });
+
+      it('declares SpecialtyPosterId as a positive int4 path id', () => {
+        expect((spec.components as Record<string, any>).parameters.SpecialtyPosterId).toMatchObject({
+          name: 'id',
+          in: 'path',
+          required: true,
+          schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+        });
+      });
+
+      it('names the failure codes once, in PosterFailureCode, for SpecialtyPoster and the 422 to share', () => {
+        expect(sch('PosterFailureCode').type).toBe('string');
+        expect(sch('PosterFailureCode').enum).toEqual([
+          'not_uploaded', 'unsupported_type', 'too_large', 'too_small', 'bad_aspect', 'animated', 'decode_failed',
+        ]);
+        expect(propertyOf('SpecialtyPoster', 'failure_code')).toMatchObject(nullableRef('PosterFailureCode'));
+        expect(propertyOf('PosterCompletionFailure', 'failure_code')).toEqual(ref('PosterFailureCode'));
+        expect(requiredKeysOf('PosterCompletionFailure')).toEqual(expect.arrayContaining(['message', 'failure_code']));
+      });
+
+      it('begins an upload with POST /specialty-posters and returns 201 with the presigned PUT', () => {
+        const o = operation('/specialty-posters', 'post');
+        expect(o.requestBody?.content?.['application/json']?.schema).toEqual(ref('PosterUploadRequest'));
+        expect(responseSchema('/specialty-posters', 'post', '201')).toEqual(ref('PosterUploadResponse'));
+        for (const status of ['400', '403']) {
+          expect(responseSchema('/specialty-posters', 'post', status)).toEqual(ref('ApiErrorResponse'));
+        }
+        expect(o.responses?.['401']).toBeDefined();
+      });
+
+      it('makes a second upload for the same program and date a replace', () => {
+        const description = flat(operation('/specialty-posters', 'post').description);
+        expect(description).toMatch(/same program and broadcast date/);
+        expect(description).toContain('`replaced`');
+        expect(description).toMatch(/binding moves/);
+      });
+
+      it('completes an upload with 200, or a 422 carrying failure_code, including the 9:16 refusal', () => {
+        const path = '/specialty-posters/{id}/complete';
+        expect(responseSchema(path, 'post', '200')).toEqual(ref('SpecialtyPoster'));
+        expect(responseSchema(path, 'post', '422')).toEqual(ref('PosterCompletionFailure'));
+        expect(responseSchema(path, 'post', '404')).toEqual(ref('ApiErrorResponse'));
+        expect(flat(operation(path, 'post').description)).toContain('uploader');
+        expect(flat(operation(path, 'post').responses?.['422']?.description)).toMatch(/9:16.*`bad_aspect`/);
+      });
+
+      it('lists posters with specialty_id, from, to and a status filter that defaults to published and uploading', () => {
+        const o = operation('/specialty-posters', 'get');
+        const byName = Object.fromEntries((o.parameters ?? []).map((p) => [p.name as string, p]));
+        expect(Object.keys(byName).sort()).toEqual(['from', 'specialty_id', 'status', 'to']);
+        expect(byName.from).toMatchObject({ in: 'query', schema: { type: 'string', format: 'date' } });
+        expect(byName.to).toMatchObject({ in: 'query', schema: { type: 'string', format: 'date' } });
+        expect(byName.specialty_id).toMatchObject({ in: 'query', schema: { type: 'integer' } });
+        expect(byName.status).toMatchObject({
+          in: 'query',
+          style: 'form',
+          explode: false,
+          schema: { type: 'array', items: { type: 'string', enum: sch('SpecialtyPoster').properties.status.enum } },
+        });
+        expect(flat((byName.status as { description?: string }).description)).toMatch(/default.*`published`.*`uploading`/);
+        expect(responseSchema('/specialty-posters', 'get', '200')).toEqual({ type: 'array', items: ref('SpecialtyPoster') });
+      });
+
+      it('answers a GET for replaced, removed or purged posters with 403 unless the caller holds flowsheet: manage', () => {
+        const o = operation('/specialty-posters', 'get');
+        expect(flat(o.description)).toContain('`flowsheet: read`');
+        expect(flat(o.responses?.['403']?.description)).toMatch(/`replaced`, `removed` or `purged`.*`flowsheet: manage`/);
+        expect(responseSchema('/specialty-posters', 'get', '403')).toEqual(ref('ApiErrorResponse'));
+      });
+
+      it('edits with PATCH, answers 200 SpecialtyPoster, and keeps show_id for managers', () => {
+        const path = '/specialty-posters/{id}';
+        const body = operation(path, 'patch').requestBody?.content?.['application/json']?.schema as Record<string, any>;
+        expect(Object.keys(body.properties).sort()).toEqual(['broadcast_date', 'show_id', 'title']);
+        expect(body.required).toBeUndefined();
+        expect(body.properties.broadcast_date).toMatchObject({ type: 'string', format: 'date' });
+        expect(body.properties.title).toMatchObject({ nullable: true, maxLength: 128 });
+        expect(flat(body.properties.show_id.description)).toContain('managers only');
+        expect(responseSchema(path, 'patch', '200')).toEqual(ref('SpecialtyPoster'));
+        expect(responseSchema(path, 'patch', '404')).toEqual(ref('ApiErrorResponse'));
+      });
+
+      it('removes with DELETE, answering 204 with no body', () => {
+        const path = '/specialty-posters/{id}';
+        expect(operation(path, 'delete').responses?.['204']).toBeDefined();
+        expect(operation(path, 'delete').responses?.['204']?.content).toBeUndefined();
+        expect(responseSchema(path, 'delete', '404')).toEqual(ref('ApiErrorResponse'));
+      });
+
+      it('restores with 200 SpecialtyPoster, or 410 renditions_gone after the hold or a purge', () => {
+        const path = '/specialty-posters/{id}/restore';
+        expect(responseSchema(path, 'post', '200')).toEqual(ref('SpecialtyPoster'));
+        expect(responseSchema(path, 'post', '410')).toEqual(ref('ApiErrorResponse'));
+        expect(flat(operation(path, 'post').responses?.['410']?.description)).toContain('`code: renditions_gone`');
+        expect(flat(operation(path, 'post').description)).toContain('`flowsheet: manage`');
+      });
+
+      it('purges with 204 and gates it on flowsheet: manage', () => {
+        const path = '/specialty-posters/{id}/purge';
+        expect(operation(path, 'post').responses?.['204']).toBeDefined();
+        expect(operation(path, 'post').responses?.['204']?.content).toBeUndefined();
+        expect(flat(operation(path, 'post').description)).toContain('`flowsheet: manage`');
+        expect(operation(path, 'post').responses?.['403']).toBeDefined();
+      });
+
+      it.each(writes)('%s %s states the airing-state authorization rule', (path, method) => {
+        const description = flat(operation(path, method).description);
+        expect(description).toMatch(/flowsheet: (write|manage)/);
+        if (path.endsWith('/restore') || path.endsWith('/purge')) {
+          expect(description).toMatch(/music directors and station managers/);
+          expect(description).toMatch(/at any time/);
+        } else {
+          expect(description).toMatch(/before the airing/);
+          expect(description).toMatch(/while it is on the air/);
+          expect(description).toMatch(/once it has ended/);
+        }
+      });
+
+      it.each(writes.filter(([path]) => !/\/(restore|purge)$/.test(path)))(
+        '%s %s answers a closed show with 403 code closed_show',
+        (path, method) => {
+          expect(flat(operation(path, method).responses?.['403']?.description)).toMatch(
+            /`code: closed_show`.*`flowsheet: manage`/,
+          );
+          expect(responseSchema(path, method, '403')).toEqual(ref('ApiErrorResponse'));
+        },
+      );
     });
   });
 });
