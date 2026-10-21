@@ -11187,8 +11187,9 @@ describe('OpenAPI Specification', () => {
 
     it('documents 400, 403 closed_show and 404', () => {
       const o = operation(SHOW, 'patch');
-      expect(flat(o.responses?.['400']?.description)).toMatch(/`specialty_id` that names no program or a retired one/);
-      expect(flat(o.responses?.['400']?.description)).toContain('DJ not a member of show');
+      expect(flat(o.responses?.['400']?.description)).toContain("re-sending the show's current `specialty_id` is accepted");
+      expect(flat(o.responses?.['400']?.description)).toContain('branch on the status');
+      expect(o.responses?.['401']).toBeDefined();
       expect(flat(o.responses?.['403']?.description)).toContain('closed_show');
       expect(o.responses?.['404']).toBeDefined();
     });
@@ -11208,7 +11209,12 @@ describe('OpenAPI Specification', () => {
       const o = operation(path, method);
       expect(flat(o.responses?.['403']?.description)).toContain('closed_show');
       expect(flat(o.responses?.['403']?.description)).toContain('flowsheet: manage');
-      expect(flat(o.responses?.['400']?.description)).toContain('DJ not a member of show');
+      expect(flat(o.responses?.['400']?.description)).toContain('branch on the status');
+      expect(o.responses?.['400']?.content?.['application/json']?.schema).toEqual({
+        $ref: '#/components/schemas/ApiErrorResponse',
+      });
+      expect(o.responses?.['401']).toBeDefined();
+      expect(flat(o.responses?.['403']?.description)).toContain('{message, reason}');
     });
   });
 });
