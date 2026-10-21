@@ -718,8 +718,9 @@ components:
 
     FlowsheetRangeShow:
       description: >-
-        Show metadata for one show overlapping a `GET /flowsheet/range` window.
-        A deliberately public-safe projection of the `shows` row: it carries the
+        Show metadata for one show referenced by a flowsheet response: the
+        rows of `GET /flowsheet/range` and of
+        `FlowsheetV2PaginatedResponse.shows`. A deliberately public-safe projection of the `shows` row: it carries the
         DJ's public handle but no user id and no real-name column. Distinct from
         `Show`, which exposes `primary_dj_id` and is used on authenticated
         surfaces.
@@ -13237,8 +13238,9 @@ paths:
             `shows_limit`, or `start_id` + `end_id`, answers with a bare array.
             Anything else — including no parameters at all — takes the default
             paginated branch and answers with `FlowsheetV2PaginatedResponse`.
-            Only that branch carries `on_air`, so a client that renders the
-            on-air banner must poll the default branch; the array branches drop
+            Only that branch carries `on_air` and `shows`, so a client that
+            renders the on-air banner, or looks up a show by an entry's
+            `show_id`, must poll the default branch; the array branches drop
             the envelope, not just its pagination fields.
 
 
