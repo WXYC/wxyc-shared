@@ -12287,11 +12287,13 @@ components:
 
     FeatureAudience:
       type: string
-      enum: [off, staff, everyone]
+      # `off` is quoted on purpose: a YAML 1.1 reader (the Java openapi-generator
+      # behind the Swift and Kotlin output) reads a bare `off` as boolean false.
+      enum: ['off', staff, everyone]
       description: >
         Who a gated feature is open to, globally: nobody (`off`), music
-        directors and testers (`staff`), or every account with DJ access
-        (`everyone`).
+        directors and above, and testers holding the feature's capability
+        (`staff`), or every account with DJ access (`everyone`).
 
     FeatureAccessEntry:
       type: object
