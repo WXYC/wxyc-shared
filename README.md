@@ -309,6 +309,11 @@ import { isHeartbeat, AutoDJCommandAction, type AutoDJStatus } from '@wxyc/share
 | `isValidEmail(email)` | Returns `true` if valid email format |
 | `validateEmail(email)` | Returns `{ valid, error? }` with detailed result |
 | `ValidationResult` | TypeScript type for validation results |
+| `lintTracks(record, tracks)` | Lints the tags of one upload; see [Tag Lint](#tag-lint) |
+| `TAG_ISSUE_CODES`, `TAG_LINT_SEVERITY` | The tag issue codes and the severity of each |
+| `stripLeadingTrackNumber(title)` | Removes a track number from the start of a title |
+| `foldForTagCompare(value)` | Folds a tag value to the org's match form |
+| `TagLintTrack`, `TagLintRecord`, `TagIssue`, `TagIssueCode`, `TagSeverity` | TypeScript types for the tag lint |
 
 ### Auth Client (`@wxyc/shared/auth-client`)
 
@@ -333,6 +338,40 @@ import { isHeartbeat, AutoDJCommandAction, type AutoDJStatus } from '@wxyc/share
 | `Capability` | Type for capability strings |
 | `hasCapability(caps, cap)` | Check if user has capability |
 | `canAssignCapability(user, cap)` | Check if user can assign capability |
+
+## Tag Lint
+
+`lintTracks` is the one rule set for audio tags that arrive with a review upload. The DJ site runs it before upload and Backend-Service runs it at its publish gate, so the two never disagree about which tags are bad. It is pure and deterministic (no I/O, no clock, no locale-dependent calls), so it runs in the browser and in Node, and it adds no runtime dependency.
+
+```typescript
+import { lintTracks, stripLeadingTrackNumber } from '@wxyc/shared/validation';
+
+const issues = lintTracks(
+  { artist: 'Juana Molina', album: 'DOGA', compilation: false },
+  tracks, // TagLintTrack[]: track_id, disc_number, track_number, title, artist, album, album_artist, duration_ms, unreadable
+);
+const blocked = [...issues.values()].some((list) => list.some((issue) => issue.severity === 'error'));
+
+stripLeadingTrackNumber('01 la paradoja'); // 'la paradoja'
+```
+
+The result is a `Map` from `track_id` to that track's `TagIssue[]` (`{ code, severity, field }`), listed in `TAG_ISSUE_CODES` order. Tracks without issues are absent, so an empty map is a clean upload. A track the ingest worker could not read gets only `unreadable` and takes no part in the cross-track comparisons. An `error` stops publishing and a `warning` informs.
+
+| Code | Severity | Fires when |
+|---|---|---|
+| `artist_digits_only` | error | the artist is digits only after trimming ("08") |
+| `title_leading_track_number` | error | the title starts with one to three digits, a separator, and text ("01 la paradoja") |
+| `missing_title`, `missing_artist`, `missing_album` | error | the tag is missing or blank |
+| `album_disagrees` | error | the album folds differently across tracks |
+| `album_artist_disagrees` | error | the album artist folds differently across tracks |
+| `tags_disagree_with_record` | error | a track's artist or album folds differently from the record's; tracks of a compilation are exempt on artist |
+| `track_number_missing` | warning | the track has no track number |
+| `track_number_duplicate` | warning | two tracks on one disc share a number (a missing disc number counts as disc 1) |
+| `duration_short` | warning | the track is under 15 seconds |
+| `duration_long` | warning | the track is over 30 minutes |
+| `unreadable` | error | the ingest worker could not read the file |
+
+"Folds differently" means `foldForTagCompare` gives different results. It produces the org's match form, the same one `to_match_form` in `wxyc-etl` produces, and the [Charset Torture Corpus](#charset-torture-corpus) pins it: "Nilüfer Yanya" and "Nilufer Yanya" compare equal, and a Cyrillic "Ё" keeps its diaeresis. The codes are the `TagIssue.code` vocabulary that WXYC/wxyc-shared#661 declares in `api.yaml` as an open string; this module is the one place they are defined.
 
 ## Call-Number Parity Corpus
 
