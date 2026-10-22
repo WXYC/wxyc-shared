@@ -228,7 +228,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.13.0');
+      expect(spec.info.version).toBe('12.14.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -11297,13 +11297,19 @@ describe('OpenAPI Specification', () => {
       ['/specialty-shows/manage', 'get'],
     ];
 
-    it('adds exactly the three program operations beside the public catalog read', () => {
+    it('adds exactly the three program operations and the three logo operations beside the public catalog read', () => {
       const declared = Object.entries(spec.paths as Record<string, Record<string, unknown>>)
         .filter(([path]) => path.startsWith('/specialty-shows'))
         .flatMap(([path, item]) => Object.keys(item).filter((k) => k !== 'parameters').map((m) => `${m} ${path}`))
         .sort();
       expect(declared).toEqual(
-        ['get /specialty-shows', ...managed.map(([path, method]) => `${method} ${path}`)].sort(),
+        [
+          'get /specialty-shows',
+          ...managed.map(([path, method]) => `${method} ${path}`),
+          'post /specialty-shows/{id}/logo',
+          'post /specialty-shows/{id}/logo/complete',
+          'delete /specialty-shows/{id}/logo',
+        ].sort(),
       );
     });
 
@@ -11396,6 +11402,72 @@ describe('OpenAPI Specification', () => {
         expect(text).toMatch(/3:1/);
       },
     );
+  });
+
+  describe('specialty-show logo (WXYC/wxyc-shared#750)', () => {
+    const logoPaths: Array<[string, string]> = [
+      ['/specialty-shows/{id}/logo', 'post'],
+      ['/specialty-shows/{id}/logo/complete', 'post'],
+      ['/specialty-shows/{id}/logo', 'delete'],
+    ];
+
+    it.each(logoPaths)('%s %s needs a signed-in manager and documents 401, 403 and 404', (path, method) => {
+      const o = operation(path, method) as Operation & { security?: unknown[]; parameters?: unknown[] };
+      expect(o['x-wxyc-service']).toBe('backend-service');
+      expect(o.security).toEqual([{ BearerAuth: [] }]);
+      expect(o.parameters).toEqual([{ $ref: '#/components/parameters/SpecialtyShowId' }]);
+      expect(o.responses?.['401']).toBeDefined();
+      expect(flat(o.responses?.['403']?.description)).toMatch(/specialty_shows: manage.*`programming`/);
+      expect(responseSchema(path, method, '403')).toEqual(ref('ApiErrorResponse'));
+      expect(responseSchema(path, method, '404')).toEqual(ref('ApiErrorResponse'));
+    });
+
+    it('begins an upload with a LogoFileDeclaration and answers 200 LogoUploadResponse', () => {
+      const o = operation('/specialty-shows/{id}/logo', 'post');
+      expect(o.requestBody?.content?.['application/json']?.schema).toEqual(ref('LogoFileDeclaration'));
+      expect(responseSchema('/specialty-shows/{id}/logo', 'post', '200')).toEqual(ref('LogoUploadResponse'));
+    });
+
+    it('completes with 200 SpecialtyShowManaged or 422 LogoCompletionFailure', () => {
+      const path = '/specialty-shows/{id}/logo/complete';
+      expect(responseSchema(path, 'post', '200')).toEqual(ref('SpecialtyShowManaged'));
+      expect(responseSchema(path, 'post', '422')).toEqual(ref('LogoCompletionFailure'));
+    });
+
+    it('deletes with 204 and no body', () => {
+      const r = operation('/specialty-shows/{id}/logo', 'delete').responses?.['204'] as Record<string, unknown>;
+      expect(r).toBeDefined();
+      expect(r.content).toBeUndefined();
+    });
+
+    it('declares only PNG and JPEG, with the poster size ceiling', () => {
+      expect(propertyOf('LogoFileDeclaration', 'content_type')).toMatchObject({ enum: ['image/png', 'image/jpeg'] });
+      expect(propertyOf('LogoFileDeclaration', 'byte_length')).toMatchObject({ minimum: 1, maximum: 10485760 });
+      expect(requiredKeysOf('LogoFileDeclaration')).toEqual(['content_type', 'byte_length']);
+    });
+
+    it('shares the presigned PUT object with the poster upload and nothing else', () => {
+      expect(propertyOf('LogoUploadResponse', 'upload')).toEqual(ref('PresignedUpload'));
+      expect(requiredKeysOf('LogoUploadResponse')).toEqual(['upload']);
+    });
+
+    it('uses not_square in place of bad_aspect, and keeps not_square off the poster codes', () => {
+      const poster = sch('PosterFailureCode').enum as string[];
+      const logo = sch('LogoFailureCode').enum as string[];
+      expect(poster).not.toContain('not_square');
+      expect(logo).toContain('not_square');
+      expect(logo).not.toContain('bad_aspect');
+      expect(logo.filter((c) => c !== 'not_square').sort()).toEqual(poster.filter((c) => c !== 'bad_aspect').sort());
+      expect(propertyOf('LogoCompletionFailure', 'failure_code') ?? sch('LogoCompletionFailure').allOf[1].properties.failure_code).toEqual(ref('LogoFailureCode'));
+    });
+
+    it('states the upload rules in the descriptions', () => {
+      const text = flat(operation('/specialty-shows/{id}/logo', 'post').description);
+      expect(text).toMatch(/PNG or JPEG/);
+      expect(text).toMatch(/square/);
+      expect(text).toMatch(/1024/);
+      expect(text).toMatch(/transparency/);
+    });
   });
 
   describe('request line mode (WXYC/wxyc-shared#706)', () => {
@@ -11746,7 +11818,8 @@ describe('OpenAPI Specification', () => {
 
     it('returns a presigned PUT with the headers to send and an expiry', () => {
       expect(propertyOf('PosterUploadResponse', 'poster')).toEqual(ref('SpecialtyPoster'));
-      const upload = propertyOf('PosterUploadResponse', 'upload') as Record<string, any>;
+      expect(propertyOf('PosterUploadResponse', 'upload')).toEqual(ref('PresignedUpload'));
+      const upload = sch('PresignedUpload');
       expect(upload.required).toEqual(['url', 'headers', 'expires_at']);
       expect(upload.properties.headers.additionalProperties).toEqual({ type: 'string' });
       expect(upload.properties.url.format).toBe('uri');
