@@ -67,7 +67,11 @@ export type TagLintTrack = {
 /** The catalog record the tracks are uploaded against. */
 export type TagLintRecord = { artist: string; album: string; compilation: boolean };
 
-/** One problem with one track. `field` names the tag at fault, or is `null` for the whole file. */
+/**
+ * One problem with one track. `field` names the `TrackTags` field at fault, or is `null` when
+ * no tag is at fault: the whole file (`unreadable`) or the audio length (`duration_short`,
+ * `duration_long`), which no tag holds.
+ */
 export type TagIssue = { code: TagIssueCode; severity: TagSeverity; field: string | null };
 
 const SHORT_TRACK_MS = 15_000;
@@ -174,10 +178,10 @@ export function lintTracks(record: TagLintRecord, tracks: TagLintTrack[]): Map<n
       numbered.set(key, [...(numbered.get(key) ?? []), track]);
     }
     if (track.duration_ms !== null && track.duration_ms < SHORT_TRACK_MS) {
-      flag(track, "duration_short", "duration_ms");
+      flag(track, "duration_short", null);
     }
     if (track.duration_ms !== null && track.duration_ms > LONG_TRACK_MS) {
-      flag(track, "duration_long", "duration_ms");
+      flag(track, "duration_long", null);
     }
   }
 
