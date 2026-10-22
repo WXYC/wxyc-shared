@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.12.0
+  version: 12.13.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -1953,13 +1953,12 @@ components:
         both nullable.
 
 
-        The single shape for all three list sites: `/flowsheet/djs-on-air`,
-        `/flowsheet/shows/recent`'s `djs` and `/flowsheet/playlist`'s
-        `show_djs`. Every one of them resolves the handle through the same
+        The shape for two list sites: `/flowsheet/djs-on-air` and
+        `/flowsheet/shows/recent`'s `djs`. `/flowsheet/playlist`'s `show_djs`
+        uses `ShowPlaylistDJ`, which adds a membership flag these two do not
+        emit. Every site resolves the handle through the same
         `resolveDjDisplayName`, so none can constrain `dj_name` more tightly
-        than the others — the premise a per-site fork would rest on. A second
-        declaration of one shape is how the two come to disagree; declare the
-        site, not the shape.
+        than the others.
       required:
         - id
         - dj_name
@@ -1995,6 +1994,30 @@ components:
             A null `dj_name` and a null `id` never co-occur. The legacy arm is
             the only source of a null `id`, and it emits an entry only when it
             has a name to put in it.
+
+    ShowPlaylistDJ:
+      type: object
+      description: >-
+        One DJ in `GET /flowsheet/playlist`'s `show_djs`: `OnAirDJ`'s `id` and
+        `dj_name` (same types and nullability) plus `active`.
+      required:
+        - id
+        - dj_name
+        - active
+      properties:
+        id:
+          type: string
+          nullable: true
+          description: The DJ's `auth_user.id`, or `null` for a legacy show DJ with no account.
+        dj_name:
+          type: string
+          nullable: true
+          description: The DJ's public on-air handle; see `OnAirDJ.dj_name`.
+        active:
+          type: boolean
+          description: >-
+            `true` when the DJ's `show_djs` membership row is active, `false`
+            when the DJ left the show.
 
     Show:
       type: object
@@ -2293,7 +2316,7 @@ components:
         show_djs:
           type: array
           items:
-            $ref: '#/components/schemas/OnAirDJ'
+            $ref: '#/components/schemas/ShowPlaylistDJ'
         previous_show_id:
           type: integer
           nullable: true
