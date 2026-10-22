@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.11.0
+  version: 12.12.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -19141,6 +19141,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: >-
+            The poster store is not configured; nothing was created; retry
+            later.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
     get:
       x-wxyc-service: backend-service
       summary: List specialty-show posters
@@ -19260,6 +19268,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PosterCompletionFailure'
+        '503':
+          description: >-
+            The render did not finish in time. The poster stays `uploading` and
+            the same call can be retried. This is not a `failure_code`: it
+            refuses nothing about the file.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /specialty-posters/{id}:
     patch:
@@ -19435,6 +19457,12 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '404':
           description: No poster with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: The poster is not `replaced` or `removed`, so there is nothing to purge.
           content:
             application/json:
               schema:
