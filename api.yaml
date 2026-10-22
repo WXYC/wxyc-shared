@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.13.0
+  version: 12.14.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -7992,24 +7992,69 @@ components:
         poster:
           $ref: '#/components/schemas/SpecialtyPoster'
         upload:
+          $ref: '#/components/schemas/PresignedUpload'
+
+    PresignedUpload:
+      type: object
+      description: The presigned PUT a client uploads an image to. Shared by `PosterUploadResponse` and `LogoUploadResponse`.
+      required: [url, headers, expires_at]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Presigned PUT. Never logged.
+        headers:
           type: object
-          required: [url, headers, expires_at]
+          additionalProperties:
+            type: string
+          description: >-
+            The Content-Type to send exactly. Content-Length is not
+            included because a browser sets it itself; the server checks
+            the size with HEAD on complete.
+        expires_at:
+          type: string
+          format: date-time
+
+    LogoFileDeclaration:
+      type: object
+      required: [content_type, byte_length]
+      properties:
+        content_type:
+          type: string
+          enum: [image/png, image/jpeg]
+        byte_length:
+          type: integer
+          minimum: 1
+          maximum: 10485760
+
+    LogoUploadResponse:
+      type: object
+      description: >-
+        The presigned PUT for a program logo. It carries the upload object
+        only; the program is unchanged until `POST
+        /specialty-shows/{id}/logo/complete` succeeds.
+      required: [upload]
+      properties:
+        upload:
+          $ref: '#/components/schemas/PresignedUpload'
+
+    LogoFailureCode:
+      type: string
+      description: >-
+        Why a logo upload was refused. The poster codes with `not_square` in
+        place of `bad_aspect`; only `POST /specialty-shows/{id}/logo/complete`
+        returns `not_square`, and `PosterFailureCode` never does.
+      enum: [not_uploaded, unsupported_type, too_large, too_small, not_square, animated, decode_failed]
+
+    LogoCompletionFailure:
+      description: The 422 body of `POST /specialty-shows/{id}/logo/complete`.
+      allOf:
+        - $ref: '#/components/schemas/ApiErrorResponse'
+        - type: object
+          required: [failure_code]
           properties:
-            url:
-              type: string
-              format: uri
-              description: Presigned PUT. Never logged.
-            headers:
-              type: object
-              additionalProperties:
-                type: string
-              description: >-
-                The Content-Type to send exactly. Content-Length is not
-                included because a browser sets it itself; the server checks
-                the size with HEAD on complete.
-            expires_at:
-              type: string
-              format: date-time
+            failure_code:
+              $ref: '#/components/schemas/LogoFailureCode'
 
     Schedule:
       type: object
@@ -19104,6 +19149,124 @@ paths:
             `slug_in_use`: the slug changes after a show has been tagged with
             the program or a poster exists for it, or the new slug belongs to
             another active or retired program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /specialty-shows/{id}/logo:
+    post:
+      x-wxyc-service: backend-service
+      summary: Begin a specialty program logo upload
+      description: >-
+        Requires the `specialty_shows: manage` grant (station managers) or the
+        `programming` capability. Returns a presigned PUT; the client uploads
+        the file, then calls `POST /specialty-shows/{id}/logo/complete`.
+        Upload rules, enforced when the upload is completed and not by this
+        schema: PNG or JPEG only, square, at least 1024 px on a side, and a
+        PNG keeps its transparency.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SpecialtyShowId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoFileDeclaration'
+      responses:
+        '200':
+          description: The presigned PUT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoUploadResponse'
+        '401':
+          description: No bearer token
+        '403':
+          description: >-
+            The caller holds neither the `specialty_shows: manage` grant
+            (station managers) nor the `programming` capability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No program with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    delete:
+      x-wxyc-service: backend-service
+      summary: Remove a specialty program's logo
+      description: >-
+        Requires the `specialty_shows: manage` grant (station managers) or the
+        `programming` capability. Sets the program's `artwork` to null.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SpecialtyShowId'
+      responses:
+        '204':
+          description: The logo is removed.
+        '401':
+          description: No bearer token
+        '403':
+          description: >-
+            The caller holds neither the `specialty_shows: manage` grant
+            (station managers) nor the `programming` capability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No program with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /specialty-shows/{id}/logo/complete:
+    post:
+      x-wxyc-service: backend-service
+      summary: Finish a specialty program logo upload
+      description: >-
+        Requires the `specialty_shows: manage` grant (station managers) or the
+        `programming` capability. Checks the uploaded file against the rules in
+        `POST /specialty-shows/{id}/logo` and, when it passes, sets the
+        program's `artwork`. A non-square image is refused with
+        `not_square`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/SpecialtyShowId'
+      responses:
+        '200':
+          description: The updated program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialtyShowManaged'
+        '422':
+          description: The uploaded file failed a rule; `failure_code` says which.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoCompletionFailure'
+        '401':
+          description: No bearer token
+        '403':
+          description: >-
+            The caller holds neither the `specialty_shows: manage` grant
+            (station managers) nor the `programming` capability.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: No program with that id
           content:
             application/json:
               schema:
