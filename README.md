@@ -355,7 +355,7 @@ const blocked = [...issues.values()].some((list) => list.some((issue) => issue.s
 stripLeadingTrackNumber('01 la paradoja'); // 'la paradoja'
 ```
 
-The result is a `Map` from `track_id` to that track's `TagIssue[]` (`{ code, severity, field }`), listed in `TAG_ISSUE_CODES` order. Tracks without issues are absent, so an empty map is a clean upload. A track the ingest worker could not read gets only `unreadable` and takes no part in the cross-track comparisons. An `error` stops publishing and a `warning` informs.
+The result is a `Map` from `track_id` to that track's `TagIssue[]` (`{ code, severity, field }`), listed in `TAG_ISSUE_CODES` order. `field` is the `TrackTags` field concerned, or `null` when no tag is at fault: `unreadable`, `duration_short` and `duration_long`. Tracks without issues are absent, so an empty map is a clean upload. A track the ingest worker could not read gets only `unreadable` and takes no part in the cross-track comparisons. An `error` stops publishing and a `warning` informs.
 
 | Code | Severity | Fires when |
 |---|---|---|

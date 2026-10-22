@@ -316,11 +316,12 @@ describe("lintTracks", () => {
 
   describe("durations", () => {
     it.each<[string, number | null, Expected]>([
-      ["one millisecond under 15 seconds", 14_999, [["duration_short", "duration_ms"]]],
+      // No `TrackTags` field holds a duration, so these issues name no field.
+      ["one millisecond under 15 seconds", 14_999, [["duration_short", null]]],
       ["exactly 15 seconds", 15_000, []],
       ["a four-minute track", 240_000, []],
       ["exactly 30 minutes", 1_800_000, []],
-      ["one millisecond over 30 minutes", 1_800_001, [["duration_long", "duration_ms"]]],
+      ["one millisecond over 30 minutes", 1_800_001, [["duration_long", null]]],
       ["an unknown duration", null, []],
     ])("%s", (_label, duration_ms, expected) => {
       expect(lint(record, [track({ duration_ms })])[1] ?? []).toEqual(expected);
