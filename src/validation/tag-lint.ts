@@ -82,7 +82,7 @@ const LEADING_TRACK_NUMBER = /^\s*\d{1,3}[\s._-]+(?=[^\s._-])/;
 
 // A combining mark after a Latin or Greek base is decoration. After a Cyrillic, Hebrew or
 // Arabic base it is part of the letter (Ё, Й, niqqud), so it stays.
-const DECORATION = /([\u0000-ɏͰ-ϿḀ-῿Ⱡ-Ɀ꜠-ꟿꬰ-꭯])\p{M}+/gu;
+const DECORATION = /([\u{0000}-\u{024F}\u{0370}-\u{03FF}\u{1E00}-\u{1FFF}\u{2C60}-\u{2C7F}\u{A720}-\u{A7FF}\u{AB30}-\u{AB6F}])\p{M}+/gu;
 
 /**
  * Fold a tag value to the org's match form. This is `to_match_form` in `wxyc-etl` applied to
@@ -105,7 +105,7 @@ export function foldForTagCompare(value: string): string {
     .replace(/ς/g, "σ")
     .replace(/æ/g, "ae")
     .replace(/œ/g, "oe")
-    .replace(/(?!‍)\p{Cf}/gu, "")
+    .replace(/(?!\u{200D})\p{Cf}/gu, "")
     .replace(/ {2,}/g, " ")
     .replace(/^ | $/g, "");
 }

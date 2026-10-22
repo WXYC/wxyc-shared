@@ -73,13 +73,13 @@ describe("foldForTagCompare", () => {
     ["compatibility forms", "Ｊｕａｎａ", "Juana"],
     ["ligatures", "Cœur de Pirate", "Coeur de Pirate"],
     ["final sigma", "Στελλάς", "Στελλάσ"],
-    ["format characters", "Duke​ Ellington", "Duke Ellington"],
+    ["format characters", "Duke\u200B Ellington", "Duke Ellington"],
   ])("folds %s together", (_label, a, b) => {
     expect(foldForTagCompare(a)).toBe(foldForTagCompare(b));
   });
 
   it("keeps U+200D so emoji sequences stay whole", () => {
-    expect(foldForTagCompare("\u{1F468}‍\u{1F3A4}")).toContain("‍");
+    expect(foldForTagCompare("\u{1F468}\u200D\u{1F3A4}")).toContain("\u200D");
   });
 
   // `to_match_form` in wxyc-etl repairs mojibake first; this fold takes storage-form input
