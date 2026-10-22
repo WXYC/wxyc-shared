@@ -129,19 +129,23 @@ describe("TAG_ISSUE_CODES and TAG_LINT_SEVERITY", () => {
     expect(Object.keys(TAG_LINT_SEVERITY).sort()).toEqual([...TAG_ISSUE_CODES].sort());
   });
 
+  // Numbered titles are the fix pass's business (D-A52), and "99 Luftballons" is a correct title.
+  it("has no rule for a number at the start of a title", () => {
+    expect(TAG_ISSUE_CODES).not.toContain("title_leading_track_number");
+  });
+
   it("list each code once", () => {
     expect(new Set(TAG_ISSUE_CODES).size).toBe(TAG_ISSUE_CODES.length);
   });
 
   it.each<[TagLintIssueCode, TagLintSeverity]>([
     ["artist_digits_only", "error"],
-    ["title_leading_track_number", "error"],
     ["missing_title", "error"],
     ["missing_artist", "error"],
     ["missing_album", "error"],
-    ["album_disagrees", "error"],
-    ["album_artist_disagrees", "error"],
-    ["tags_disagree_with_record", "error"],
+    ["album_disagrees", "warning"],
+    ["album_artist_disagrees", "warning"],
+    ["tags_disagree_with_record", "warning"],
     ["track_number_missing", "warning"],
     ["track_number_duplicate", "warning"],
     ["duration_short", "warning"],
@@ -170,7 +174,7 @@ describe("lintTracks", () => {
 
   it("lists a track's issues in TAG_ISSUE_CODES order", () => {
     const issues = lintTracks(record, [
-      track({ title: "01 x", artist: "08", album: null, duration_ms: 1_000, track_number: null }),
+      track({ title: "x", artist: "08", album: null, duration_ms: 1_000, track_number: null }),
     ]).get(1);
     const positions = (issues ?? []).map((i) => TAG_ISSUE_CODES.indexOf(i.code));
     expect(positions.length).toBeGreaterThan(3);
@@ -184,8 +188,10 @@ describe("lintTracks", () => {
       ["artist digits only after trimming", { artist: " 08 " }, [["artist_digits_only", "artist"]]],
       ["artist with digits and letters", { artist: "808 State" }, []],
       ["artist that is a name", { artist: "Jessica Pratt" }, []],
-      ["title with a leading track number", { title: "01 la paradoja" }, [["title_leading_track_number", "title"]]],
-      ["title with a dotted track number", { title: "3. Back, Baby" }, [["title_leading_track_number", "title"]]],
+      // The lint no longer flags a number at the start of a title: it may be part of the title.
+      ["title with a leading track number", { title: "01 la paradoja" }, []],
+      ["title with a dotted track number", { title: "3. Back, Baby" }, []],
+      ["title that starts with a number", { title: "99 Luftballons" }, []],
       ["title that is a bare year", { title: "1999" }, []],
       ["title with a trailing number", { title: "la paradoja 01" }, []],
       ["null title", { title: null }, [["missing_title", "title"]]],
