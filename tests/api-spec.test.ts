@@ -228,7 +228,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.12.0');
+      expect(spec.info.version).toBe('12.13.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -3471,41 +3471,44 @@ describe('OpenAPI Specification', () => {
     });
   });
 
-  // ShowPlaylistDJ was forked from OnAirDJ on the claim that a non-null
-  // dj_name "holds for the live-DJ endpoints but not here". It never did:
-  // /flowsheet/playlist's show_djs, /flowsheet/djs-on-air and
-  // /flowsheet/shows/recent all resolve the handle through the same
-  // `resolveDjDisplayName`. Widening OnAirDJ.dj_name (#469) removed the last
-  // structural difference, leaving two names for one shape and a generated
-  // type per name in four languages.
-  describe('ShowPlaylistDJ collapsed into OnAirDJ (#473)', () => {
-    it('refs OnAirDJ for show_djs[] rather than a forked twin', () => {
-      const showDjs = propertyOf('ShowPlaylist', 'show_djs') as
-        | { type?: string; items?: { $ref?: string; properties?: unknown } }
-        | undefined;
-      expect(showDjs?.type).toBe('array');
-      expect(showDjs?.items?.$ref).toBe('#/components/schemas/OnAirDJ');
-      expect(showDjs?.items?.properties).toBeUndefined();
+  // show_djs needs a per-DJ membership flag that /flowsheet/djs-on-air and
+  // /flowsheet/shows/recent do not emit, so it gets its own item schema. The
+  // properties are inline rather than allOf [OnAirDJ]: the repo's oasdiff gate
+  // flags the allOf form as breaking.
+  describe('ShowPlaylistDJ carries a required active flag (#748)', () => {
+    type Prop = Record<string, unknown>;
+    const dj = () =>
+      spec.components.schemas.ShowPlaylistDJ as { required?: string[]; properties: Record<string, Prop> };
+
+    it('refs ShowPlaylistDJ for show_djs[]', () => {
+      const showDjs = propertyOf('ShowPlaylist', 'show_djs') as { items?: { $ref?: string } } | undefined;
+      expect(showDjs?.items?.$ref).toBe('#/components/schemas/ShowPlaylistDJ');
     });
 
-    it('deletes ShowPlaylistDJ from components.schemas', () => {
-      expect(spec.components.schemas.ShowPlaylistDJ).toBeUndefined();
+    it('requires id, dj_name and active', () => {
+      expect(dj().required).toEqual(['id', 'dj_name', 'active']);
     });
 
-    // Whole-document, not just the two sites above: a name that survives
-    // anywhere — a stale $ref, a description naming the retired twin as the
-    // one to prefer — is a name the next author can reach for.
-    it('leaves no mention of the retired name anywhere in the document', () => {
-      expect(specText).not.toContain('ShowPlaylistDJ');
+    it('mirrors OnAirDJ id and dj_name types and nullability', () => {
+      const on = spec.components.schemas.OnAirDJ as { properties: Record<string, Prop> };
+      for (const k of ['id', 'dj_name']) {
+        expect(dj().properties[k]?.type).toBe(on.properties[k]?.type);
+        expect(dj().properties[k]?.nullable).toBe(on.properties[k]?.nullable);
+      }
     });
 
-    // The collapse restores the `$ref` ShowPlaylist carried before the fork, so
-    // a description recounting that it "previously $ref'ed OnAirDJ" now
-    // contradicts the line directly beneath it. The nullability the sentence
-    // exists to disown is stated where it belongs, on OnAirDJ.dj_name.
-    it('stops recounting a non-nullable dj_name it no longer has a twin to contrast', () => {
-      const description = (spec.components.schemas.ShowPlaylist as { description?: string }).description ?? '';
-      expect(description).not.toMatch(/non-nullable/);
+    it('types active as a boolean', () => {
+      expect(dj().properties.active?.type).toBe('boolean');
+    });
+
+    it('does not use allOf', () => {
+      expect((dj() as { allOf?: unknown }).allOf).toBeUndefined();
+    });
+
+    it('has OnAirDJ name its other two sites and point at ShowPlaylistDJ', () => {
+      const d = flat((spec.components.schemas.OnAirDJ as { description?: string }).description);
+      expect(d).toContain('ShowPlaylistDJ');
+      expect(d).not.toMatch(/single shape for all three/);
     });
   });
 
