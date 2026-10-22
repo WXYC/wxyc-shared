@@ -28,13 +28,13 @@ export const TAG_ISSUE_CODES = [
 ] as const;
 
 /** A tag issue code: one of {@link TAG_ISSUE_CODES}. */
-export type TagIssueCode = (typeof TAG_ISSUE_CODES)[number];
+export type TagLintIssueCode = (typeof TAG_ISSUE_CODES)[number];
 
 /** `error` stops publishing; `warning` informs. */
-export type TagSeverity = "error" | "warning";
+export type TagLintSeverity = "error" | "warning";
 
 /** The severity of each code. */
-export const TAG_LINT_SEVERITY: Record<TagIssueCode, TagSeverity> = {
+export const TAG_LINT_SEVERITY: Record<TagLintIssueCode, TagLintSeverity> = {
   artist_digits_only: "error",
   title_leading_track_number: "error",
   missing_title: "error",
@@ -70,9 +70,10 @@ export type TagLintRecord = { artist: string; album: string; compilation: boolea
 /**
  * One problem with one track. `field` names the `TrackTags` field at fault, or is `null` when
  * no tag is at fault: the whole file (`unreadable`) or the audio length (`duration_short`,
- * `duration_long`), which no tag holds.
+ * `duration_long`), which no tag holds. Named `TagLintIssue` because `TagIssue` is the schema
+ * `api.yaml` declares for the same shape, and the package index re-exports both.
  */
-export type TagIssue = { code: TagIssueCode; severity: TagSeverity; field: string | null };
+export type TagLintIssue = { code: TagLintIssueCode; severity: TagLintSeverity; field: string | null };
 
 const SHORT_TRACK_MS = 15_000;
 const LONG_TRACK_MS = 30 * 60 * 1000;
@@ -135,9 +136,9 @@ export function stripLeadingTrackNumber(title: string): string {
  * const issues = lintTracks({ artist: "Juana Molina", album: "DOGA", compilation: false }, tracks);
  * const blocked = [...issues.values()].some((list) => list.some((issue) => issue.severity === "error"));
  */
-export function lintTracks(record: TagLintRecord, tracks: TagLintTrack[]): Map<number, TagIssue[]> {
-  const found = new Map<number, TagIssue[]>();
-  const flag = (track: TagLintTrack, code: TagIssueCode, field: string | null): void => {
+export function lintTracks(record: TagLintRecord, tracks: TagLintTrack[]): Map<number, TagLintIssue[]> {
+  const found = new Map<number, TagLintIssue[]>();
+  const flag = (track: TagLintTrack, code: TagLintIssueCode, field: string | null): void => {
     const issue = { code, severity: TAG_LINT_SEVERITY[code], field };
     const issues = found.get(track.track_id);
     if (issues) {
