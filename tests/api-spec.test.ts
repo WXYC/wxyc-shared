@@ -228,7 +228,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.11.0');
+      expect(spec.info.version).toBe('12.12.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -11819,6 +11819,18 @@ describe('OpenAPI Specification', () => {
         expect(propertyOf('SpecialtyPoster', 'failure_code')).toMatchObject(nullableRef('PosterFailureCode'));
         expect(propertyOf('PosterCompletionFailure', 'failure_code')).toEqual(ref('PosterFailureCode'));
         expect(requiredKeysOf('PosterCompletionFailure')).toEqual(expect.arrayContaining(['message', 'failure_code']));
+      });
+
+      it('declares the 503 and 409 answers the Backend specs send (WXYC/wxyc-shared#747)', () => {
+        const op = (path: string, status: string) => (operation(path, 'post').responses as Record<string, any>)[status];
+        expect(responseSchema('/specialty-posters', 'post', '503')).toEqual(ref('ApiErrorResponse'));
+        expect(flat(op('/specialty-posters', '503').description)).toMatch(/not configured.*nothing was created/);
+        const complete = op('/specialty-posters/{id}/complete', '503');
+        expect(complete.headers['Retry-After']).toBeDefined();
+        expect(flat(complete.description)).toMatch(/stays `uploading`.*not a `failure_code`/);
+        expect(responseSchema('/specialty-posters/{id}/complete', 'post', '503')).toEqual(ref('ApiErrorResponse'));
+        expect(responseSchema('/specialty-posters/{id}/purge', 'post', '409')).toEqual(ref('ApiErrorResponse'));
+        expect(flat(op('/specialty-posters/{id}/purge', '409').description)).toMatch(/not `replaced` or `removed`/);
       });
 
       it('begins an upload with POST /specialty-posters and returns 201 with the presigned PUT', () => {
