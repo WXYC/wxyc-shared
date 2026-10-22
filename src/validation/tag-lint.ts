@@ -144,14 +144,15 @@ export function lintTracks(record: TagLintRecord, tracks: TagLintTrack[]): Map<n
       found.set(track.track_id, [issue]);
     }
   };
-  // A tag's folded form with any edge whitespace trimmed; "" when it is missing or blank.
+  // A value's folded form with any edge whitespace trimmed; "" when it is missing or blank.
+  // The record's values and the tracks' tags both go through it, so they compare alike.
   const fold = (value: string | null): string => (value === null ? "" : foldForTagCompare(value).trim());
 
   const readable = tracks.filter((track) => !track.unreadable);
   tracks.filter((track) => track.unreadable).forEach((track) => flag(track, "unreadable", null));
 
-  const recordArtist = foldForTagCompare(record.artist);
-  const recordAlbum = foldForTagCompare(record.album);
+  const recordArtist = fold(record.artist);
+  const recordAlbum = fold(record.album);
   const numbered = new Map<string, TagLintTrack[]>();
   for (const track of readable) {
     if (track.artist !== null && /^\p{Nd}+$/u.test(track.artist.trim())) {

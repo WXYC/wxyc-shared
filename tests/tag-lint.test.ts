@@ -264,6 +264,10 @@ describe("lintTracks", () => {
       ],
       ["artist differs only by case and spacing", record, { artist: " juana  MOLINA" }, []],
       ["artist differs only by diacritics", { ...record, artist: "Nilüfer Yanya" }, { artist: "Nilufer Yanya" }, []],
+      // The record's values are folded and trimmed the way the tracks' are, so edge whitespace
+      // beyond spaces on the record's side does not count as a difference.
+      ["record artist has a trailing tab", { ...record, artist: "Juana Molina\t" }, {}, []],
+      ["record album has a leading newline", { ...record, album: "\nDOGA" }, {}, []],
       ["artist is missing", record, { artist: null }, [["missing_artist", "artist"]]],
       ["compilation track by another artist", compilation, { artist: "Jessica Pratt" }, []],
       [
