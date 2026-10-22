@@ -19182,6 +19182,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LogoUploadResponse'
+        '400':
+          description: >-
+            A declaration that is malformed or out of bounds: a `content_type`
+            other than PNG or JPEG, a `byte_length` below 1 or above the size
+            ceiling, or a missing field. Any other 400 is a field that fails
+            its schema.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
         '401':
           description: No bearer token
         '403':
@@ -19194,6 +19204,14 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '404':
           description: No program with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: >-
+            The poster store is not configured; nothing was created; retry
+            later.
           content:
             application/json:
               schema:
@@ -19267,6 +19285,20 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '404':
           description: No program with that id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: >-
+            The render did not finish in time. The logo stays `uploading` and
+            the same call can be retried. This is not a `failure_code`: it
+            refuses nothing about the file.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
           content:
             application/json:
               schema:

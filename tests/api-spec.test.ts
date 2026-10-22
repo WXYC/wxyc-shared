@@ -11428,6 +11428,31 @@ describe('OpenAPI Specification', () => {
       expect(responseSchema('/specialty-shows/{id}/logo', 'post', '200')).toEqual(ref('LogoUploadResponse'));
     });
 
+    it('declares the 400 on the upload declaration, as its siblings do', () => {
+      expect(responseSchema('/specialty-shows/{id}/logo', 'post', '400')).toEqual(ref('ApiErrorResponse'));
+      expect(flat(operation('/specialty-shows/{id}/logo', 'post').responses?.['400']?.description)).toMatch(
+        /malformed or out of bounds/,
+      );
+    });
+
+    it('declares the poster store 503 on the logo paths (WXYC/wxyc-shared#747)', () => {
+      const begin = operation('/specialty-shows/{id}/logo', 'post').responses?.['503'] as Record<string, any>;
+      expect(responseSchema('/specialty-shows/{id}/logo', 'post', '503')).toEqual(ref('ApiErrorResponse'));
+      expect(flat(begin.description)).toMatch(/not configured.*nothing was created/);
+
+      const path = '/specialty-shows/{id}/logo/complete';
+      const complete = operation(path, 'post').responses?.['503'] as Record<string, any>;
+      expect(responseSchema(path, 'post', '503')).toEqual(ref('ApiErrorResponse'));
+      expect(complete.headers['Retry-After']).toMatchObject({ schema: { type: 'integer' } });
+      expect(flat(complete.description)).toMatch(/stays `uploading`.*not a `failure_code`/);
+    });
+
+    it('declares no 409 on the logo paths, since a logo is never purged', () => {
+      for (const [path, method] of logoPaths) {
+        expect(operation(path, method).responses?.['409']).toBeUndefined();
+      }
+    });
+
     it('completes with 200 SpecialtyShowManaged or 422 LogoCompletionFailure', () => {
       const path = '/specialty-shows/{id}/logo/complete';
       expect(responseSchema(path, 'post', '200')).toEqual(ref('SpecialtyShowManaged'));
@@ -11449,6 +11474,7 @@ describe('OpenAPI Specification', () => {
     it('shares the presigned PUT object with the poster upload and nothing else', () => {
       expect(propertyOf('LogoUploadResponse', 'upload')).toEqual(ref('PresignedUpload'));
       expect(requiredKeysOf('LogoUploadResponse')).toEqual(['upload']);
+      expect(Object.keys(sch('LogoUploadResponse').properties).sort()).toEqual(['upload']);
     });
 
     it('uses not_square in place of bad_aspect, and keeps not_square off the poster codes', () => {
@@ -11458,7 +11484,7 @@ describe('OpenAPI Specification', () => {
       expect(logo).toContain('not_square');
       expect(logo).not.toContain('bad_aspect');
       expect(logo.filter((c) => c !== 'not_square').sort()).toEqual(poster.filter((c) => c !== 'bad_aspect').sort());
-      expect(propertyOf('LogoCompletionFailure', 'failure_code') ?? sch('LogoCompletionFailure').allOf[1].properties.failure_code).toEqual(ref('LogoFailureCode'));
+      expect(propertyOf('LogoCompletionFailure', 'failure_code')).toEqual(ref('LogoFailureCode'));
     });
 
     it('states the upload rules in the descriptions', () => {
