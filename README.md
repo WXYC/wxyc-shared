@@ -311,7 +311,7 @@ import { isHeartbeat, AutoDJCommandAction, type AutoDJStatus } from '@wxyc/share
 | `ValidationResult` | TypeScript type for validation results |
 | `lintTracks(record, tracks)` | Lints the tags of one upload; see [Tag Lint](#tag-lint) |
 | `TAG_ISSUE_CODES`, `TAG_LINT_SEVERITY` | The tag issue codes and the severity of each |
-| `stripLeadingTrackNumber(title)` | Removes a track number from the start of a title |
+| `stripLeadingTrackNumber(title)` | Removes a track number from the start of a title; the fix pass decides when to call it |
 | `foldForTagCompare(value)` | Folds a tag value to the org's match form |
 | `TagLintTrack`, `TagLintRecord`, `TagLintIssue`, `TagLintIssueCode`, `TagLintSeverity` | TypeScript types for the tag lint |
 
@@ -355,16 +355,15 @@ const blocked = [...issues.values()].some((list) => list.some((issue) => issue.s
 stripLeadingTrackNumber('01 la paradoja'); // 'la paradoja'
 ```
 
-The result is a `Map` from `track_id` to that track's `TagLintIssue[]` (`{ code, severity, field }`), listed in `TAG_ISSUE_CODES` order. `field` is the `TrackTags` field concerned, or `null` when no tag is at fault: `unreadable`, `duration_short` and `duration_long`. Tracks without issues are absent, so an empty map is a clean upload. A track the ingest worker could not read gets only `unreadable` and takes no part in the cross-track comparisons. An `error` stops publishing and a `warning` informs.
+The result is a `Map` from `track_id` to that track's `TagLintIssue[]` (`{ code, severity, field }`), listed in `TAG_ISSUE_CODES` order. `field` is the `TrackTags` field concerned, or `null` when no tag is at fault: `unreadable`, `duration_short` and `duration_long`. Tracks without issues are absent, so an empty map is a clean upload. A track the ingest worker could not read gets only `unreadable` and takes no part in the cross-track comparisons. An `error` stops publishing and a `warning` informs. Tags are fixed by a separate fix pass first, and the lint checks only what that pass leaves, so only what nothing can decide is an `error`; a disagreement between tracks or with the record is the MD's own choice and is a `warning`. The lint does not flag a number at the start of a title, because it may be part of the title ("99 Luftballons"); `stripLeadingTrackNumber` is a plain string transform, and the fix pass decides when to call it.
 
 | Code | Severity | Fires when |
 |---|---|---|
 | `artist_digits_only` | error | the artist is digits only after trimming ("08") |
-| `title_leading_track_number` | error | the title starts with one to three digits, a separator, and text ("01 la paradoja") |
 | `missing_title`, `missing_artist`, `missing_album` | error | the tag is missing or blank |
-| `album_disagrees` | error | the album folds differently across tracks |
-| `album_artist_disagrees` | error | the album artist folds differently across tracks |
-| `tags_disagree_with_record` | error | a track's artist or album folds differently from the record's; tracks of a compilation are exempt on artist |
+| `album_disagrees` | warning | the album folds differently across tracks |
+| `album_artist_disagrees` | warning | the album artist folds differently across tracks |
+| `tags_disagree_with_record` | warning | a track's artist or album folds differently from the record's; tracks of a compilation are exempt on artist |
 | `track_number_missing` | warning | the track has no track number |
 | `track_number_duplicate` | warning | two tracks on one disc share a number (a missing disc number counts as disc 1) |
 | `duration_short` | warning | the track is under 15 seconds |

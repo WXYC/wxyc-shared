@@ -13,7 +13,6 @@
  */
 export const TAG_ISSUE_CODES = [
   "artist_digits_only",
-  "title_leading_track_number",
   "missing_title",
   "missing_artist",
   "missing_album",
@@ -30,19 +29,22 @@ export const TAG_ISSUE_CODES = [
 /** A tag issue code: one of {@link TAG_ISSUE_CODES}. */
 export type TagLintIssueCode = (typeof TAG_ISSUE_CODES)[number];
 
-/** `error` stops publishing; `warning` informs. */
+/**
+ * `error` stops publishing; `warning` informs. Only what cannot be decided without the MD is an
+ * `error`: the fix pass settles what it can, and what survives it (a disagreement between
+ * tracks or with the record) is the MD's own choice, so it is a `warning`.
+ */
 export type TagLintSeverity = "error" | "warning";
 
 /** The severity of each code. */
 export const TAG_LINT_SEVERITY: Record<TagLintIssueCode, TagLintSeverity> = {
   artist_digits_only: "error",
-  title_leading_track_number: "error",
   missing_title: "error",
   missing_artist: "error",
   missing_album: "error",
-  album_disagrees: "error",
-  album_artist_disagrees: "error",
-  tags_disagree_with_record: "error",
+  album_disagrees: "warning",
+  album_artist_disagrees: "warning",
+  tags_disagree_with_record: "warning",
   track_number_missing: "warning",
   track_number_duplicate: "warning",
   duration_short: "warning",
@@ -115,6 +117,11 @@ export function foldForTagCompare(value: string): string {
  * Remove a track number from the start of a title ("Remove track numbers from
  * titles"). A title that has no track number, or nothing after it, is returned unchanged.
  *
+ * This is a string transform and nothing more: it does not decide whether a number belongs to
+ * the title. The fix pass (a later slice) decides when to call it, on evidence such as the
+ * track's own number. The lint no longer flags numbered titles, because that blocked correct
+ * titles like "99 Luftballons".
+ *
  * @example
  * stripLeadingTrackNumber("01 la paradoja") // "la paradoja"
  * stripLeadingTrackNumber("1999") // "1999"
@@ -160,9 +167,6 @@ export function lintTracks(record: TagLintRecord, tracks: TagLintTrack[]): Map<n
   for (const track of readable) {
     if (track.artist !== null && /^\p{Nd}+$/u.test(track.artist.trim())) {
       flag(track, "artist_digits_only", "artist");
-    }
-    if (track.title !== null && LEADING_TRACK_NUMBER.test(track.title)) {
-      flag(track, "title_leading_track_number", "title");
     }
     for (const field of ["title", "artist", "album"] as const) {
       if (fold(track[field]) === "") {
