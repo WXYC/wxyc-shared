@@ -313,7 +313,7 @@ import { isHeartbeat, AutoDJCommandAction, type AutoDJStatus } from '@wxyc/share
 | `TAG_ISSUE_CODES`, `TAG_LINT_SEVERITY` | The tag issue codes and the severity of each |
 | `stripLeadingTrackNumber(title)` | Removes a track number from the start of a title |
 | `foldForTagCompare(value)` | Folds a tag value to the org's match form |
-| `TagLintTrack`, `TagLintRecord`, `TagIssue`, `TagIssueCode`, `TagSeverity` | TypeScript types for the tag lint |
+| `TagLintTrack`, `TagLintRecord`, `TagLintIssue`, `TagLintIssueCode`, `TagLintSeverity` | TypeScript types for the tag lint |
 
 ### Auth Client (`@wxyc/shared/auth-client`)
 
@@ -355,7 +355,7 @@ const blocked = [...issues.values()].some((list) => list.some((issue) => issue.s
 stripLeadingTrackNumber('01 la paradoja'); // 'la paradoja'
 ```
 
-The result is a `Map` from `track_id` to that track's `TagIssue[]` (`{ code, severity, field }`), listed in `TAG_ISSUE_CODES` order. `field` is the `TrackTags` field concerned, or `null` when no tag is at fault: `unreadable`, `duration_short` and `duration_long`. Tracks without issues are absent, so an empty map is a clean upload. A track the ingest worker could not read gets only `unreadable` and takes no part in the cross-track comparisons. An `error` stops publishing and a `warning` informs.
+The result is a `Map` from `track_id` to that track's `TagLintIssue[]` (`{ code, severity, field }`), listed in `TAG_ISSUE_CODES` order. `field` is the `TrackTags` field concerned, or `null` when no tag is at fault: `unreadable`, `duration_short` and `duration_long`. Tracks without issues are absent, so an empty map is a clean upload. A track the ingest worker could not read gets only `unreadable` and takes no part in the cross-track comparisons. An `error` stops publishing and a `warning` informs.
 
 | Code | Severity | Fires when |
 |---|---|---|

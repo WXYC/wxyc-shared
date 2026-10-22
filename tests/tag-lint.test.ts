@@ -5,15 +5,17 @@ import {
   foldForTagCompare,
   lintTracks,
   stripLeadingTrackNumber,
-  type TagIssueCode,
+  type TagLintIssue,
+  type TagLintIssueCode,
   type TagLintRecord,
+  type TagLintSeverity,
   type TagLintTrack,
 } from "../src/validation/index.js";
 import { charsetTortureEntries } from "../src/test-utils/charset-torture.js";
 import { wxycCanonicalArtistNames } from "../src/test-utils/wxyc-example-data.js";
 
 /** One issue as `[code, field]`, the shape the tables below assert against. */
-type Expected = Array<[TagIssueCode, string | null]>;
+type Expected = Array<[TagLintIssueCode, string | null]>;
 
 const record: TagLintRecord = { artist: "Juana Molina", album: "DOGA", compilation: false };
 const compilation: TagLintRecord = { artist: "Various Artists", album: "DOGA", compilation: true };
@@ -35,7 +37,7 @@ const track = (overrides: Partial<TagLintTrack> = {}): TagLintTrack => ({
 /** Lint results as plain `{ track_id: [[code, field], ...] }` for readable assertions. */
 const lint = (rec: TagLintRecord, tracks: TagLintTrack[]): Record<number, Expected> =>
   Object.fromEntries(
-    [...lintTracks(rec, tracks)].map(([id, issues]) => [id, issues.map((i) => [i.code, i.field])]),
+    [...lintTracks(rec, tracks)].map(([id, issues]) => [id, issues.map((i: TagLintIssue) => [i.code, i.field])]),
   );
 
 describe("foldForTagCompare", () => {
@@ -131,7 +133,7 @@ describe("TAG_ISSUE_CODES and TAG_LINT_SEVERITY", () => {
     expect(new Set(TAG_ISSUE_CODES).size).toBe(TAG_ISSUE_CODES.length);
   });
 
-  it.each<[TagIssueCode, "error" | "warning"]>([
+  it.each<[TagLintIssueCode, TagLintSeverity]>([
     ["artist_digits_only", "error"],
     ["title_leading_track_number", "error"],
     ["missing_title", "error"],
