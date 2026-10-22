@@ -371,7 +371,7 @@ The result is a `Map` from `track_id` to that track's `TagIssue[]` (`{ code, sev
 | `duration_long` | warning | the track is over 30 minutes |
 | `unreadable` | error | the ingest worker could not read the file |
 
-"Folds differently" means `foldForTagCompare` gives different results. It produces the org's match form, the same one `to_match_form` in `wxyc-etl` produces, and the [Charset Torture Corpus](#charset-torture-corpus) pins it: "Nilüfer Yanya" and "Nilufer Yanya" compare equal, and a Cyrillic "Ё" keeps its diaeresis. The codes are the `TagIssue.code` vocabulary that WXYC/wxyc-shared#661 declares in `api.yaml` as an open string; this module is the one place they are defined.
+"Folds differently" means `foldForTagCompare` gives different results. It is `to_match_form` from `wxyc-etl` applied to storage-form input, without that function's mojibake-repair step (text that was already garbled, such as "NilÃ¼fer Yanya", does not fold equal to "Nilüfer Yanya"). The [Charset Torture Corpus](#charset-torture-corpus) pins the fold: "Nilüfer Yanya" and "Nilufer Yanya" compare equal, and a Cyrillic "Ё" keeps its diaeresis. The codes are the `TagIssue.code` vocabulary that WXYC/wxyc-shared#661 declares in `api.yaml` as an open string; this module is the one place they are defined.
 
 ## Call-Number Parity Corpus
 

@@ -82,6 +82,14 @@ describe("foldForTagCompare", () => {
     expect(foldForTagCompare("\u{1F468}‍\u{1F3A4}")).toContain("‍");
   });
 
+  // `to_match_form` in wxyc-etl repairs mojibake first; this fold takes storage-form input
+  // and does not, so a UTF-8 "ü" misread as Latin-1 ("Ã¼") stays a different string.
+  it("does not repair mojibake", () => {
+    const mojibake = "NilÃ¼fer Yanya";
+    expect(foldForTagCompare(mojibake)).toBe("nila1⁄4fer yanya");
+    expect(foldForTagCompare(mojibake)).not.toBe(foldForTagCompare("Nilüfer Yanya"));
+  });
+
   it.each([
     ["different names", "Juana Molina", "Jessica Pratt"],
     ["a Cyrillic letter and its base", "Ёж", "Еж"],

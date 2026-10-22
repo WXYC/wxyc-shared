@@ -85,10 +85,12 @@ const LEADING_TRACK_NUMBER = /^\s*\d{1,3}[\s._-]+(?=[^\s._-])/;
 const DECORATION = /([\u0000-ɏͰ-ϿḀ-῿Ⱡ-Ɀ꜠-ꟿꬰ-꭯])\p{M}+/gu;
 
 /**
- * Fold a tag value to the org's match form, the same form `to_match_form` in `wxyc-etl`
- * produces: NFKC, lowercase, combining marks stripped from Latin and Greek letters, the
- * fold registry (final sigma, and the ae and oe ligatures), format characters (Cf)
- * stripped except U+200D, runs of spaces collapsed, and spaces trimmed.
+ * Fold a tag value to the org's match form. This is `to_match_form` in `wxyc-etl` applied to
+ * storage-form input, without its mojibake-repair step, so text that was already garbled
+ * ("NilÃ¼fer Yanya") does not fold equal to its repaired form. The steps are NFKC, lowercase,
+ * combining marks stripped from Latin and Greek letters, the fold registry (final sigma, and
+ * the ae and oe ligatures), format characters (Cf) stripped except U+200D, runs of spaces
+ * collapsed, and spaces trimmed.
  *
  * @example
  * foldForTagCompare("  Nilüfer   Yanya ") // "nilufer yanya"
