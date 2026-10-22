@@ -11444,7 +11444,8 @@ describe('OpenAPI Specification', () => {
       const complete = operation(path, 'post').responses?.['503'] as Record<string, any>;
       expect(responseSchema(path, 'post', '503')).toEqual(ref('ApiErrorResponse'));
       expect(complete.headers['Retry-After']).toMatchObject({ schema: { type: 'integer' } });
-      expect(flat(complete.description)).toMatch(/stays `uploading`.*not a `failure_code`/);
+      expect(flat(complete.description)).toMatch(/`artwork` is unchanged.*retried.*not a `failure_code`/);
+      expect(flat(complete.description)).not.toMatch(/uploading/);
     });
 
     it('declares no 409 on the logo paths, since a logo is never purged', () => {

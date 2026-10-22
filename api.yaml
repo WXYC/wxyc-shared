@@ -19291,9 +19291,9 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
         '503':
           description: >-
-            The render did not finish in time. The logo stays `uploading` and
-            the same call can be retried. This is not a `failure_code`: it
-            refuses nothing about the file.
+            The render did not finish in time. The program's `artwork` is
+            unchanged and the same call can be retried. This is not a
+            `failure_code`: it refuses nothing about the file.
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
