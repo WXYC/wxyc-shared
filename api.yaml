@@ -3529,15 +3529,43 @@ components:
             overridable, it does not replace it.
 
     AddArtistResponse:
-      description: The created artist, plus the `code_number` it was filed under.
-      allOf:
-        - $ref: '#/components/schemas/Artist'
-        - type: object
-          required:
-            - code_number
-          properties:
-            code_number:
-              type: integer
+      type: object
+      description: >
+        The created `artists` row (serialized, so the six external-ID columns
+        arrive nested as `reconciled_identity`), plus the `code_number` and
+        `genre_id` it was filed under. Not an `Artist`: the row has no
+        `code_artist_number`, which the handler sends as `code_number`.
+      required:
+        - id
+        - artist_name
+        - alphabetical_name
+        - code_letters
+        - code_number
+        - genre_id
+      properties:
+        id:
+          type: integer
+        artist_name:
+          type: string
+        alphabetical_name:
+          type: string
+        code_letters:
+          type: string
+        code_number:
+          type: integer
+        genre_id:
+          type: integer
+        add_date:
+          type: string
+          format: date
+        last_modified:
+          type: string
+          format: date-time
+        reconciled_identity:
+          allOf:
+            - $ref: '#/components/schemas/ReconciledIdentity'
+          nullable: true
+          description: Null when the artist has resolved none of the six IDs yet.
 
     AddArtistConflictResponse:
       type: object
@@ -3553,10 +3581,33 @@ components:
           enum: [artist_code_conflict, artist_name_conflict]
           description: >
             `artist_code_conflict`: the `(genre_id, code_letters,
-            code_number)` slot is taken. `artist_name_conflict`: an artist
-            with this name already exists.
+            code_number)` slot is taken; checked first, so it wins when both
+            apply. `artist_name_conflict`: an artist whose name fold-matches
+            this one (case, diacritics and Unicode form folded) is already
+            filed in this genre.
         artist:
-          $ref: '#/components/schemas/Artist'
+          type: object
+          description: >
+            The artist that holds the slot or the name, so a client can offer
+            it instead of reporting a bare failure. The same shape as
+            `ArtistNameConflictError.artist`, not an `Artist`.
+          required:
+            - artist_id
+            - artist_name
+            - code_letters
+          properties:
+            artist_id:
+              type: integer
+            artist_name:
+              type: string
+            code_letters:
+              type: string
+            code_comp_letter:
+              type: string
+              nullable: true
+              description: >
+                The compilation section letter of the taken slot (null when
+                the slot has none). Present on `artist_code_conflict` only.
 
     FormatEntry:
       type: object
