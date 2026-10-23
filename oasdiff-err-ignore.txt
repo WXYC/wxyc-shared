@@ -39,10 +39,3 @@
 # test can catch that — the checks in
 # scripts/__tests__/check-breaking-changes.test.sh skip comment lines by
 # their leading `#`, so prose in this header is never read as an entry.
-
-# POST /library/artists: the spec's `200` is stale. The handler
-# (library.controller.ts addArtist) answered 200 until Backend-Service 40ea62a4
-# (2026-02-21) and has answered 201 since, so the deployed endpoint no longer
-# sends the `200` this removes; the change documents the real status
-# (wxyc-shared#299). Inert once it lands on `main`.
-post /library/artists removed the success response with the status `200`
