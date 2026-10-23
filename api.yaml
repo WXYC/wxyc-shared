@@ -256,8 +256,10 @@ components:
       description: >
         Identity of the open show the caller collided with. Carries `OpenShow`'s
         identity fields, with the same nullability and the same BS#1371
-        resolution chain for `dj_name`, plus the embedded `specialty`, which
-        `OpenShow` (the rows `GET /flowsheet/open-shows` returns) does not have.
+        resolution chain for `dj_name`, plus the embedded `specialty`. It stays
+        a separate schema because it omits `OpenShow`'s derived counters and
+        `specialty_id`, and because `specialty` is optional here so a server
+        that predates it stays valid.
       required:
         - id
         - start_time
