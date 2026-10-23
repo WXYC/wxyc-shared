@@ -229,7 +229,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.15.0');
+      expect(spec.info.version).toBe('12.16.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
