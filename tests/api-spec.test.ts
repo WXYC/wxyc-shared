@@ -228,7 +228,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.14.0');
+      expect(spec.info.version).toBe('12.15.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -12074,6 +12074,99 @@ describe('OpenAPI Specification', () => {
           expect(responseSchema(path, method, '403')).toEqual(ref('ApiErrorResponse'));
         },
       );
+    });
+  });
+
+  describe('/labels admin operations (WXYC/wxyc-shared#760)', () => {
+    const counts = ['library', 'rotation', 'flowsheet', 'intake_items'];
+
+    it.each([
+      ['/labels/{id}', 'get'],
+      ['/labels/{id}', 'patch'],
+      ['/labels/{id}', 'delete'],
+      ['/labels/info', 'get'],
+      ['/labels/search', 'get'],
+    ] as Array<[string, string]>)('%s %s is declared behind BearerAuth', (path, method) => {
+      expect(operation(path, method).security).toEqual([{ BearerAuth: [] }]);
+    });
+
+    it.each([
+      ['/labels/{id}', 'get'],
+      ['/labels/{id}', 'patch'],
+      ['/labels/{id}', 'delete'],
+    ] as Array<[string, string]>)('%s %s answers an absent label with a 404 ApiErrorResponse', (path, method) => {
+      expect(responseSchema(path, method, '404')).toEqual(ref('ApiErrorResponse'));
+    });
+
+    it('GET /labels/{id} returns LabelWithReferences', () => {
+      expect(responseSchema('/labels/{id}', 'get', '200')).toEqual(ref('LabelWithReferences'));
+    });
+
+    it('LabelReferenceCounts requires an integer count for each referencing table', () => {
+      const s = sch('LabelReferenceCounts');
+      expect([...s.required].sort()).toEqual([...counts].sort());
+      for (const c of counts) expect(s.properties[c].type).toBe('integer');
+    });
+
+    it('LabelWithReferences is a Label plus references and child_labels', () => {
+      const [base, extra] = sch('LabelWithReferences').allOf;
+      expect(base).toEqual(ref('Label'));
+      expect([...extra.required].sort()).toEqual(['child_labels', 'references']);
+      expect(extra.properties.references).toEqual(ref('LabelReferenceCounts'));
+      expect(extra.properties.child_labels.type).toBe('integer');
+    });
+
+    it('PATCH /labels/{id} takes UpdateLabelRequest and returns UpdateLabelResponse', () => {
+      const body = operation('/labels/{id}', 'patch').requestBody as any;
+      expect(body.content['application/json'].schema).toEqual(ref('UpdateLabelRequest'));
+      expect(responseSchema('/labels/{id}', 'patch', '200')).toEqual(ref('UpdateLabelResponse'));
+    });
+
+    it('UpdateLabelRequest bounds label_name at 128 and lets parent_label_id be null', () => {
+      const s = sch('UpdateLabelRequest');
+      expect(s.required).toBeUndefined();
+      expect(s.properties.label_name.maxLength).toBe(128);
+      expect(s.properties.parent_label_id.type).toBe('integer');
+      expect(s.properties.parent_label_id.nullable).toBe(true);
+    });
+
+    it('UpdateLabelResponse carries the label and per-table rewritten counts', () => {
+      const s = sch('UpdateLabelResponse');
+      expect(s.required.sort()).toEqual(['label', 'rewritten']);
+      expect(s.properties.label).toEqual(ref('Label'));
+      expect(s.properties.rewritten.allOf).toEqual([ref('LabelReferenceCounts')]);
+    });
+
+    it('PATCH answers a cycle with 400 and a taken name with 409 label_name_taken', () => {
+      expect(responseSchema('/labels/{id}', 'patch', '400')).toEqual(ref('ApiErrorResponse'));
+      expect(responseSchema('/labels/{id}', 'patch', '409')).toEqual(ref('ApiErrorResponse'));
+      expect(operation('/labels/{id}', 'patch').responses?.['409']?.description).toContain('label_name_taken');
+    });
+
+    it('DELETE answers 204, and 409 label_in_use with the reference counts', () => {
+      expect(operation('/labels/{id}', 'delete').responses?.['204']).toBeDefined();
+      expect(responseSchema('/labels/{id}', 'delete', '409')).toEqual(ref('LabelInUseResponse'));
+      const s = sch('LabelInUseResponse');
+      expect(s.required).toEqual(expect.arrayContaining(['message', 'details']));
+      expect([...s.properties.details.required].sort()).toEqual(['child_labels', 'references']);
+      expect(s.properties.details.properties.references).toEqual(ref('LabelReferenceCounts'));
+    });
+
+    it('GET /labels/info answers a Label, 400 and 404', () => {
+      expect(responseSchema('/labels/info', 'get', '200')).toEqual(ref('Label'));
+      expect(responseSchema('/labels/info', 'get', '400')).toEqual(ref('ApiErrorResponse'));
+      expect(responseSchema('/labels/info', 'get', '404')).toEqual(ref('ApiErrorResponse'));
+    });
+
+    it('GET /labels/search answers Label[] and 400 when q is missing', () => {
+      expect(responseSchema('/labels/search', 'get', '200')).toEqual({ type: 'array', items: ref('Label') });
+      expect(responseSchema('/labels/search', 'get', '400')).toEqual(ref('ApiErrorResponse'));
+      const q = (operation('/labels/search', 'get').parameters as any[]).find((p) => p.name === 'q');
+      expect(q.required).toBe(true);
+    });
+
+    it('GET /labels declares no q/limit parameters, which its handler ignores', () => {
+      expect(operation('/labels', 'get').parameters ?? []).toEqual([]);
     });
   });
 });
