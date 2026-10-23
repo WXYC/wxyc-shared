@@ -229,7 +229,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.16.0');
+      expect(spec.info.version).toBe('12.17.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -976,6 +976,22 @@ describe('OpenAPI Specification', () => {
         expect(propertyOf('FlowsheetRangeShow', 'dj_name')).toMatchObject({ type: 'string', nullable: true });
         expect(propertyOf('FlowsheetRangeShow', 'end_time')).toMatchObject({ nullable: true });
         expect(requiredKeysOf('FlowsheetRangeShow').sort()).toEqual(['id', 'start_time']);
+      });
+    });
+
+    // BS#3680: the Open Shows edit dialog needs the show's current program to
+    // preselect it and to tell "clear the tag" apart from "no change".
+    describe('OpenShow specialty (BS#3680)', () => {
+      it('declares specialty_id as a required nullable integer', () => {
+        expect(propertyOf('OpenShow', 'specialty_id')).toMatchObject({ type: 'integer', nullable: true });
+        expect(requiredKeysOf('OpenShow')).toEqual(expect.arrayContaining(['specialty_id', 'specialty']));
+      });
+
+      it('declares specialty as a nullable SpecialtyShowRef', () => {
+        expect(propertyOf('OpenShow', 'specialty')).toMatchObject({
+          allOf: [{ $ref: '#/components/schemas/SpecialtyShowRef' }],
+          nullable: true,
+        });
       });
     });
 
