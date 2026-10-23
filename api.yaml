@@ -3503,6 +3503,9 @@ components:
       properties:
         artist_name:
           type: string
+        alphabetical_name:
+          type: string
+          description: Sort name; defaults to `artist_name` when omitted.
         code_letters:
           type: string
         genre_id:
@@ -3518,15 +3521,42 @@ components:
             integer, hence the 2147483647 ceiling — bounded here, at
             publish time, because oasdiff treats adding request-side bounds
             later as a breaking change (see `RotationCreateFields.urls`).
-            Declared optional ahead of the Backend-Service relaxation that
-            honors omission (WXYC/Backend-Service#2475): the deployed
-            `POST /library/artists` still 400s on a body without it, so a
-            client must keep sending it until #2475 ships. Once omission is
-            honored, the server assigns the next number in the bucket — the
-            same generator behind Backend's artist-code peek route (`GET
+            Optional: when omitted, the server assigns the next number in
+            the bucket (WXYC/Backend-Service#2475) — the same generator
+            behind Backend's artist-code peek route (`GET
             /library/artists/peek-code`, a Backend route this contract does
             not declare) — and this field makes that assignment
             overridable, it does not replace it.
+
+    AddArtistResponse:
+      description: The created artist, plus the `code_number` it was filed under.
+      allOf:
+        - $ref: '#/components/schemas/Artist'
+        - type: object
+          required:
+            - code_number
+          properties:
+            code_number:
+              type: integer
+
+    AddArtistConflictResponse:
+      type: object
+      required:
+        - message
+        - reason
+        - artist
+      properties:
+        message:
+          type: string
+        reason:
+          type: string
+          enum: [artist_code_conflict, artist_name_conflict]
+          description: >
+            `artist_code_conflict`: the `(genre_id, code_letters,
+            code_number)` slot is taken. `artist_name_conflict`: an artist
+            with this name already exists.
+        artist:
+          $ref: '#/components/schemas/Artist'
 
     FormatEntry:
       type: object
@@ -17468,12 +17498,18 @@ paths:
             schema:
               $ref: '#/components/schemas/AddArtistRequest'
       responses:
-        '200':
+        '201':
           description: Successfully added artist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Artist'
+                $ref: '#/components/schemas/AddArtistResponse'
+        '409':
+          description: The artist's call-number slot or name is already taken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddArtistConflictResponse'
 
   /library/artists/search:
     get:

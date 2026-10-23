@@ -3844,6 +3844,39 @@ describe('OpenAPI Specification', () => {
       expect(requiredKeysOf('AddArtistRequest')).not.toContain('code_number');
     });
 
+    it('AddArtistRequest declares optional alphabetical_name and no longer says the deployed endpoint 400s on a missing code_number', () => {
+      expect(propertyOf('AddArtistRequest', 'alphabetical_name')?.type).toBe('string');
+      expect(requiredKeysOf('AddArtistRequest')).not.toContain('alphabetical_name');
+      const description = propertyOf('AddArtistRequest', 'code_number')?.description as string;
+      expect(description).not.toMatch(/still 400s/);
+      expect(description).not.toMatch(/must keep sending/);
+    });
+
+    it('POST /library/artists answers 201 with the artist plus code_number, not 200', () => {
+      const responses = (spec.paths['/library/artists'] as { post: { responses: Record<string, unknown> } }).post
+        .responses as Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+      expect(responses['200']).toBeUndefined();
+      expect(responses['201']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/AddArtistResponse'
+      );
+      expect(propertyOf('AddArtistResponse', 'id')).toBeDefined();
+      expect(propertyOf('AddArtistResponse', 'genre_id')).toBeDefined();
+      expect(propertyOf('AddArtistResponse', 'code_number')?.type).toBe('integer');
+    });
+
+    it('POST /library/artists documents the 409 body { message, reason, artist } with both reasons', () => {
+      const responses = (spec.paths['/library/artists'] as { post: { responses: Record<string, unknown> } }).post
+        .responses as Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
+      expect(responses['409']?.content?.['application/json']?.schema?.$ref).toBe(
+        '#/components/schemas/AddArtistConflictResponse'
+      );
+      expect(requiredKeysOf('AddArtistConflictResponse')).toEqual(['message', 'reason', 'artist']);
+      expect(propertyOf('AddArtistConflictResponse', 'reason')?.enum).toEqual([
+        'artist_code_conflict',
+        'artist_name_conflict',
+      ]);
+    });
+
     it('defines LibraryFilingRequest with a discriminated FilingArtist, release, and optional rotation', () => {
       const schema = spec.components.schemas.LibraryFilingRequest as {
         required?: string[];
