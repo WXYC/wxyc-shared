@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.14.0
+  version: 12.15.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -3404,6 +3404,95 @@ components:
           type: string
         parent_label_id:
           type: integer
+
+    LabelReferenceCounts:
+      type: object
+      description: >
+        Per-table counts of rows whose `label_id` points at a label.
+      required:
+        - library
+        - rotation
+        - flowsheet
+        - intake_items
+      properties:
+        library:
+          type: integer
+        rotation:
+          type: integer
+        flowsheet:
+          type: integer
+        intake_items:
+          type: integer
+
+    LabelWithReferences:
+      description: >
+        A `Label` plus what still points at it: `references` counts the rows
+        whose `label_id` is this label, `child_labels` the labels whose
+        `parent_label_id` is this id.
+      allOf:
+        - $ref: '#/components/schemas/Label'
+        - type: object
+          required:
+            - references
+            - child_labels
+          properties:
+            references:
+              $ref: '#/components/schemas/LabelReferenceCounts'
+            child_labels:
+              type: integer
+
+    UpdateLabelRequest:
+      type: object
+      description: >
+        Partial update: only fields present are written. `parent_label_id: null`
+        detaches the label from its parent.
+      properties:
+        label_name:
+          type: string
+          maxLength: 128
+        parent_label_id:
+          type: integer
+          nullable: true
+
+    UpdateLabelResponse:
+      type: object
+      required:
+        - label
+        - rewritten
+      properties:
+        label:
+          $ref: '#/components/schemas/Label'
+        rewritten:
+          description: >
+            Per-table counts of text copies of the label name rewritten on a
+            rename; all zero when the name did not change.
+          allOf:
+            - $ref: '#/components/schemas/LabelReferenceCounts'
+
+    LabelInUseResponse:
+      type: object
+      description: >
+        The 409 `label_in_use` body of `DELETE /labels/{id}`: an
+        `ApiErrorResponse` whose `details` carry the same counts
+        `GET /labels/{id}` reports.
+      required:
+        - message
+        - details
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+        details:
+          type: object
+          required:
+            - references
+            - child_labels
+          properties:
+            references:
+              $ref: '#/components/schemas/LabelReferenceCounts'
+            child_labels:
+              type: integer
 
     AddArtistRequest:
       type: object
@@ -18189,20 +18278,11 @@ paths:
         - Library
       security:
         - BearerAuth: []
-      parameters:
-        - name: q
-          in: query
-          description: Search query for label name prefix (optional, returns all labels if omitted)
-          schema:
-            type: string
-        - name: limit
-          in: query
-          description: Maximum number of results
-          schema:
-            type: integer
       responses:
         '200':
-          description: List of labels
+          description: >
+            Every label. The handler takes no query parameters; search is
+            `GET /labels/search`.
           content:
             application/json:
               schema:
@@ -18229,6 +18309,176 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Label'
+
+  /labels/info:
+    get:
+      x-wxyc-service: backend-service
+      summary: Get one label by id (query form)
+      tags:
+        - Library
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: The label
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Label'
+        '400':
+          description: >
+            `id` missing or not numeric.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: >
+            No label has that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /labels/search:
+    get:
+      x-wxyc-service: backend-service
+      summary: Search labels by name
+      tags:
+        - Library
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Matching labels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Label'
+        '400':
+          description: >
+            `q` missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /labels/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      x-wxyc-service: backend-service
+      summary: Read one label with its reference counts
+      tags:
+        - Library
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The label, with what still references it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelWithReferences'
+        '404':
+          description: >
+            No label has that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    patch:
+      x-wxyc-service: backend-service
+      summary: Rename or re-parent a label
+      description: >
+        A rename rewrites the text copies of the name on library, rotation,
+        flowsheet and intake rows; `rewritten` reports how many per table.
+      tags:
+        - Library
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLabelRequest'
+      responses:
+        '200':
+          description: The updated label and the rewrite counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateLabelResponse'
+        '400':
+          description: >
+            Invalid body, or a re-parent that would make the label its own ancestor (itself or any descendant).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: >
+            No label has that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            `label_name_taken`: the new name belongs to another label; merge instead (Backend-Service#3290).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    delete:
+      x-wxyc-service: backend-service
+      summary: Delete an unreferenced label
+      tags:
+        - Library
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: >
+            No label has that id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            `label_in_use`: rows or child labels still reference the label.
+            `details` carries the same counts `GET /labels/{id}` reports.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelInUseResponse'
 
   /library/{id}:
     patch:
