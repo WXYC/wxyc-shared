@@ -3864,6 +3864,17 @@ describe('OpenAPI Specification', () => {
       expect(propertyOf('AddArtistResponse', 'code_number')?.type).toBe('integer');
     });
 
+    // The 201 body is `{ ...serializeArtist(artists row), code_number, genre_id }`. The `artists` table has no
+    // `code_artist_number` (the handler sends that number as `code_number`), so the response must not inherit
+    // `Artist`'s required `code_artist_number`, or every generated client fails to decode a successful create.
+    it('POST /library/artists 201 body is the artists row plus code_number and genre_id, with no code_artist_number', () => {
+      expect(requiredKeysOf('AddArtistResponse').sort()).toEqual(
+        ['alphabetical_name', 'artist_name', 'code_letters', 'code_number', 'genre_id', 'id'].sort()
+      );
+      expect(propertyOf('AddArtistResponse', 'code_artist_number')).toBeUndefined();
+      expect(propertyOf('AddArtistResponse', 'reconciled_identity')).toBeDefined();
+    });
+
     it('POST /library/artists documents the 409 body { message, reason, artist } with both reasons', () => {
       const responses = (spec.paths['/library/artists'] as { post: { responses: Record<string, unknown> } }).post
         .responses as Record<string, { content?: Record<string, { schema?: { $ref?: string } }> }>;
@@ -3875,6 +3886,21 @@ describe('OpenAPI Specification', () => {
         'artist_code_conflict',
         'artist_name_conflict',
       ]);
+    });
+
+    // Both 409 branches send the code-owner projection, not an `Artist`: `artist_code_conflict` sends
+    // getArtistByCode's `{ artist_id, artist_name, code_letters, code_comp_letter }`, `artist_name_conflict` sends
+    // getArtistById's `{ artist_id, artist_name, code_letters }` (the same shape as ArtistNameConflictError.artist).
+    it('POST /library/artists 409 artist is the code-owner projection, not an Artist', () => {
+      const artist = deref(propertyOf('AddArtistConflictResponse', 'artist')) as {
+        required?: string[];
+        properties?: Record<string, { type?: string; nullable?: boolean }>;
+      };
+      expect(artist.required).toEqual(['artist_id', 'artist_name', 'code_letters']);
+      expect(Object.keys(artist.properties ?? {}).sort()).toEqual(
+        ['artist_id', 'artist_name', 'code_comp_letter', 'code_letters'].sort()
+      );
+      expect(artist.properties?.code_comp_letter?.nullable).toBe(true);
     });
 
     it('defines LibraryFilingRequest with a discriminated FilingArtist, release, and optional rotation', () => {
