@@ -147,6 +147,7 @@ describe('OpenAPI Specification', () => {
       { description?: string; content?: Record<string, { schema?: Record<string, unknown> }> } | undefined
     >;
     'x-wxyc-service'?: string;
+    security?: Array<Record<string, unknown>>;
   };
 
   // Throws on a missing path or method rather than asserting it: `toBeDefined()` does not narrow
