@@ -229,7 +229,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.17.0');
+      expect(spec.info.version).toBe('12.17.1');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -11614,6 +11614,29 @@ describe('OpenAPI Specification', () => {
 
   describe('PATCH /flowsheet/shows/{id} and the closed_show answer on row writes (WXYC/wxyc-shared#701)', () => {
     const SHOW = '/flowsheet/shows/{id}';
+
+    // WXYC/wxyc-shared#759: a `flowsheet: manage` holder may edit any show or row, open or ended.
+    it.each([
+      ['/flowsheet', 'patch'],
+      ['/flowsheet', 'delete'],
+      ['/flowsheet/play-order', 'patch'],
+      [SHOW, 'patch'],
+    ] as Array<[string, string]>)('%s %s states that a manager may edit any show, open or ended', (path, method) => {
+      const o = operation(path, method);
+      const text = flat(o.description) + ' ' + flat(o.responses?.['400']?.description);
+      expect(text).toMatch(/`flowsheet: manage`.*any (show|row)|any show.*open or ended|row of any show/);
+      expect(flat(o.responses?.['400']?.description)).toMatch(/lacks `flowsheet: manage`|without `flowsheet: manage`/);
+    });
+
+    it.each([
+      ['/flowsheet', 'patch'],
+      ['/flowsheet', 'delete'],
+      ['/flowsheet/play-order', 'patch'],
+    ] as Array<[string, string]>)('%s %s still refuses a row with no show for every caller', (path, method) => {
+      expect(flat(operation(path, method).responses?.['400']?.description)).toContain(
+        'refused for every caller, managers included',
+      );
+    });
 
     it('declares the show-id path parameter', () => {
       expect(operation(SHOW, 'patch').parameters).toEqual([
