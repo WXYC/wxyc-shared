@@ -86,3 +86,28 @@ check() { bash "$REPO/scripts/check-added-oasdiff-ignores.sh"; }
     run check
     [ "$(cat "$REPO/oasdiff-err-ignore.txt")" = "$before" ]
 }
+
+@test "a dead added entry fails even when api.yaml is identical to the base" {
+    # The PR-that-only-adds-a-dead-entry case: no spec change, so every added entry is dead.
+    git -C "$REPO" checkout -q -- api.yaml
+    printf '# why\n%s\n' "$DEAD_ENTRY" >> "$REPO/oasdiff-err-ignore.txt"
+    run check
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$DEAD_ENTRY"* ]]
+}
+
+@test "nothing added and api.yaml identical to the base passes" {
+    git -C "$REPO" checkout -q -- api.yaml
+    run check
+    [ "$status" -eq 0 ]
+}
+
+@test "CI runs the check as its own step, not only through a bats case that skips on an unchanged api.yaml" {
+    # check-breaking-changes.test.sh's case calls setup_base, which skips when api.yaml
+    # matches origin/main, so it never covers the PR that changes only the whitelist.
+    ci="$SCRIPT_DIR/../.github/workflows/ci.yml"
+    run grep -E '^[[:space:]]*run:[[:space:]]*npm run check:added-oasdiff-ignores[[:space:]]*$' "$ci"
+    [ "$status" -eq 0 ]
+    run grep -F '"check:added-oasdiff-ignores": "bash scripts/check-added-oasdiff-ignores.sh"' "$SCRIPT_DIR/../package.json"
+    [ "$status" -eq 0 ]
+}
