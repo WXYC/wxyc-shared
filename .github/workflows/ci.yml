@@ -241,6 +241,13 @@ jobs:
           npm run test:version-bump-guard
           npm run test:added-ignores-guard
 
+      # Runs against the PR's own added whitelist entries whether or not api.yaml
+      # changed. The bats case in check-breaking-changes.test.sh skips on an
+      # unchanged api.yaml, which is exactly when every added entry is dead.
+      # Passes at once when the branch adds no entry.
+      - name: Added oasdiff ignores are live
+        run: npm run check:added-oasdiff-ignores
+
       # Cross-service contract suite (see INVARIANTS.md, src/contracts.ts).
       # When $E2E_BASE_URL is unset, every test in the file is `skipIf`-ed
       # or `skip`-ed so vitest never reaches `beforeAll` (no live stack
