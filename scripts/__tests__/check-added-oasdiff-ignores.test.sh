@@ -102,6 +102,22 @@ check() { bash "$REPO/scripts/check-added-oasdiff-ignores.sh"; }
     [ "$status" -eq 0 ]
 }
 
+@test "a branch behind its base is judged against the merge base, not the base tip" {
+    # The merge base lacks property `b`; the base ref then adds it back. Against the
+    # base tip the branch looks like it removed `b`, so LIVE_ENTRY would pass; against
+    # the merge base nothing changed, so the added entry suppresses nothing.
+    git_t() { git -C "$REPO" -c user.name=t -c user.email=t@t "$@"; }
+    git_t commit -qam "merge base without b"
+    git_t checkout -q -b mainline
+    git_t show HEAD~1:api.yaml > "$REPO/api.yaml"
+    git_t commit -qam "main adds b"
+    git_t checkout -q -
+    printf '# why\n%s\n' "$LIVE_ENTRY" >> "$REPO/oasdiff-err-ignore.txt"
+    BASE_REF=mainline run check
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$LIVE_ENTRY"* ]]
+}
+
 @test "CI runs the check as its own step, not only through a bats case that skips on an unchanged api.yaml" {
     # check-breaking-changes.test.sh's case calls setup_base, which skips when api.yaml
     # matches origin/main, so it never covers the PR that changes only the whitelist.

@@ -9,7 +9,9 @@
 #
 # Usage:
 #   bash scripts/check-added-oasdiff-ignores.sh [base-spec-path]
-#   BASE_REF=<ref> overrides origin/main as the merge-base ref.
+#   BASE_REF=<ref> overrides origin/main as the merge-base ref. The base spec is
+#   api.yaml at the merge base, not at the ref tip, so a branch behind main is
+#   judged against what it forked from.
 #
 # Exit codes:
 #   0 - every added entry is live (or none was added)
@@ -33,8 +35,8 @@ MERGE_BASE=$(git -C "$PROJECT_ROOT" merge-base HEAD "$BASE_REF" 2>/dev/null) \
     || { echo "Error: no merge base with $BASE_REF." >&2; exit 2; }
 if [[ -z "$BASE_SPEC" ]]; then
     BASE_SPEC="$WORK_DIR/base.yaml"
-    git -C "$PROJECT_ROOT" show "$BASE_REF:api.yaml" > "$BASE_SPEC" 2>/dev/null \
-        || { echo "Error: could not read api.yaml from $BASE_REF." >&2; exit 2; }
+    git -C "$PROJECT_ROOT" show "$MERGE_BASE:api.yaml" > "$BASE_SPEC" 2>/dev/null \
+        || { echo "Error: could not read api.yaml from the merge base with $BASE_REF." >&2; exit 2; }
 fi
 
 # Added lines only; comments and blanks are not entries.
