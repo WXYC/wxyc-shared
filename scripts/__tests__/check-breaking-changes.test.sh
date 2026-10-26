@@ -128,12 +128,12 @@ setup_base() {
 # oasdiff itself (Go, bufio.Scanner) still honoured it. That is the worst
 # direction for the bug to run: a live, silently unguarded suppression.
 live_entries() {
-    local line
+    local line file="${1:-$IGNORE_FILE}"
     while IFS= read -r line || [[ -n "$line" ]]; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${line//[[:space:]]/}" ]] && continue
         printf '%s\n' "$line"
-    done < "$IGNORE_FILE"
+    done < "$file"
 }
 
 @test "live_entries sees a final entry that has no trailing newline" {
@@ -194,17 +194,18 @@ PY
 # command when an entry is stale.
 stale_entry_report() {
     local base="$1" api="$2" file="$3" line raw one stale=0
-    raw=$(oasdiff breaking "$base" "$api")
+    raw=$(oasdiff breaking "$base" "$api") \
+        || { echo "oasdiff could not complete the comparison (exit $?); staleness cannot be judged."; return 2; }
     while IFS= read -r line; do
-        [[ -n "$line" && ! "$line" =~ ^[[:space:]]*# ]] || continue
         printf '%s\n' "$line" > "$TEST_TEMP_DIR/one-entry.txt"
-        one=$(oasdiff breaking "$base" "$api" --err-ignore "$TEST_TEMP_DIR/one-entry.txt")
+        one=$(oasdiff breaking "$base" "$api" --err-ignore "$TEST_TEMP_DIR/one-entry.txt") \
+            || { echo "oasdiff could not complete the comparison (exit $?); staleness cannot be judged."; return 2; }
         if [[ "$one" == "$raw" ]]; then
             echo "stale whitelist entry, matches nothing in the diff:"
             echo "  $line"
             stale=1
         fi
-    done < "$file"
+    done < <(live_entries "$file")
     if [[ "$stale" -eq 1 ]]; then
         echo "fix: npm run prune:oasdiff-ignore"
         return 1
@@ -357,6 +358,34 @@ STALE_ENTRY='post /gone the response property `y` became nullable for the status
     [[ "$output" == *"npm run prune:oasdiff-ignore"* ]]
 }
 
+@test "the staleness helper reports a stale final entry that has no trailing newline" {
+    setup_prune_project
+    printf '# s\n%s' "$STALE_ENTRY" > "$TEST_TEMP_DIR/stale.txt"
+
+    run stale_entry_report "$TEST_TEMP_DIR/base.yaml" "$TEST_TEMP_DIR/api.yaml" "$TEST_TEMP_DIR/stale.txt"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"/gone"* ]]
+}
+
+@test "the staleness helper does not treat a whitespace-only line as an entry" {
+    setup_prune_project
+    printf '# s\n   \n' > "$TEST_TEMP_DIR/blank.txt"
+
+    run stale_entry_report "$TEST_TEMP_DIR/base.yaml" "$TEST_TEMP_DIR/api.yaml" "$TEST_TEMP_DIR/blank.txt"
+    [ "$status" -eq 0 ]
+}
+
+@test "the staleness helper reports an oasdiff failure as such, not as stale entries" {
+    setup_prune_project
+    printf 'not: openapi: at all\n  - [unclosed\n' > "$TEST_TEMP_DIR/bad.yaml"
+    printf '# s\n%s\n' "$LIVE_ENTRY" > "$TEST_TEMP_DIR/live.txt"
+
+    run stale_entry_report "$TEST_TEMP_DIR/base.yaml" "$TEST_TEMP_DIR/bad.yaml" "$TEST_TEMP_DIR/live.txt"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"oasdiff could not complete"* ]]
+    [[ "$output" != *"npm run prune:oasdiff-ignore"* ]]
+}
+
 @test "prune keeps an uppercase-method entry and an entry with a trailing note" {
     setup_prune_project
     printf '# header\n\n# upper\nGET /x removed the success response with the status `200`\n\n# note\n%s (justified in #739)\n' "$LIVE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
@@ -369,9 +398,40 @@ STALE_ENTRY='post /gone the response property `y` became nullable for the status
 
 @test "prune keeps the header when a stale entry follows it with no blank line" {
     setup_prune_project
-    printf '# header prose 1\n# header prose 2\n%s\n' "$STALE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+    printf '# header prose 1\n# header prose 2\n# justification\n%s\n' "$STALE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
 
     run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
     [ "$status" -eq 0 ]
     [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "$(printf '# header prose 1\n# header prose 2')" ]
+}
+
+@test "prune drops the justification of a stale entry in a headerless first block" {
+    setup_prune_project
+    printf '# justification\n%s\n\n# live\n%s\n' "$STALE_ENTRY" "$LIVE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "$(printf '# live\n%s' "$LIVE_ENTRY")" ]
+}
+
+@test "prune leaves a file with double and trailing blank lines byte-identical and says nothing was pruned" {
+    setup_prune_project
+    printf '# h\n\n\n# a\n%s\n\n\n' "$LIVE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+    cp "$TEST_TEMP_DIR/oasdiff-err-ignore.txt" "$TEST_TEMP_DIR/before.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Pruned"* ]]
+    [[ "$output" == *"Nothing pruned"* ]]
+    cmp "$TEST_TEMP_DIR/before.txt" "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+}
+
+@test "prune changes only the stale lines and keeps other blank-line runs as they were" {
+    setup_prune_project
+    printf '# h\n\n\n# a\n%s\n%s\n\n\n# b\n%s\n' "$LIVE_ENTRY" "$STALE_ENTRY" "$LIVE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Pruned"* ]]
+    [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "$(printf '# h\n\n\n# a\n%s\n\n\n# b\n%s' "$LIVE_ENTRY" "$LIVE_ENTRY")" ]
 }
