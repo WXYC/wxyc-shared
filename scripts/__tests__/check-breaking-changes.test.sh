@@ -188,25 +188,37 @@ if added:
 PY
 }
 
+# Reports entries that suppress nothing, judged by oasdiff itself (it ignores case
+# and accepts extra text on the line, so a substring test disagrees with it).
+# Args: base spec, revision spec, ignore file. Returns 1 and names the prune
+# command when an entry is stale.
+stale_entry_report() {
+    local base="$1" api="$2" file="$3" line raw one stale=0
+    raw=$(oasdiff breaking "$base" "$api")
+    while IFS= read -r line; do
+        [[ -n "$line" && ! "$line" =~ ^[[:space:]]*# ]] || continue
+        printf '%s\n' "$line" > "$TEST_TEMP_DIR/one-entry.txt"
+        one=$(oasdiff breaking "$base" "$api" --err-ignore "$TEST_TEMP_DIR/one-entry.txt")
+        if [[ "$one" == "$raw" ]]; then
+            echo "stale whitelist entry, matches nothing in the diff:"
+            echo "  $line"
+            stale=1
+        fi
+    done < "$file"
+    if [[ "$stale" -eq 1 ]]; then
+        echo "fix: npm run prune:oasdiff-ignore"
+        return 1
+    fi
+}
+
 @test "every whitelist entry corresponds to a finding in the current diff" {
     # The file's own rule is that entries are diff-scoped and dead ones get
     # pruned. This fails when an entry outlives the change it was written for.
     # Correctly vacuous at zero entries: it quantifies over entries, and there
     # are none. The test above is what stays non-vacuous in that state.
     setup_base
-    run oasdiff breaking "$BASE_SPEC" "$REPO_ROOT/api.yaml" --fail-on ERR
-    local findings="$output" line message
-    while IFS= read -r line; do
-        # Strip the leading "<method> <path> " to get the message text.
-        message="${line#* }"
-        message="${message#* }"
-        [[ "$findings" == *"$message"* ]] || {
-            echo "stale whitelist entry, matches nothing in the diff:"
-            echo "  $line"
-            echo "fix: npm run prune:oasdiff-ignore"
-            return 1
-        }
-    done < <(live_entries)
+    run stale_entry_report "$BASE_SPEC" "$REPO_ROOT/api.yaml" "$IGNORE_FILE"
+    [ "$status" -eq 0 ]
 }
 
 @test "a non-breaking oasdiff failure is not reported as a breaking change" {
@@ -336,6 +348,30 @@ STALE_ENTRY='post /gone the response property `y` became nullable for the status
 }
 
 @test "the staleness failure names the prune command" {
-    # [:] keeps this line from matching its own pattern.
-    grep -q 'echo "fix: npm run prune[:]oasdiff-ignore"' "$BATS_TEST_FILENAME"
+    setup_prune_project
+    printf '# stale\n%s\n' "$STALE_ENTRY" > "$TEST_TEMP_DIR/stale.txt"
+
+    run stale_entry_report "$TEST_TEMP_DIR/base.yaml" "$TEST_TEMP_DIR/api.yaml" "$TEST_TEMP_DIR/stale.txt"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"/gone"* ]]
+    [[ "$output" == *"npm run prune:oasdiff-ignore"* ]]
+}
+
+@test "prune keeps an uppercase-method entry and an entry with a trailing note" {
+    setup_prune_project
+    printf '# header\n\n# upper\nGET /x removed the success response with the status `200`\n\n# note\n%s (justified in #739)\n' "$LIVE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+    cp "$TEST_TEMP_DIR/oasdiff-err-ignore.txt" "$TEST_TEMP_DIR/before.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 0 ]
+    cmp "$TEST_TEMP_DIR/before.txt" "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+}
+
+@test "prune keeps the header when a stale entry follows it with no blank line" {
+    setup_prune_project
+    printf '# header prose 1\n# header prose 2\n%s\n' "$STALE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "$(printf '# header prose 1\n# header prose 2')" ]
 }
