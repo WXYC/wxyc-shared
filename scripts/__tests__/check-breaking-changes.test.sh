@@ -222,6 +222,14 @@ stale_entry_report() {
     [ "$status" -eq 0 ]
 }
 
+@test "no whitelist entry added by this branch suppresses nothing" {
+    # Scoped to the lines the branch adds, so older stale entries are left to the
+    # test above. Catches a dead entry at the PR that adds it.
+    setup_base
+    run bash "$SCRIPT_DIR/check-added-oasdiff-ignores.sh" "$BASE_SPEC"
+    [ "$status" -eq 0 ]
+}
+
 @test "a non-breaking oasdiff failure is not reported as a breaking change" {
     # oasdiff exits 121 for a bad --err-ignore path, 2/3 for a malformed spec.
     # Reporting those as "Breaking changes detected!" with advice to deprecate
@@ -278,7 +286,7 @@ PRUNE_SCRIPT="$SCRIPT_DIR/prune-oasdiff-ignore.sh"
 setup_prune_project() {
     command -v oasdiff > /dev/null || skip "oasdiff not installed"
     mkdir -p "$TEST_TEMP_DIR/scripts"
-    cp "$PRUNE_SCRIPT" "$TEST_TEMP_DIR/scripts/"
+    cp "$PRUNE_SCRIPT" "$SCRIPT_DIR/oasdiff-entry-live.sh" "$TEST_TEMP_DIR/scripts/"
     cat > "$TEST_TEMP_DIR/base.yaml" <<'YAML'
 openapi: 3.0.3
 info: {title: t, version: 1.0.0}
@@ -464,5 +472,17 @@ STALE_ENTRY='post /gone the response property `y` became nullable for the status
         [ "$status" -eq 0 ]
         [[ "$output" == *"Pruned"* ]]
         [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "$(printf "${leading}# live\n%s" "$LIVE_ENTRY")" ]
+    done
+}
+
+@test "prune drops the leading blank lines along with a dropped first block" {
+    setup_prune_project
+    local leading
+    for leading in '\n' '\n\n'; do
+        printf "${leading}# stale\n%s\n\n# live\n%s\n" "$STALE_ENTRY" "$LIVE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+        run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+        [ "$status" -eq 0 ]
+        [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "$(printf '# live\n%s' "$LIVE_ENTRY")" ]
     done
 }

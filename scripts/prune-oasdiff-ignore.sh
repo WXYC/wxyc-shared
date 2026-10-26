@@ -35,6 +35,9 @@ BASE_SPEC="${1:-}"
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/prune-oasdiff-XXXXXX")
 trap 'rm -rf "$WORK_DIR"' EXIT
 
+# shellcheck source=oasdiff-entry-live.sh
+source "$SCRIPT_DIR/oasdiff-entry-live.sh"
+
 command -v oasdiff > /dev/null || { echo "Error: oasdiff is not installed (brew install oasdiff)." >&2; exit 2; }
 [[ -f "$PROJECT_ROOT/api.yaml" ]] || { echo "Error: api.yaml not found at $PROJECT_ROOT/api.yaml" >&2; exit 2; }
 [[ -f "$IGNORE_FILE" && -r "$IGNORE_FILE" ]] || { echo "Error: oasdiff-err-ignore.txt is not a readable file at $IGNORE_FILE" >&2; exit 2; }
@@ -46,12 +49,7 @@ if [[ -z "$BASE_SPEC" ]]; then
 fi
 [[ -f "$BASE_SPEC" ]] || { echo "Error: base spec not found: $BASE_SPEC" >&2; exit 2; }
 
-# Liveness is decided by oasdiff itself, so the prune and the matcher can never
-# disagree (oasdiff ignores case and accepts extra text on the line, which a
-# substring test does not). An entry is live when oasdiff run with only that
-# entry as --err-ignore reports something different from the raw run, i.e. the
-# entry suppresses a finding. Not --fail-on: any non-zero exit is then a tool or
-# input problem.
+# Liveness is decided by oasdiff itself (see oasdiff-entry-live.sh).
 oasdiff breaking "$BASE_SPEC" "$PROJECT_ROOT/api.yaml" > "$WORK_DIR/raw.txt" \
     || { echo "Error: oasdiff could not complete the comparison." >&2; exit 2; }
 
@@ -60,12 +58,13 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ -z "${line//[[:space:]]/}" || "$line" =~ ^[[:space:]]*# ]]; then
         continue
     fi
-    printf '%s\n' "$line" > "$WORK_DIR/one.txt"
-    oasdiff breaking "$BASE_SPEC" "$PROJECT_ROOT/api.yaml" --err-ignore "$WORK_DIR/one.txt" > "$WORK_DIR/one-out.txt" \
-        || { echo "Error: oasdiff could not complete the comparison." >&2; exit 2; }
-    if ! cmp -s "$WORK_DIR/raw.txt" "$WORK_DIR/one-out.txt"; then
-        printf '%s\n' "$line" >> "$WORK_DIR/live.txt"
-    fi
+    rc=0
+    oasdiff_entry_is_live "$BASE_SPEC" "$PROJECT_ROOT/api.yaml" "$WORK_DIR/raw.txt" "$line" "$WORK_DIR" || rc=$?
+    case "$rc" in
+        0) printf '%s\n' "$line" >> "$WORK_DIR/live.txt" ;;
+        1) ;;
+        *) echo "Error: oasdiff could not complete the comparison." >&2; exit 2 ;;
+    esac
 done < "$IGNORE_FILE"
 
 awk -v live="$WORK_DIR/live.txt" -v countfile="$WORK_DIR/count.txt" '
