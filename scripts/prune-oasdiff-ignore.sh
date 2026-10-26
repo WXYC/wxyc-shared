@@ -98,7 +98,7 @@ function flush(   i, cs, ce, es, ee, k, allstale, keep, any) {
         for (i = 1; i <= n; i++) if (!(i in drop)) print b[i]
         emitted = 1; pending = ""; lastRemoved = 0
     } else {
-        pending = ""; lastRemoved = 1
+        lastRemoved = 1   # keep pending: the separator before the dropped block now separates its neighbours
     }
     skipBlanks = !any
     delete drop; n = 0
