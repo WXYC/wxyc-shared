@@ -71,6 +71,7 @@
     "generate:python": "bash scripts/generate-python-models.sh --output generated/python/models.py",
     "generate:kotlin": "openapi-generator-cli generate -i api.yaml -g kotlin -o generated/kotlin -c openapi-config/kotlin.yaml --skip-validate-spec",
     "check:breaking": "bash scripts/check-breaking-changes.sh",
+    "prune:oasdiff-ignore": "bash scripts/prune-oasdiff-ignore.sh",
     "check:version-bump": "bash scripts/check-version-bump.sh"
   },
   "files": [
