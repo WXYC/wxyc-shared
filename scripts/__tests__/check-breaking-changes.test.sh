@@ -435,3 +435,21 @@ STALE_ENTRY='post /gone the response property `y` became nullable for the status
     [[ "$output" == *"Pruned"* ]]
     [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "$(printf '# h\n\n\n# a\n%s\n\n\n# b\n%s' "$LIVE_ENTRY" "$LIVE_ENTRY")" ]
 }
+
+@test "prune keeps one separator when it drops a block between two kept blocks" {
+    setup_prune_project
+    printf '# h\n\n# stale\n%s\n\n# live\n%s\n' "$STALE_ENTRY" "$LIVE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "$(printf '# h\n\n# live\n%s' "$LIVE_ENTRY")" ]
+}
+
+@test "prune keeps one separator when it drops two consecutive blocks between kept blocks" {
+    setup_prune_project
+    printf '# h\n\n# live1\n%s\n\n# s1\n%s\n\n# s2\n%s\n\n# live2\n%s\n' "$LIVE_ENTRY" "$STALE_ENTRY" "$STALE_ENTRY" "$LIVE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "$(printf '# h\n\n# live1\n%s\n\n# live2\n%s' "$LIVE_ENTRY" "$LIVE_ENTRY")" ]
+}
