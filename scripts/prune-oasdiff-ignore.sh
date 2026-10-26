@@ -71,7 +71,7 @@ done < "$IGNORE_FILE"
 awk -v live="$WORK_DIR/live.txt" -v countfile="$WORK_DIR/count.txt" '
 function iscomment(x) { return x ~ /^[[:space:]]*#/ }
 # Decide which lines of the current block to drop, then emit the rest.
-function flush(   i, cs, ce, es, ee, k, allstale, keep, any) {
+function flush(   i, cs, ce, es, ee, k, allstale, any) {
     if (n == 0) return
     blocks++
     i = 1
@@ -94,10 +94,11 @@ function flush(   i, cs, ce, es, ee, k, allstale, keep, any) {
     any = 0
     for (i = 1; i <= n; i++) if (!(i in drop)) any = 1
     if (any) {
-        if (emitted) printf "%s", pending
+        printf "%s", pending
         for (i = 1; i <= n; i++) if (!(i in drop)) print b[i]
         emitted = 1; pending = ""; lastRemoved = 0
     } else {
+        if (!emitted) pending = ""   # leading blank lines go with a dropped first block
         lastRemoved = 1   # keep pending: the separator before the dropped block now separates its neighbours
     }
     skipBlanks = !any

@@ -453,3 +453,16 @@ STALE_ENTRY='post /gone the response property `y` became nullable for the status
     [ "$status" -eq 0 ]
     [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "$(printf '# h\n\n# live1\n%s\n\n# live2\n%s' "$LIVE_ENTRY" "$LIVE_ENTRY")" ]
 }
+
+@test "prune keeps leading blank lines when the first block is kept and a later entry is stale" {
+    setup_prune_project
+    local leading
+    for leading in '\n' '\n\n' '\n\n\n'; do
+        printf "${leading}# live\n%s\n\n# stale\n%s\n" "$LIVE_ENTRY" "$STALE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+        run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+        [ "$status" -eq 0 ]
+        [[ "$output" == *"Pruned"* ]]
+        [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "$(printf "${leading}# live\n%s" "$LIVE_ENTRY")" ]
+    done
+}
