@@ -203,6 +203,7 @@ PY
         [[ "$findings" == *"$message"* ]] || {
             echo "stale whitelist entry, matches nothing in the diff:"
             echo "  $line"
+            echo "fix: npm run prune:oasdiff-ignore"
             return 1
         }
     done < <(live_entries)
@@ -251,4 +252,90 @@ PY
     run bash "$TEST_TEMP_DIR/scripts/check-breaking-changes.sh"
     [ "$status" -eq 2 ]
     [[ "$output" == *"oasdiff-err-ignore.txt"* ]]
+}
+
+# --- prune-oasdiff-ignore.sh ---
+#
+# Entries outlive the diff they were written for (#743). The prune script is the
+# fix the staleness test above points at, so these run it against a throwaway
+# project: a two-path spec pair whose only finding is the removed `200` on /x.
+
+PRUNE_SCRIPT="$SCRIPT_DIR/prune-oasdiff-ignore.sh"
+
+setup_prune_project() {
+    command -v oasdiff > /dev/null || skip "oasdiff not installed"
+    mkdir -p "$TEST_TEMP_DIR/scripts"
+    cp "$PRUNE_SCRIPT" "$TEST_TEMP_DIR/scripts/"
+    cat > "$TEST_TEMP_DIR/base.yaml" <<'YAML'
+openapi: 3.0.3
+info: {title: t, version: 1.0.0}
+paths:
+  /x:
+    get:
+      responses:
+        '200': {description: ok}
+YAML
+    sed -e "s/'200'/'201'/" "$TEST_TEMP_DIR/base.yaml" > "$TEST_TEMP_DIR/api.yaml"
+}
+
+LIVE_ENTRY='get /x removed the success response with the status `200`'
+STALE_ENTRY='post /gone the response property `y` became nullable for the status `200`'
+
+@test "prune keeps a live entry with its comments and drops a stale entry's whole block" {
+    setup_prune_project
+    {
+        printf '# header prose\n\n'
+        printf '# live block: still in the diff\n%s\n%s\n\n' "$LIVE_ENTRY" "$STALE_ENTRY"
+        printf '# stale block: its change already landed\n%s\n' "$STALE_ENTRY"
+    } > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 0 ]
+
+    run cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+    [ "${lines[0]}" = "# header prose" ]
+    [[ "$output" == *"# live block: still in the diff"* ]]
+    [[ "$output" == *"$LIVE_ENTRY"* ]]
+    [[ "$output" != *"/gone"* ]]
+    [[ "$output" != *"stale block"* ]]
+}
+
+@test "prune empties a fully stale file down to its comments but never removes it" {
+    setup_prune_project
+    printf '# header prose\n\n# stale block\n%s\n' "$STALE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "# header prose" ]
+}
+
+@test "prune leaves a file with only live entries byte-identical" {
+    setup_prune_project
+    printf '# header\n\n# live\n%s\n' "$LIVE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+    cp "$TEST_TEMP_DIR/oasdiff-err-ignore.txt" "$TEST_TEMP_DIR/before.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 0 ]
+    cmp "$TEST_TEMP_DIR/before.txt" "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+}
+
+@test "prune handles a stale last entry with no trailing newline" {
+    setup_prune_project
+    printf '# header\n\n# stale\n%s' "$STALE_ENTRY" > "$TEST_TEMP_DIR/oasdiff-err-ignore.txt"
+
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TEST_TEMP_DIR/oasdiff-err-ignore.txt")" = "# header" ]
+}
+
+@test "prune exits 2 when the ignore file is missing" {
+    setup_prune_project
+    run bash "$TEST_TEMP_DIR/scripts/prune-oasdiff-ignore.sh" "$TEST_TEMP_DIR/base.yaml"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"oasdiff-err-ignore.txt"* ]]
+}
+
+@test "the staleness failure names the prune command" {
+    # [:] keeps this line from matching its own pattern.
+    grep -q 'echo "fix: npm run prune[:]oasdiff-ignore"' "$BATS_TEST_FILENAME"
 }

@@ -12,8 +12,14 @@
 # matches nothing — including a `#` comment — is inert.
 #
 # Entries here are scoped to a `main`..PR diff, so an entry stops matching the
-# moment its change lands on `main`. Prune dead entries when you notice them;
-# an entry that outlives its diff suppresses nothing but reads as if it does.
+# moment its change lands on `main`. Lifecycle: add the entry (with its comment
+# block) in the PR that needs it; once that PR merges, the next contract PR that
+# rebases onto `main` inherits a dead entry, and the staleness test in
+# scripts/__tests__/check-breaking-changes.test.sh fails on it. Run
+# `npm run prune:oasdiff-ignore` after rebasing: it drops every entry that matches
+# no current finding, plus any comment block left with no entries, and leaves live
+# blocks and this header alone. An entry that outlives its diff suppresses nothing
+# but reads as if it does.
 # Prune ENTRIES, never the file: both the CI job and
 # scripts/check-breaking-changes.sh pass this path unconditionally, and oasdiff
 # exits 121 when it is missing. An entry-free file of comments is the floor.
