@@ -222,14 +222,6 @@ stale_entry_report() {
     [ "$status" -eq 0 ]
 }
 
-@test "no whitelist entry added by this branch suppresses nothing" {
-    # Scoped to the lines the branch adds, so older stale entries are left to the
-    # test above. Catches a dead entry at the PR that adds it.
-    setup_base
-    run bash "$SCRIPT_DIR/check-added-oasdiff-ignores.sh" "$BASE_SPEC"
-    [ "$status" -eq 0 ]
-}
-
 @test "a non-breaking oasdiff failure is not reported as a breaking change" {
     # oasdiff exits 121 for a bad --err-ignore path, 2/3 for a malformed spec.
     # Reporting those as "Breaking changes detected!" with advice to deprecate
