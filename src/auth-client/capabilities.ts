@@ -4,15 +4,23 @@ import type { WXYCRole } from "./roles.js";
  * Cross-cutting capabilities that can be granted to any user.
  * These are independent of the DJ role hierarchy.
  */
-export const CAPABILITIES = ["editor", "webmaster", "reviews_beta"] as const;
+export const CAPABILITIES = ["editor", "webmaster", "reviews_beta", "archive_admin"] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
+
+/** Screen labels for each capability. Total, so a new capability cannot ship without one. */
+export const CAPABILITY_LABELS: Record<Capability, string> = {
+  editor: "Editor",
+  webmaster: "Webmaster",
+  reviews_beta: "Reviews beta",
+  archive_admin: "Archive admin",
+};
 
 /**
  * Policy as data: who can assign which capabilities.
  *
  * Delegation chain:
- *   StationManager -> can assign webmaster, editor or reviews_beta (no capability delegates reviews_beta)
+ *   StationManager -> can assign webmaster, editor, reviews_beta or archive_admin (no capability delegates reviews_beta or archive_admin)
  *   Webmaster (capability) -> can assign editor only
  */
 export const CAPABILITY_ASSIGNERS: Record<
@@ -28,6 +36,10 @@ export const CAPABILITY_ASSIGNERS: Record<
     capabilities: [],
   },
   reviews_beta: {
+    roles: ["stationManager"],
+    capabilities: [],
+  },
+  archive_admin: {
     roles: ["stationManager"],
     capabilities: [],
   },
