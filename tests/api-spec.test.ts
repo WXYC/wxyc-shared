@@ -229,7 +229,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.18.0');
+      expect(spec.info.version).toBe('12.19.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -7794,6 +7794,7 @@ describe('OpenAPI Specification', () => {
       'post /api/v1/artists/search-aliases/bulk',
       'post /api/v1/cache/refresh-for-identities',
       'post /api/v1/identity/bulk-resolve-libraries',
+      'post /api/v1/identity/pinned-tracklists',
       'post /api/v1/identity/resolve',
       'post /api/v1/lookup',
     ] as const;
@@ -7825,7 +7826,7 @@ describe('OpenAPI Specification', () => {
       expect(misattributed, misattributed.join('\n')).toEqual([]);
     });
 
-    it('attributes exactly the known seven operations to library-metadata-lookup', () => {
+    it('attributes exactly the known eight operations to library-metadata-lookup', () => {
       const lml = operations()
         .filter(([, , op]) => op['x-wxyc-service'] === 'library-metadata-lookup')
         .map(([method, path]) => `${method} ${path}`)
@@ -12280,6 +12281,80 @@ describe('OpenAPI Specification', () => {
     it('describes relevance ordering and the flag-off fallback', () => {
       expect(sort().description).toMatch(/exact name matches/);
       expect(sort().description).toMatch(/album asc/);
+    });
+  });
+
+  describe('POST /api/v1/identity/pinned-tracklists (WXYC/wxyc-shared#781)', () => {
+    const PATH = '/api/v1/identity/pinned-tracklists';
+
+    it('is served by library-metadata-lookup under LMLBearerAuth, with the request and 200 schemas wired', () => {
+      const op = operation(PATH, 'post');
+      expect(op['x-wxyc-service']).toBe('library-metadata-lookup');
+      expect(op.security).toEqual([{ LMLBearerAuth: [] }]);
+      expect(op.requestBody?.content?.['application/json']?.schema).toEqual(ref('PinnedTracklistsRequest'));
+      expect(responseSchema(PATH, 'post', '200')).toEqual(ref('PinnedTracklistsResponse'));
+    });
+
+    it('answers 503 on a transient database error, and says a failure is never "no pin"', () => {
+      expect(responseSchema(PATH, 'post', '503')).toEqual(ref('ApiErrorResponse'));
+      expect(flat(operation(PATH, 'post').responses?.['503']?.description)).toContain('never');
+      expect(flat(operation(PATH, 'post').description)).toContain('no pin');
+    });
+
+    it('bounds legacy_release_ids to 1..1000 integers', () => {
+      const s = sch('PinnedTracklistsRequest');
+      expect(s.required).toEqual(['legacy_release_ids']);
+      expect(s.properties.legacy_release_ids).toMatchObject({
+        type: 'array',
+        minItems: 1,
+        maxItems: 1000,
+        items: { type: 'integer' },
+      });
+      expect(flat(s.properties.legacy_release_ids.description)).toContain('library.legacy_release_id');
+    });
+
+    it('returns one entry per requested id with a nullable pin', () => {
+      const r = sch('PinnedTracklistsResponse');
+      expect(r.required).toEqual(['results']);
+      expect(r.properties.results.items).toEqual(ref('PinnedTracklistsResult'));
+      const e = sch('PinnedTracklistsResult');
+      expect([...e.required].sort()).toEqual(['legacy_release_id', 'pin']);
+      expect(e.properties.legacy_release_id.type).toBe('integer');
+      expect(e.properties.pin.nullable).toBe(true);
+      expect(e.properties.pin.allOf).toEqual([ref('PinnedTracklist')]);
+    });
+
+    it('declares pin fields, with in_cache a required non-nullable boolean', () => {
+      const p = sch('PinnedTracklist');
+      expect([...p.required].sort()).toEqual(['discogs_release_id', 'in_cache', 'source', 'tracks']);
+      expect(p.properties.discogs_release_id.type).toBe('integer');
+      expect(p.properties.source.type).toBe('string');
+      expect(p.properties.in_cache.type).toBe('boolean');
+      expect(p.properties.in_cache.nullable).toBeUndefined();
+      expect(p.properties.tracks).toEqual(expect.objectContaining({ type: 'array', items: ref('PinnedTrack') }));
+    });
+
+    it('writes the in_cache and empty-tracks meanings into the descriptions', () => {
+      const p = sch('PinnedTracklist');
+      const inCache = flat(p.properties.in_cache.description);
+      expect(inCache).toContain('outside the Discogs cache');
+      expect(inCache).toContain('`tracks` is then empty and means nothing');
+      expect(flat(p.properties.tracks.description)).toContain('`in_cache: true` with `[]` means the release has no tracks');
+    });
+
+    it('declares PinnedTrack with a nullable position and primary-only artist_credits', () => {
+      const t = sch('PinnedTrack');
+      expect([...t.required].sort()).toEqual(['artist_credits', 'position', 'sequence', 'title']);
+      expect(t.properties.sequence.type).toBe('integer');
+      expect(t.properties.position).toMatchObject({ type: 'string', nullable: true });
+      expect(t.properties.title.type).toBe('string');
+      expect(t.properties.artist_credits).toMatchObject({ type: 'array', items: { type: 'string' } });
+      expect(flat(t.properties.artist_credits.description)).toContain('primary credits only');
+      expect(flat(t.properties.position.description)).toContain('empty');
+    });
+
+    it('does not widen bulk-resolve-libraries include_tracks', () => {
+      expect(Object.keys(sch('BulkResolveLibrariesRequest').properties).sort()).toEqual(['include_tracks', 'inputs']);
     });
   });
 });
