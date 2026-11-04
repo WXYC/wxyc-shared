@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the six other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.17.1
+  version: 12.18.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -16705,10 +16705,12 @@ paths:
           in: query
           description: |
             Sort field. `date` means the catalog-addition date — when the album was
-            added to the WXYC library — not flowsheet play date.
+            added to the WXYC library — not flowsheet play date. `relevance` orders
+            within a match level: exact name matches and text rank first, then
+            plays, then id. With the backend flag off it behaves as `album asc`.
           schema:
             type: string
-            enum: [artist, album, plays, date]
+            enum: [artist, album, plays, date, relevance]
             default: album
         - name: order
           in: query

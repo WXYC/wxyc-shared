@@ -229,7 +229,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.17.1');
+      expect(spec.info.version).toBe('12.18.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -12266,6 +12266,20 @@ describe('OpenAPI Specification', () => {
 
     it('GET /labels declares no q/limit parameters, which its handler ignores', () => {
       expect(operation('/labels', 'get').parameters ?? []).toEqual([]);
+    });
+  });
+  describe('GET /library/query sort (WXYC/wxyc-shared#776)', () => {
+    const sort = () =>
+      (operation('/library/query', 'get').parameters as any[]).find((p) => p.name === 'sort');
+
+    it('accepts relevance and keeps album as the default', () => {
+      expect(sort().schema.enum).toEqual(['artist', 'album', 'plays', 'date', 'relevance']);
+      expect(sort().schema.default).toBe('album');
+    });
+
+    it('describes relevance ordering and the flag-off fallback', () => {
+      expect(sort().description).toMatch(/exact name matches/);
+      expect(sort().description).toMatch(/album asc/);
     });
   });
 });
