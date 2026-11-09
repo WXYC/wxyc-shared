@@ -12,7 +12,8 @@ export type Capability = (typeof CAPABILITIES)[number];
  * Policy as data: who can assign which capabilities.
  *
  * Delegation chain:
- *   StationManager -> can assign webmaster, editor or reviews_beta (no capability delegates reviews_beta)
+ *   StationManager -> can assign webmaster, editor or reviews_beta
+ *   MusicDirector -> can assign reviews_beta only (no capability delegates it)
  *   Webmaster (capability) -> can assign editor only
  */
 export const CAPABILITY_ASSIGNERS: Record<
@@ -28,7 +29,7 @@ export const CAPABILITY_ASSIGNERS: Record<
     capabilities: [],
   },
   reviews_beta: {
-    roles: ["stationManager"],
+    roles: ["musicDirector", "stationManager"],
     capabilities: [],
   },
 } as const;

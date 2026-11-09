@@ -229,7 +229,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.19.0');
+      expect(spec.info.version).toBe('12.20.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -4705,7 +4705,7 @@ describe('OpenAPI Specification', () => {
       });
 
       it.each([
-        ['the approved message, word for word', "\"This DJ can't see reviews yet. A station manager can add them to the reviews beta in the DJ Roster.\""],
+        ['the approved message, word for word', "\"This DJ can't see reviews yet. A music director can add them to the reviews beta.\""],
         ['the code', '`code` `asked_dj_cannot_see_feature`'],
         ['it applies only to an account that can be asked', 'applies only to an account that can be asked: one that holds `reviews: write` and is not a service account'],
         ['no request is recorded', 'no request is recorded'],
@@ -10001,7 +10001,7 @@ describe('OpenAPI Specification', () => {
       });
 
       it('keeps the legal name apart from the on-air name: no dj_name or handle property', () => {
-        expect(Object.keys(reviewer().properties)).toEqual(['id', 'name', 'on_air_name', 'records_out', 'last_submitted_at']);
+        expect(Object.keys(reviewer().properties)).toEqual(['id', 'name', 'on_air_name', 'records_out', 'last_submitted_at', 'reviews_beta']);
         for (const key of Object.keys(reviewer().properties)) {
           expect(key).not.toMatch(/dj_?name|handle/i);
         }
@@ -10028,6 +10028,36 @@ describe('OpenAPI Specification', () => {
         expect(flat(props.on_air_name.description)).toContain('"Anonymous"');
         expect(flat(props.records_out.description)).toContain('unfiled records the account has checked out or taken now');
         expect(flat(props.last_submitted_at.description)).toContain('When the account last submitted a review; `null` if never');
+      });
+
+      // WXYC/wxyc-shared#784
+      it('declares an optional reviews_beta boolean, read as false when a server omits it', () => {
+        const props = reviewer().properties as Record<string, any>;
+        expect([...reviewer().required].sort()).toEqual(['id', 'name']);
+        expect(props.reviews_beta.type).toBe('boolean');
+        expect(props.reviews_beta.nullable).toBeUndefined();
+        expect(flat(props.reviews_beta.description)).toContain('a server that predates it omits it');
+        expect(flat(props.reviews_beta.description)).toContain('`reviews_beta` capability');
+      });
+
+      describe.each(['put', 'delete'] as const)('%s /reviews/reviewers/{id}/reviews-beta (#784)', (method) => {
+        const path = '/reviews/reviewers/{id}/reviews-beta';
+        it('is a backend-service route granted by reviews: manage, answering 200 with the Reviewer', () => {
+          const o = operation(path, method);
+          expect(o['x-wxyc-service']).toBe('backend-service');
+          expect(flat(o.description)).toContain('Grant: `reviews: manage`');
+          expect(flat(o.description)).toContain('Idempotent');
+          expect(responseSchema(path, method, '200')).toEqual(ref('Reviewer'));
+        });
+        it.each(['401', '403', '404'])('documents %s', (status) => {
+          expect(operation(path, method).responses?.[status]).toBeDefined();
+        });
+        it('words the 404 as the accounts GET /reviews/reviewers leaves out, and the 403 as canAssignCapability', () => {
+          const r = operation(path, method).responses as Record<string, any>;
+          expect(flat(r['404'].description)).toMatch(/banned/);
+          expect(flat(r['404'].description)).toMatch(/service account/);
+          expect(flat(r['403'].description)).toContain('canAssignCapability');
+        });
       });
 
       it('gives each IntakeItem pass an optional dj_id, the passing account', () => {

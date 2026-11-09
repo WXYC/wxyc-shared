@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the seven other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.19.0
+  version: 12.20.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -5287,6 +5287,13 @@ components:
             for any public surface, because this is an activity fact about a
             person; never for client telemetry (analytics properties, error
             breadcrumbs, logs).
+        reviews_beta:
+          type: boolean
+          description: >
+            Whether the account holds the `reviews_beta` capability. Optional:
+            a server that predates it omits it, and a client reads a missing
+            value as false. Change it with `PUT` or `DELETE
+            /reviews/reviewers/{id}/reviews-beta`.
 
     Review:
       type: object
@@ -15745,8 +15752,8 @@ paths:
             `reviews_beta`; at `everyone`, one without DJ access), the body is
             `IntakeRequestRefusedError` with `code`
             `asked_dj_cannot_see_feature` and `message` "This DJ can't see
-            reviews yet. A station manager can add them to the reviews beta in
-            the DJ Roster."; no request is recorded. A `dj_id` that does not name
+            reviews yet. A music director can add them to the reviews beta.";
+            no request is recorded. A `dj_id` that does not name
             an account that can be asked (no such account, a service account, or
             an account without `reviews: write`) gets the plain `ApiErrorResponse`
             with no code, whatever the audience. Every other 400 here is the
@@ -16547,6 +16554,71 @@ paths:
           description: No bearer token
         '403':
           description: 'Caller lacks the `reviews: manage` permission'
+
+  /reviews/reviewers/{id}/reviews-beta:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The account id (`auth_user.id`), as in `Reviewer.id`.
+    put:
+      x-wxyc-service: backend-service
+      summary: Add an account to the reviews beta
+      description: >
+        Grant: `reviews: manage` (music directors and station managers), and
+        the caller must pass `canAssignCapability` for `reviews_beta`. Adds the `reviews_beta` capability.
+        Idempotent. Answers 200 with the updated `Reviewer`. `{id}` is the
+        account id. Station managers can still change it through the DJ
+        Roster.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The updated reviewer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reviewer'
+        '401':
+          description: Not signed in
+        '403':
+          description: 'Caller lacks `reviews: manage`, or `canAssignCapability` refuses `reviews_beta` for the caller'
+        '404':
+          description: '`{id}` is not an account `GET /reviews/reviewers` would list: an unknown id, a banned account or a service account'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    delete:
+      x-wxyc-service: backend-service
+      summary: Remove an account from the reviews beta
+      description: >
+        Grant: `reviews: manage` (music directors and station managers), and
+        the caller must pass `canAssignCapability` for `reviews_beta`. Removes the `reviews_beta` capability.
+        Idempotent. Answers 200 with the updated `Reviewer`. `{id}` is the
+        account id. Station managers can still change it through the DJ
+        Roster.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: The updated reviewer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reviewer'
+        '401':
+          description: Not signed in
+        '403':
+          description: 'Caller lacks `reviews: manage`, or `canAssignCapability` refuses `reviews_beta` for the caller'
+        '404':
+          description: '`{id}` is not an account `GET /reviews/reviewers` would list: an unknown id, a banned account or a service account'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
 
   /reviews/{id}:
     parameters:
