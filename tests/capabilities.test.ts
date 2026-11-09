@@ -61,12 +61,27 @@ describe("CAPABILITY_ASSIGNERS", () => {
     expect(CAPABILITY_ASSIGNERS.webmaster.capabilities).toHaveLength(0);
   });
 
-  it("allows only stationManager to assign reviews_beta by role", () => {
-    expect(CAPABILITY_ASSIGNERS.reviews_beta.roles).toEqual(["stationManager"]);
+  it("allows musicDirector and stationManager to assign reviews_beta by role", () => {
+    expect(CAPABILITY_ASSIGNERS.reviews_beta.roles).toEqual(["musicDirector", "stationManager"]);
   });
 
   it("does not allow any capability to assign reviews_beta", () => {
     expect(CAPABILITY_ASSIGNERS.reviews_beta.capabilities).toHaveLength(0);
+  });
+});
+
+describe("canAssignCapability by role x capability", () => {
+  it.each<[WXYCRole, Capability, boolean]>([
+    ["member", "reviews_beta", false],
+    ["dj", "reviews_beta", false],
+    ["musicDirector", "reviews_beta", true],
+    ["stationManager", "reviews_beta", true],
+    ["musicDirector", "editor", false],
+    ["musicDirector", "webmaster", false],
+    ["stationManager", "editor", true],
+    ["stationManager", "webmaster", true],
+  ])("%s assigning %s is %s", (role, capability, expected) => {
+    expect(canAssignCapability({ role, capabilities: [] }, capability)).toBe(expected);
   });
 });
 
@@ -109,20 +124,20 @@ describe("canAssignCapability", () => {
       [{ role: WXYCRole; capabilities: Capability[] }, boolean, string]
     >([
       [user("stationManager"), true, "stationManager can assign"],
-      [user("musicDirector"), false, "musicDirector cannot assign"],
+      [user("musicDirector"), true, "musicDirector can assign"],
       [user("dj"), false, "dj cannot assign"],
       [user("member"), false, "member cannot assign"],
       [user("dj", ["webmaster"]), false, "webmaster cannot assign"],
       [
-        user("musicDirector", ["webmaster"]),
+        user("dj", ["editor"]),
         false,
-        "musicDirector with webmaster cannot assign",
+        "editor capability cannot assign",
       ],
       [user("dj", ["reviews_beta"]), false, "reviews_beta holder cannot assign"],
       [
         user("musicDirector", ["reviews_beta"]),
-        false,
-        "musicDirector with reviews_beta cannot assign",
+        true,
+        "musicDirector assigns by role whatever it holds",
       ],
     ])("given %j returns %s (%s)", (assigner, expected) => {
       expect(canAssignCapability(assigner, "reviews_beta")).toBe(expected);

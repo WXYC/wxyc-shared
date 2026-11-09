@@ -714,7 +714,7 @@ describe('Generated TypeScript Types', () => {
         body.code === IntakeRequestRefusedCode.asked_dj_cannot_see_feature;
 
       const coded: Request400 = {
-        message: "This DJ can't see reviews yet. A station manager can add them to the reviews beta in the DJ Roster.",
+        message: "This DJ can't see reviews yet. A music director can add them to the reviews beta.",
         code: IntakeRequestRefusedCode.asked_dj_cannot_see_feature,
       };
       const plain: Request400 = { message: 'dj_id does not name an account that can be asked to review' };
