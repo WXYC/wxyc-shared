@@ -229,7 +229,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.20.0');
+      expect(spec.info.version).toBe('12.21.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -7789,6 +7789,7 @@ describe('OpenAPI Specification', () => {
     // Backend operation that happened to be versioned, which is precisely the
     // kind of quiet drift the marker exists to stop.
     const LML_OPERATIONS = [
+      'delete /api/v1/library-release-override/{legacy_release_id}',
       'post /api/v1/artists/genres/bulk',
       'post /api/v1/artists/resolve/bulk',
       'post /api/v1/artists/search-aliases/bulk',
@@ -7797,6 +7798,7 @@ describe('OpenAPI Specification', () => {
       'post /api/v1/identity/pinned-tracklists',
       'post /api/v1/identity/resolve',
       'post /api/v1/lookup',
+      'put /api/v1/library-release-override/{legacy_release_id}',
     ] as const;
 
     it('marks every operation with exactly one service from the closed set', () => {
@@ -7826,7 +7828,7 @@ describe('OpenAPI Specification', () => {
       expect(misattributed, misattributed.join('\n')).toEqual([]);
     });
 
-    it('attributes exactly the known eight operations to library-metadata-lookup', () => {
+    it('attributes exactly the known ten operations to library-metadata-lookup', () => {
       const lml = operations()
         .filter(([, , op]) => op['x-wxyc-service'] === 'library-metadata-lookup')
         .map(([method, path]) => `${method} ${path}`)
@@ -12385,6 +12387,238 @@ describe('OpenAPI Specification', () => {
 
     it('does not widen bulk-resolve-libraries include_tracks', () => {
       expect(Object.keys(sch('BulkResolveLibrariesRequest').properties).sort()).toEqual(['include_tracks', 'inputs']);
+    });
+  });
+
+  describe('Discogs release picker contract (WXYC/wxyc-shared#786, WXYC/Backend-Service#3790)', () => {
+    const PIN_PATH = '/api/v1/library-release-override/{legacy_release_id}';
+    const PICKER_PATH = '/library/{id}/discogs-release';
+    const PREFILL_PATH = '/library/releases/discogs-prefill';
+
+    it('counts the two pin operations in the info description', () => {
+      expect(flat((spec.info as { description?: string }).description)).toContain('plus the nine other `/api/v1/*` operations');
+    });
+
+    describe('LML pin endpoints', () => {
+      it.each(['put', 'delete'])('%s is served by library-metadata-lookup under LMLBearerAuth, pin-writer key only', (method) => {
+        const op = operation(PIN_PATH, method);
+        expect(op['x-wxyc-service']).toBe('library-metadata-lookup');
+        expect(op.security).toEqual([{ LMLBearerAuth: [] }]);
+        expect(flat(op.description)).toContain('backend-service-pin-writer');
+        expect(flat(op.description)).toContain('LML_PIN_WRITER_CALLERS');
+        const param = (op.parameters as Array<Record<string, any>>).find((p) => p.name === 'legacy_release_id');
+        expect(param).toMatchObject({ in: 'path', required: true, schema: { type: 'integer' } });
+        expect(flat(param!.description)).toContain('library.legacy_release_id');
+      });
+
+      it.each([
+        ['put', '200', 'ReleasePinWriteResponse'],
+        ['put', '401', 'ApiErrorResponse'],
+        ['put', '403', 'ApiErrorResponse'],
+        ['put', '409', 'ApiErrorResponse'],
+        ['put', '422', 'ApiErrorResponse'],
+        ['put', '503', 'ApiErrorResponse'],
+        ['delete', '200', 'ReleasePinDeleteResponse'],
+        ['delete', '401', 'ApiErrorResponse'],
+        ['delete', '403', 'ApiErrorResponse'],
+        ['delete', '404', 'ApiErrorResponse'],
+        ['delete', '503', 'ApiErrorResponse'],
+      ])('%s answers %s with %s', (method, status, schema) => {
+        expect(responseSchema(PIN_PATH, method, status)).toEqual(ref(schema));
+      });
+
+      it('takes a ReleasePinWriteRequest on PUT', () => {
+        expect(operation(PIN_PATH, 'put').requestBody?.content?.['application/json']?.schema).toEqual(
+          ref('ReleasePinWriteRequest')
+        );
+      });
+
+      it('says the legacy shared LML_API_KEY is refused with 403', () => {
+        expect(flat(operation(PIN_PATH, 'put').responses?.['403']?.description)).toContain('LML_API_KEY');
+      });
+
+      it('answers 409 with nothing written when the pin would not bind', () => {
+        const d = flat(operation(PIN_PATH, 'put').responses?.['409']?.description);
+        expect(d).toContain('would not bind');
+        expect(d).toContain('nothing is written');
+      });
+
+      it('bounds the request: positive release id, md- source, optional note', () => {
+        const s = sch('ReleasePinWriteRequest');
+        expect([...s.required].sort()).toEqual(['discogs_release_id', 'source']);
+        expect(s.properties.discogs_release_id).toMatchObject({ type: 'integer', minimum: 1 });
+        expect(s.properties.source).toMatchObject({ type: 'string', pattern: '^md-' });
+        expect(s.properties.note).toMatchObject({ type: 'string', nullable: true });
+        expect(s.required).not.toContain('note');
+      });
+
+      it('returns the written pin, binds, and the replaced pin', () => {
+        const s = sch('ReleasePinWriteResponse');
+        expect([...s.required].sort()).toEqual([
+          'binds',
+          'discogs_release_id',
+          'legacy_release_id',
+          'replaced',
+          'source',
+        ]);
+        expect(s.properties.binds.type).toBe('boolean');
+        expect(s.properties.binds.nullable).toBeUndefined();
+        expect(s.properties.replaced).toMatchObject(nullableRef('ReleasePin'));
+        expect(flat(s.properties.replaced.description)).toContain('null');
+      });
+
+      it('returns the removed pin on DELETE', () => {
+        expect(sch('ReleasePinDeleteResponse').required).toEqual(['legacy_release_id', 'removed']);
+        expect(sch('ReleasePinDeleteResponse').properties.removed).toEqual(ref('ReleasePin'));
+      });
+
+      it('declares ReleasePin as a release id and its source', () => {
+        const p = sch('ReleasePin');
+        expect([...p.required].sort()).toEqual(['discogs_release_id', 'source']);
+        expect(p.properties.discogs_release_id.type).toBe('integer');
+        expect(p.properties.source.type).toBe('string');
+      });
+    });
+
+    describe('PUT /library/{id}/discogs-release', () => {
+      it('is a catalog write served by backend-service', () => {
+        expectBackendRoute(PICKER_PATH, 'put', { grant: "catalog: ['write']", issue: 'WXYC/Backend-Service#3790' });
+        expect(operation(PICKER_PATH, 'put').security).toEqual([{ BearerAuth: [] }]);
+        expect(operation(PICKER_PATH, 'put').requestBody?.content?.['application/json']?.schema).toEqual(
+          ref('DiscogsReleaseChangeRequest')
+        );
+      });
+
+      it('takes a required url', () => {
+        const s = sch('DiscogsReleaseChangeRequest');
+        expect(s.required).toEqual(['url']);
+        expect(s.properties.url.type).toBe('string');
+      });
+
+      it.each([
+        ['200', 'DiscogsReleaseChangeResponse'],
+        ['400', 'ApiErrorResponse'],
+        ['403', 'ApiErrorResponse'],
+        ['404', 'ApiErrorResponse'],
+        ['409', 'ApiErrorResponse'],
+        ['422', 'ApiErrorResponse'],
+        ['503', 'ApiErrorResponse'],
+      ])('answers %s with %s', (status, schema) => {
+        expect(responseSchema(PICKER_PATH, 'put', status)).toEqual(ref(schema));
+      });
+
+      it.each([
+        ['400', 'missing_url'],
+        ['400', 'invalid_url'],
+        ['400', 'not_release_url'],
+        ['400', 'master_url'],
+        ['409', 'pin_not_bound'],
+        ['422', 'release_not_found'],
+        ['503', 'lml_unavailable'],
+      ])('names the %s code %s', (status, code) => {
+        expect(flat(operation(PICKER_PATH, 'put').responses?.[status]?.description)).toContain(`\`${code}\``);
+      });
+
+      it('returns the catalog row, the metadata payload, and the pin with its provenance', () => {
+        const s = sch('DiscogsReleaseChangeResponse');
+        expect([...s.required].sort()).toEqual(['album', 'metadata', 'pin']);
+        expect(s.properties.album).toEqual(ref('AlbumDetail'));
+        expect(s.properties.metadata).toEqual(ref('AlbumMetadataResponse'));
+        expect(s.properties.pin).toEqual(ref('DiscogsReleasePinProvenance'));
+      });
+
+      it('declares the pin provenance field', () => {
+        const p = sch('DiscogsReleasePinProvenance');
+        expect([...p.required].sort()).toEqual(['discogs_release_id', 'provenance', 'source']);
+        expect(p.properties.provenance).toEqual(ref('DiscogsLinkProvenance'));
+        expect(p.properties.source).toMatchObject({ type: 'string', nullable: true });
+        expect(sch('DiscogsLinkProvenance')).toMatchObject({
+          type: 'string',
+          enum: ['md', 'catalog_import', 'automatic'],
+        });
+        const d = flat(sch('DiscogsLinkProvenance').description);
+        expect(d).toContain('md-');
+        expect(d).toContain('alex-l-2026');
+      });
+
+      it('says streaming links are left alone and iOS/Android may lag by the 10-minute cache', () => {
+        const d = flat(operation(PICKER_PATH, 'put').description);
+        expect(d).toMatch(/streaming links and their statuses are left alone/i);
+        expect(d).toContain('max-age=600');
+      });
+    });
+
+    describe('GET /library/releases/discogs-prefill', () => {
+      it('is a catalog read served by backend-service with a required url query', () => {
+        expectBackendRoute(PREFILL_PATH, 'get', { grant: "catalog: ['read']", issue: 'WXYC/Backend-Service#3790' });
+        const param = (operation(PREFILL_PATH, 'get').parameters as Array<Record<string, any>>).find(
+          (p) => p.name === 'url'
+        );
+        expect(param).toMatchObject({ in: 'query', required: true, schema: { type: 'string' } });
+      });
+
+      it.each([
+        ['200', 'DiscogsReleasePrefill'],
+        ['400', 'ApiErrorResponse'],
+        ['403', 'ApiErrorResponse'],
+        ['404', 'ApiErrorResponse'],
+      ])('answers %s with %s', (status, schema) => {
+        expect(responseSchema(PREFILL_PATH, 'get', status)).toEqual(ref(schema));
+      });
+
+      it.each([
+        ['400', 'missing_url'],
+        ['400', 'invalid_url'],
+        ['400', 'not_release_url'],
+        ['400', 'master_url'],
+        ['404', 'release_not_found'],
+      ])('names the %s code %s', (status, code) => {
+        expect(flat(operation(PREFILL_PATH, 'get').responses?.[status]?.description)).toContain(`\`${code}\``);
+      });
+
+      it.each([
+        ['discogs_release_id', 'integer', false],
+        ['discogs_master_id', 'integer', true],
+        ['artist_name', 'string', false],
+        ['album_title', 'string', false],
+        ['label', 'string', true],
+        ['discogs_label_id', 'integer', true],
+        ['year', 'integer', true],
+        ['discogs_artist_id', 'integer', true],
+        ['artwork_url', 'string', true],
+        ['track_count', 'integer', false],
+      ])('declares %s as a required %s (nullable: %s)', (name, type, nullable) => {
+        const s = sch('DiscogsReleasePrefill');
+        expect(s.required).toContain(name);
+        expect(s.properties[name].type).toBe(type);
+        expect(s.properties[name].nullable ?? false).toBe(nullable);
+      });
+
+      it.each(['genres', 'styles'])('declares %s as a required string array', (name) => {
+        const s = sch('DiscogsReleasePrefill');
+        expect(s.required).toContain(name);
+        expect(s.properties[name]).toMatchObject({ type: 'array', items: { type: 'string' } });
+      });
+
+      it('declares exactly the prefill fields, with track_count the one new one', () => {
+        expect(Object.keys(sch('DiscogsReleasePrefill').properties).sort()).toEqual(
+          [
+            'album_title',
+            'artist_name',
+            'artwork_url',
+            'discogs_artist_id',
+            'discogs_label_id',
+            'discogs_master_id',
+            'discogs_release_id',
+            'genres',
+            'label',
+            'styles',
+            'track_count',
+            'year',
+          ].sort()
+        );
+        expect(flat(sch('DiscogsReleasePrefill').properties.track_count.description)).toContain('WXYC/Backend-Service#3793');
+      });
     });
   });
 });
