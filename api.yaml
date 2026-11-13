@@ -10,10 +10,10 @@ info:
     This document spans two services. Every operation carries `x-wxyc-service`
     naming the one that serves it: `backend-service` (api.wxyc.org, including
     the `/auth/*` app on the same host) or `library-metadata-lookup` (a separate
-    host, `POST /api/v1/lookup` plus the seven other `/api/v1/*` operations). The
+    host, `POST /api/v1/lookup` plus the nine other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.20.0
+  version: 12.21.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -11650,6 +11650,213 @@ components:
           description: >
             One list per track, primary credits only (`extra = 0`); empty
             when the track carries none.
+    ReleasePin:
+      type: object
+      description: >
+        One LML release pin (`lml_cache.library_release_override`): the
+        Discogs release a library record's lookups use instead of searching,
+        and the batch or writer that set it.
+      required:
+        - discogs_release_id
+        - source
+      properties:
+        discogs_release_id:
+          type: integer
+          description: The pinned Discogs release.
+        source:
+          type: string
+          description: >
+            Who set the pin: `md-<user id>` for a music director, or a seed
+            batch name such as `alex-l-2026` for a catalog import.
+    ReleasePinWriteRequest:
+      type: object
+      description: Request to `PUT /api/v1/library-release-override/{legacy_release_id}`.
+      required:
+        - discogs_release_id
+        - source
+      properties:
+        discogs_release_id:
+          type: integer
+          minimum: 1
+          description: >
+            The Discogs release to pin. Must be positive (the table's CHECK)
+            and must resolve through LML's `get_release`, so a typo cannot pin
+            a release that does not exist.
+        source:
+          type: string
+          pattern: '^md-'
+          description: >
+            `md-<user id>`. A seed batch name is reserved for the seed
+            scripts, so this writer can never write or overwrite a pin under
+            a seed batch's name.
+        note:
+          type: string
+          nullable: true
+          description: Optional free-text note stored with the pin.
+    ReleasePinWriteResponse:
+      type: object
+      description: >
+        Response to `PUT /api/v1/library-release-override/{legacy_release_id}`:
+        the pin as written, whether it binds, and the pin it replaced.
+      required:
+        - legacy_release_id
+        - discogs_release_id
+        - source
+        - binds
+        - replaced
+      properties:
+        legacy_release_id:
+          type: integer
+          description: Echo of the path's `library.legacy_release_id`.
+        discogs_release_id:
+          type: integer
+          description: The pinned Discogs release.
+        source:
+          type: string
+          description: The `md-*` source as written.
+        binds:
+          type: boolean
+          description: >
+            Whether the next `/lookup` for this record, built from its own
+            artist and title, uses the pinned release. A caller reports
+            success only when this is `true`.
+        replaced:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ReleasePin'
+          description: >
+            The pin this write replaced, as it was before the upsert, or null
+            when the record had no pin. Backend records it in
+            `library_discogs_release_change`.
+    ReleasePinDeleteResponse:
+      type: object
+      description: >
+        Response to `DELETE /api/v1/library-release-override/{legacy_release_id}`:
+        the pin that was removed.
+      required:
+        - legacy_release_id
+        - removed
+      properties:
+        legacy_release_id:
+          type: integer
+          description: Echo of the path's `library.legacy_release_id`.
+        removed:
+          $ref: '#/components/schemas/ReleasePin'
+    DiscogsReleaseChangeRequest:
+      type: object
+      description: Request to `PUT /library/{id}/discogs-release`.
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          description: >
+            A pasted Discogs release URL or a bare release id, parsed as
+            `GET /library/releases/discogs-prefill` parses its `url`.
+    DiscogsLinkProvenance:
+      type: string
+      enum:
+        - md
+        - catalog_import
+        - automatic
+      description: >
+        Where a record's Discogs link came from, derived from the LML pin
+        source. `md`: a pin whose source starts with `md-`, set by a music
+        director ("set by an MD"). `catalog_import`: a seed-batch pin such as
+        `alex-l-2026` or `alex-l-2026-masters-api` ("from the catalog
+        import"). `automatic`: no pin; LML's search chose the release ("found
+        automatically").
+    DiscogsReleasePinProvenance:
+      type: object
+      description: The record's current Discogs link and where it came from.
+      required:
+        - discogs_release_id
+        - source
+        - provenance
+      properties:
+        discogs_release_id:
+          type: integer
+          description: The linked Discogs release.
+        source:
+          type: string
+          nullable: true
+          description: The raw LML pin source, or null when the record has no pin.
+        provenance:
+          $ref: '#/components/schemas/DiscogsLinkProvenance'
+    DiscogsReleaseChangeResponse:
+      type: object
+      description: >
+        Response to `PUT /library/{id}/discogs-release`: everything the DJ
+        site needs to show the new release without refetching.
+      required:
+        - album
+        - metadata
+        - pin
+      properties:
+        album:
+          $ref: '#/components/schemas/AlbumDetail'
+        metadata:
+          $ref: '#/components/schemas/AlbumMetadataResponse'
+        pin:
+          $ref: '#/components/schemas/DiscogsReleasePinProvenance'
+    DiscogsReleasePrefill:
+      type: object
+      description: >
+        Response to `GET /library/releases/discogs-prefill`: one Discogs
+        release, as `DiscogsReleasePrefill` in Backend's `library.service.ts`.
+      required:
+        - discogs_release_id
+        - discogs_master_id
+        - artist_name
+        - album_title
+        - label
+        - discogs_label_id
+        - year
+        - discogs_artist_id
+        - genres
+        - styles
+        - artwork_url
+        - track_count
+      properties:
+        discogs_release_id:
+          type: integer
+        discogs_master_id:
+          type: integer
+          nullable: true
+        artist_name:
+          type: string
+        album_title:
+          type: string
+        label:
+          type: string
+          nullable: true
+        discogs_label_id:
+          type: integer
+          nullable: true
+        year:
+          type: integer
+          nullable: true
+          description: Release year; Discogs' "unknown" (0) is sent as null.
+        discogs_artist_id:
+          type: integer
+          nullable: true
+        genres:
+          type: array
+          items:
+            type: string
+        styles:
+          type: array
+          items:
+            type: string
+        artwork_url:
+          type: string
+          nullable: true
+          description: The release's cover, or null (Discogs' spacer image is sent as null).
+        track_count:
+          type: integer
+          description: >
+            Tracks on the release's tracklist. Added by
+            WXYC/Backend-Service#3793; the other fields are already emitted.
     IdentityKind:
       type: string
       description: >
@@ -19331,6 +19538,159 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
 
+  /library/{id}/discogs-release:
+    put:
+      x-wxyc-service: backend-service
+      summary: Set a release's Discogs link (release picker)
+      description: |
+        The release picker's save (WXYC/Backend-Service#3790). Requires
+        `catalog: ['write']` (music director and above). The body's `url` is
+        parsed like `GET /library/releases/discogs-prefill`'s and the release
+        is fetched through LML. Then, in this order:
+
+        1. The LML pin for the record is set, with source `md-<user id>`.
+        2. In one transaction: `album_metadata` is rewritten from the release
+           (the release-scoped columns, and the artist columns unless the
+           release is a compilation), `library.artwork_url` is updated,
+           `library_identity` and every rotation row for the record take the
+           new release, the record's track-index rows are dropped, "Not on
+           Discogs" is cleared, and a `library_discogs_release_change` row
+           records the change and the pin it replaced. Streaming links and
+           their statuses are left alone: they are resolved per catalog row,
+           not per Discogs release.
+        3. Every Backend instance drops its cached lookup responses.
+
+        The DJ site shows the new release at once from this response. iOS and
+        Android may show the old one for up to 10 minutes, because the proxy
+        endpoints send `Cache-Control: private, max-age=600`.
+
+        If the database write fails after the pin is set, the route answers
+        500; retrying the same request is safe.
+      operationId: setLibraryDiscogsRelease
+      tags:
+        - Library
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Backend's `library.id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscogsReleaseChangeRequest'
+      responses:
+        '200':
+          description: The link was set; the updated release, its metadata and the pin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscogsReleaseChangeResponse'
+        '400':
+          description: >
+            The `url` could not be used. `code` is the parse outcome, as on
+            `GET /library/releases/discogs-prefill`: `missing_url`,
+            `invalid_url`, `not_release_url`, or `master_url` (a master link;
+            paste a specific release).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: "The caller lacks `catalog: ['write']`."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: Album not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            `pin_not_bound`: LML would not apply the pin to this record's
+            lookups (or reported `binds: false`), so nothing is written.
+            `message` carries LML's reason for the music director.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: >
+            `release_not_found`: Discogs has no release with that id. Nothing
+            is written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: >
+            `lml_unavailable`: LML did not answer (a 502 or 504 upstream).
+            Nothing is written; try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /library/releases/discogs-prefill:
+    get:
+      x-wxyc-service: backend-service
+      summary: Resolve a pasted Discogs release URL to its release fields
+      description: |
+        Requires `catalog: ['read']`. Resolves a pasted Discogs release URL
+        through LML's `GET /api/v1/discogs/release/{id}`, for the rotation
+        filing bench's prefill and the release picker's preview
+        (WXYC/Backend-Service#3790). A hard LML failure passes through
+        LML's status.
+      operationId: getDiscogsReleasePrefill
+      tags:
+        - Library
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema:
+            type: string
+          description: A Discogs release URL or a bare positive release id. Exactly one.
+      responses:
+        '200':
+          description: The release's fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscogsReleasePrefill'
+        '400':
+          description: >
+            `missing_url` (absent, empty or repeated `url`), `invalid_url`
+            (not a Discogs URL, or not a valid id), `not_release_url` (a
+            Discogs URL with no `/release/{id}`), or `master_url` (a master
+            link; paste a specific release).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: "The caller lacks `catalog: ['read']`."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: "`release_not_found`: Discogs has no release for that link."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
   /library/{id}/urls:
     put:
       x-wxyc-service: backend-service
@@ -20913,6 +21273,134 @@ paths:
           description: >
             Transient database error. The lookup did not complete, so the
             route never answers "no pin" for it; retry the whole request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+
+  /api/v1/library-release-override/{legacy_release_id}:
+    put:
+      x-wxyc-service: library-metadata-lookup
+      summary: Pin a library record to a Discogs release
+      description: >
+        Upserts the record's pin in `lml_cache.library_release_override`
+        (WXYC/Backend-Service#3790). A manual pin replaces a seed pin, which
+        comes back in `replaced`. The bearer token must be a pin-writer key,
+        one whose caller is in `LML_PIN_WRITER_CALLERS` (default
+        `backend-service-pin-writer`), whatever `LML_REQUIRE_AUTH` says. An
+        `md-*` pin is exempt from the 80/80 artist/title floor; the title gate
+        still applies. A pin that would not bind is refused with 409.
+      operationId: setLibraryReleaseOverride
+      security:
+        - LMLBearerAuth: []
+      tags:
+        - lookup
+      parameters:
+        - name: legacy_release_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The record's `library.legacy_release_id` (not `library.id`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleasePinWriteRequest'
+      responses:
+        '200':
+          description: The pin was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleasePinWriteResponse'
+        '401':
+          description: Missing or unknown bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: >
+            The token is valid but is not a pin-writer key. This includes the
+            shared `LML_API_KEY` and every other consumer's key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '409':
+          description: >
+            The pin would not bind, so nothing is written: the release-override
+            setting is off, the release fails validation for this record, or
+            the legacy id is not in LML's `library.db` yet. `message` gives the
+            reason and `code` names it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '422':
+          description: >
+            Validation error: `discogs_release_id` is not positive, `source`
+            does not start with `md-`, or the release does not resolve through
+            `get_release`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: Transient database or Discogs-cache error. Nothing is written; retry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+    delete:
+      x-wxyc-service: library-metadata-lookup
+      summary: Remove a library record's release pin
+      description: >
+        Removes the record's pin, so its lookups go back to automatic
+        matching. For engineers; the DJ site does not offer it. Takes the
+        same pin-writer key as `PUT` (`LML_PIN_WRITER_CALLERS`, default
+        `backend-service-pin-writer`).
+      operationId: deleteLibraryReleaseOverride
+      security:
+        - LMLBearerAuth: []
+      tags:
+        - lookup
+      parameters:
+        - name: legacy_release_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The record's `library.legacy_release_id` (not `library.id`).
+      responses:
+        '200':
+          description: The pin was removed; the response carries what it was.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleasePinDeleteResponse'
+        '401':
+          description: Missing or unknown bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '403':
+          description: The token is valid but is not a pin-writer key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '404':
+          description: The record has no pin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+        '503':
+          description: Transient database error. Nothing is removed; retry.
           content:
             application/json:
               schema:
