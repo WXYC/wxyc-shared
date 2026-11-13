@@ -12406,9 +12406,15 @@ describe('OpenAPI Specification', () => {
         expect(op.security).toEqual([{ LMLBearerAuth: [] }]);
         expect(flat(op.description)).toContain('backend-service-pin-writer');
         expect(flat(op.description)).toContain('LML_PIN_WRITER_CALLERS');
-        const param = (op.parameters as Array<Record<string, any>>).find((p) => p.name === 'legacy_release_id');
+      });
+
+      it('declares legacy_release_id once, on the path item, for both methods', () => {
+        const item = (spec.paths as Record<string, any>)[PIN_PATH];
+        const param = (item.parameters as Array<Record<string, any>>).find((p) => p.name === 'legacy_release_id');
         expect(param).toMatchObject({ in: 'path', required: true, schema: { type: 'integer' } });
         expect(flat(param!.description)).toContain('library.legacy_release_id');
+        expect(item.put.parameters).toBeUndefined();
+        expect(item.delete.parameters).toBeUndefined();
       });
 
       it.each([
@@ -12441,6 +12447,8 @@ describe('OpenAPI Specification', () => {
         const d = flat(operation(PIN_PATH, 'put').responses?.['409']?.description);
         expect(d).toContain('would not bind');
         expect(d).toContain('nothing is written');
+        // LML's HTTPException handler emits only `message`; no `code` is promised.
+        expect(d).not.toContain('`code`');
       });
 
       it('bounds the request: positive release id, md- source, optional note', () => {
@@ -12519,12 +12527,27 @@ describe('OpenAPI Specification', () => {
         expect(flat(operation(PICKER_PATH, 'put').responses?.[status]?.description)).toContain(`\`${code}\``);
       });
 
+      it('says a binds: false answer means LML already stored the pin (LML#1515)', () => {
+        const d = flat(operation(PICKER_PATH, 'put').responses?.['409']?.description);
+        expect(d).toContain('Backend writes nothing');
+        expect(d).toContain('`binds: false`');
+        expect(d).toContain('WXYC/library-metadata-lookup#1515');
+      });
+
+      it('maps a transient failure of the pin write to lml_unavailable, too', () => {
+        const d = flat(operation(PICKER_PATH, 'put').responses?.['503']?.description);
+        expect(d).toContain('502, 503 or 504');
+        expect(d).toContain('pin write');
+      });
+
       it('returns the catalog row, the metadata payload, and the pin with its provenance', () => {
         const s = sch('DiscogsReleaseChangeResponse');
         expect([...s.required].sort()).toEqual(['album', 'metadata', 'pin']);
         expect(s.properties.album).toEqual(ref('AlbumDetail'));
         expect(s.properties.metadata).toEqual(ref('AlbumMetadataResponse'));
         expect(s.properties.pin).toEqual(ref('DiscogsReleasePinProvenance'));
+        expect(flat(s.description)).toContain('always `md`');
+        expect(flat(s.description)).toContain('WXYC/Backend-Service#3794');
       });
 
       it('declares the pin provenance field', () => {
@@ -12562,6 +12585,9 @@ describe('OpenAPI Specification', () => {
         ['400', 'ApiErrorResponse'],
         ['403', 'ApiErrorResponse'],
         ['404', 'ApiErrorResponse'],
+        ['502', 'ApiErrorResponse'],
+        ['503', 'ApiErrorResponse'],
+        ['504', 'ApiErrorResponse'],
       ])('answers %s with %s', (status, schema) => {
         expect(responseSchema(PREFILL_PATH, 'get', status)).toEqual(ref(schema));
       });
