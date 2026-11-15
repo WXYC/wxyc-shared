@@ -13,7 +13,7 @@ info:
     host, `POST /api/v1/lookup` plus the nine other `/api/v1/*` operations). The
     `servers:` block below names only Backend, so without that marker
     reachability is not decidable from this document.
-  version: 12.21.0
+  version: 12.22.0
   contact:
     name: WXYC
     url: https://wxyc.org
@@ -11259,6 +11259,31 @@ components:
             Composed external IDs for `kind: single_artist`. NULL for
             every other `kind`. URL construction is the consumer's job
             (see existing ReconciledIdentity contract).
+        discogs_release_id:
+          type: integer
+          nullable: true
+          description: >
+            The Discogs release a music director pinned for this row. Set
+            only when a manual (`md-*`) pin decides the `kind:
+            single_artist` main row, with `method: manual` and confidence
+            1.0; null otherwise, including every other `kind` and every
+            row without an `md-*` pin. It sits on the result, not on
+            `main`, because `ReconciledIdentity` carries artist ids and is
+            shared by other responses. Null means no pin decided the
+            release, not "clear it": a consumer that stores the release
+            must keep its stored value when this is null
+            (WXYC/Backend-Service#3790).
+        discogs_master_id:
+          type: integer
+          nullable: true
+          description: >
+            The Discogs master of the release in `discogs_release_id`. Set
+            only when a manual (`md-*`) pin decides the `kind:
+            single_artist` main row and the pinned release belongs to a
+            master; null otherwise, including every other `kind` and every
+            row without an `md-*` pin. Null means no pin decided it, not
+            "clear it": a consumer that stores the master must keep its
+            stored value when this is null (WXYC/Backend-Service#3790).
         method:
           allOf:
             - $ref: '#/components/schemas/IdentityMethod'
