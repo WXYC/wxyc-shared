@@ -229,7 +229,7 @@ describe('OpenAPI Specification', () => {
     // move filed the assertion under a ticket that didn't bump anything. It
     // lives here permanently now; update the literal, leave the location.
     it('pins info.version to the released contract version', () => {
-      expect(spec.info.version).toBe('12.21.0');
+      expect(spec.info.version).toBe('12.22.0');
     });
 
     it('says setting a citation withdraws a pending request on IntakeItemPatch (WXYC/Backend-Service#3383)', () => {
@@ -12645,6 +12645,36 @@ describe('OpenAPI Specification', () => {
         );
         expect(flat(sch('DiscogsReleasePrefill').properties.track_count.description)).toContain('WXYC/Backend-Service#3793');
       });
+    });
+  });
+
+  describe('Release and master ids on the bulk-resolve result (WXYC/wxyc-shared#788, WXYC/Backend-Service#3790)', () => {
+    // An MD pin picks a release, but `main` is a ReconciledIdentity (artist ids
+    // only), so LML had no field to tell Backend-Service's
+    // library-identity-consumer which release was pinned. The ids live on the
+    // result itself: ReconciledIdentity is shared by other responses.
+    const IDS = ['discogs_release_id', 'discogs_master_id'] as const;
+
+    it.each(IDS)('adds %s to BulkResolveResult as an optional nullable integer', (name) => {
+      const s = sch('BulkResolveResult');
+      expect(s.properties[name]).toMatchObject({ type: 'integer', nullable: true });
+      // Additive: an un-upgraded LML that never sends the key stays valid.
+      expect(s.required ?? []).not.toContain(name);
+      // Same openapi-typescript `defaultNonNullable` trap as include_tracks.
+      expect(s.properties[name]).not.toHaveProperty('default');
+    });
+
+    it.each(IDS)('documents %s as set only by a manual md-* pin on the single-artist main row', (name) => {
+      const description = flat(sch('BulkResolveResult').properties[name].description);
+      expect(description).toContain('`md-*`');
+      expect(description).toContain('`kind: single_artist`');
+      expect(description).toMatch(/null otherwise/i);
+      // B1c depends on this reading: null is "no pin decided", never "clear it".
+      expect(description).toMatch(/keep/i);
+    });
+
+    it.each(IDS)('keeps %s off ReconciledIdentity, which other responses share', (name) => {
+      expect(sch('ReconciledIdentity').properties).not.toHaveProperty(name);
     });
   });
 });
